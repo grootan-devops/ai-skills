@@ -182,3 +182,22 @@ half-done state behind, and the next run inherits it.
 GitLab's equivalent is per job, not per file: `interruptible: true` on verification jobs
 (the library sets it as a default) and `resource_group:` where two pipelines must not touch
 the same target at once.
+
+## 9. Run names
+
+**Every project-level workflow declares a `run-name`.** Without one the runs list shows the
+workflow's `name` on every row, identical for each run, and the only way to tell two apart
+is to open them.
+
+```yaml
+name: CD · Production Release
+run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+```
+
+The label is the first segment of `name:` — `CI`, `CD`, `Lint`, `Check`, `Scan`, `Audit`.
+Then the two facts a row cannot otherwise carry: **what triggered it** and **exactly which
+commit ran**. Actor and branch are already columns in the UI, so repeating them spends the
+row's width on what is visible anyway; `github.sha` is not shown anywhere on the list.
+
+A reusable workflow — `on: workflow_call` — declares none. It has no run of its own; the
+caller's `run-name` titles the whole run, and a `run-name` here would be dead text.

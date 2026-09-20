@@ -288,6 +288,18 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
     # `workflow_call`-only workflow is exempt -- the caller's group already covers it.
     triggers = _on_triggers(wf)
     self_starting = [t for t in triggers if t != "workflow_call"]
+
+    # Without `run-name` the runs list shows the workflow's `name` on every row, identical
+    # each time, and two runs can only be told apart by opening them. A reusable workflow
+    # has no run of its own -- the caller's name titles it -- so it is exempt.
+    if self_starting and "run-name" not in wf:
+        out.append(Finding(
+            "P2", "No run name", f"{rel}:run-name",
+            "No `run-name`. Every row in the runs list will read the same. Add one carrying "
+            "what triggered the run and which commit it built, e.g. "
+            "`run-name: \"CI · ${{ github.event_name }} · ${{ github.sha }}\"` -- actor and "
+            "branch are already columns, the commit is not."))
+
     if self_starting and "concurrency" not in wf:
         out.append(Finding(
             "P2", "No concurrency group", f"{rel}:concurrency",
