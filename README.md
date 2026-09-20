@@ -45,7 +45,30 @@ never reaches outside its own folder for a reference.
 
 ## 3. Manual Integration Instructions by AI Tool
 
-If you prefer to configure your environment manually, follow the instructions for your specific AI assistant below:
+If you prefer to configure your environment manually, clone the repository first — every
+instruction below points at that clone, and none of them copies a skill into your project.
+
+```bash
+git clone https://github.com/grootan-devops/ai-skills.git ~/.ai-skills
+git -C ~/.ai-skills checkout 1.0.0
+```
+
+Pin a tag rather than tracking a branch: a branch moves, and a skill that changes underneath
+a project changes what the agent does to it without anything in the project's history saying
+so.
+
+Where the project should carry its own skill version, add the repository as a submodule
+instead. The revision is then recorded in the project's history, and a fresh checkout gets
+the same skill:
+
+```bash
+git submodule add https://github.com/grootan-devops/ai-skills.git .ai-skills
+git -C .ai-skills checkout 1.0.0
+```
+
+The examples below use `~/.ai-skills` and name `terraform-module-builder`. Substitute the
+submodule path if you took that route, and any skill from the catalog above — each lives at
+the repository root.
 
 ### 3.1. Google Antigravity (AGY)
 
@@ -55,7 +78,7 @@ Antigravity automatically discovers skills placed in `.agents/skills/` or declar
 
   ```bash
   mkdir -p .agents/skills
-  ln -sfn ../../skills/terraform-module-builder .agents/skills/terraform-module-builder
+  ln -sfn ~/.ai-skills/terraform-module-builder .agents/skills/terraform-module-builder
   ```
 
   Or register the path in `.agents/skills.json`:
@@ -63,7 +86,7 @@ Antigravity automatically discovers skills placed in `.agents/skills/` or declar
   ```json
   {
     "entries": [
-      { "path": "skills" }
+      { "path": ".ai-skills/terraform-module-builder" }
     ]
   }
   ```
@@ -72,7 +95,7 @@ Antigravity automatically discovers skills placed in `.agents/skills/` or declar
 
   ```bash
   mkdir -p ~/.gemini/config/skills
-  ln -sfn /path/to/library/skills/terraform-module-builder ~/.gemini/config/skills/terraform-module-builder
+  ln -sfn ~/.ai-skills/terraform-module-builder ~/.gemini/config/skills/terraform-module-builder
   ```
 
 - **Activation**: Antigravity automatically indexes the skill's `name` and `description`. Trigger it by prompting:
@@ -92,7 +115,7 @@ Cursor supports project-specific rules (`.cursor/rules/*.mdc`) and agent skills 
   ```bash
   # 1. Link skills folder
   mkdir -p .cursor/skills
-  ln -sfn ../../skills/terraform-module-builder .cursor/skills/terraform-module-builder
+  ln -sfn ~/.ai-skills/terraform-module-builder .cursor/skills/terraform-module-builder
 
   # 2. Create Cursor Rule (.cursor/rules/terraform-module-builder.mdc)
   mkdir -p .cursor/rules
@@ -127,7 +150,7 @@ Claude Code supports project-level skills and `CLAUDE.md` instruction files.
 
   ```bash
   mkdir -p .claude/skills
-  ln -sfn ../../skills/terraform-module-builder .claude/skills/terraform-module-builder
+  ln -sfn ~/.ai-skills/terraform-module-builder .claude/skills/terraform-module-builder
   ```
 
   Add the skill reference to your project's `CLAUDE.md`:
@@ -150,7 +173,7 @@ Kiro recognizes skills in `.kiro/skills/` or standard `.agent/skills/`.
 
   ```bash
   mkdir -p .kiro/skills
-  ln -sfn ../../skills/terraform-module-builder .kiro/skills/terraform-module-builder
+  ln -sfn ~/.ai-skills/terraform-module-builder .kiro/skills/terraform-module-builder
   ```
 
 - **Activation**: Kiro reads `.kiro/skills/terraform-module-builder/SKILL.md` when executing infrastructure automation tasks or when prompting with `terraform-module audit` or `terraform-module add`.
@@ -172,7 +195,7 @@ Most modern agentic tools natively parse `.agent/skills/` or workspace instructi
 
 ```bash
 mkdir -p .agent/skills
-ln -sfn ../../skills/terraform-module-builder .agent/skills/terraform-module-builder
+ln -sfn ~/.ai-skills/terraform-module-builder .agent/skills/terraform-module-builder
 ```
 
 For **GitHub Copilot Workspace**, add to `.github/copilot-instructions.md`:
