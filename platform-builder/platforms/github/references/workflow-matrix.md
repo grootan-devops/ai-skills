@@ -160,8 +160,22 @@ it may touch. Crammed together they scan as a single block of preamble.
 
 **Every workflow that starts itself declares a `concurrency:` block** — not just the
 pull-request one. Two manual runs, or a schedule landing on top of one, race the same
-caches and registry tags. A `workflow_call`-only workflow is exempt: the caller's group
-already covers it.
+caches and registry tags.
+
+> [!WARNING]
+> **A workflow that can be called declares none — even if it also starts itself.** Inside a
+> called workflow `github.workflow` is the **caller's** name, so the group below evaluates to
+> the caller's own group. The caller holds it while waiting for the callee, the callee queues
+> behind the caller, and GitHub cancels the run:
+>
+> ```text
+> Canceling since a deadlock was detected for concurrency group:
+> 'CI · PR Verification-refs/pull/1/merge' between a top level workflow and 'Lint'
+> ```
+>
+> A dual-purpose workflow — `workflow_dispatch` **and** `workflow_call` — is the trap: it
+> looks like it needs a group, and every group it can express deadlocks. The caller's group
+> already covers the whole run, standalone invocations included.
 
 ```yaml
 concurrency:

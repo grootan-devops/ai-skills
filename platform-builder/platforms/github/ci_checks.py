@@ -284,9 +284,15 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
                     f"whatever it was meant to tear down."))
 
     # Any workflow that starts itself needs a group, not just a PR one: two manual runs,
-    # or a schedule landing on top of one, race the same caches and registry tags. A
-    # `workflow_call`-only workflow is exempt -- the caller's group already covers it.
+    # or a schedule landing on top of one, race the same caches and registry tags.
+    #
+    # A workflow that is ALSO callable is exempt, and must not declare one: inside a called
+    # workflow `github.workflow` resolves to the CALLER's name, so the usual group evaluates
+    # to the caller's own group. The caller then holds it while waiting for the callee, and
+    # the callee queues behind the caller -- GitHub detects the cycle and cancels the run
+    # with "a deadlock was detected for concurrency group".
     triggers = _on_triggers(wf)
+    callable_too = "workflow_call" in triggers
     self_starting = [t for t in triggers if t != "workflow_call"]
 
     # Without `run-name` the runs list shows the workflow's `name` on every row, identical
@@ -300,7 +306,18 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
             "`run-name: \"CI · ${{ github.event_name }} · ${{ github.sha }}\"` -- actor and "
             "branch are already columns, the commit is not."))
 
-    if self_starting and "concurrency" not in wf:
+    if callable_too:
+        # Exempt whether or not it also starts itself: the group cannot be made safe, because
+        # it is evaluated with the caller's `github.workflow` on every called run.
+        if "concurrency" in wf:
+            out.append(Finding(
+                "P1", "Concurrency deadlock", f"{rel}:concurrency",
+                "A `workflow_call`-able workflow declares `concurrency:`. When it is called, "
+                "`github.workflow` is the CALLER's name, so this group is the caller's group: "
+                "the caller holds it waiting for this workflow, and this workflow queues behind "
+                "the caller. GitHub cancels the run with \"a deadlock was detected for "
+                "concurrency group\". Remove it -- the caller's group covers the whole run."))
+    elif self_starting and "concurrency" not in wf:
         out.append(Finding(
             "P2", "No concurrency group", f"{rel}:concurrency",
             f"No `concurrency:` block on a workflow triggered by {', '.join(sorted(self_starting))}. "
