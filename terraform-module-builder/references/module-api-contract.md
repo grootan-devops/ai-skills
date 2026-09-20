@@ -1,5 +1,7 @@
 # Module API Contract & Specification
 
+<!-- markdownlint-disable MD033 -->  <!-- <br> is a line break inside table cells -->
+
 This document defines the authoritative API contract for all Terraform modules engineered under the `terraform-module-builder` skill. Every module is treated as a versioned, public software library.
 
 ---
@@ -40,16 +42,21 @@ variable "cloudwatch_logs" {
 ### 1.3. Legitimate vs. Banned `lookup()` Usage
 
 - **Banned**: Using `lookup()` to query static object attributes or bypass the type system.
+
   ```hcl
   # ANTI-PATTERN (BANNED):
   retention = lookup(var.logs, "retention_in_days", 90)
   ```
+
 - **Allowed**: Accessing dynamic keys in open-ended runtime maps where keys are not known at authoring time:
+
   ```hcl
   # PERMITTED:
   custom_header_value = lookup(var.custom_headers, "X-Custom-Auth", null)
   ```
+
 - **Fallback Chaining**: Use native HCL functions such as `coalesce()` for hierarchical defaults:
+
   ```hcl
   kms_key_id = coalesce(var.cloudwatch_logs.kms_key_arn, var.kms_key_arn)
   ```
@@ -61,7 +68,9 @@ variable "cloudwatch_logs" {
 Outputs form the public consumption layer of the module. They must remain stable, minimal, and secure.
 
 ### 2.1. Output Design Rules
+
 1. **Curate Stable Primitives & Structured Maps**: Export explicit identifiers, ARNs, endpoints, and well-typed summary maps:
+
    ```hcl
    output "id" {
      description = "The unique identifier of the provisioned resource."
@@ -73,11 +82,13 @@ Outputs form the public consumption layer of the module. They must remain stable
      value       = aws_resource.this.arn
    }
    ```
+
 2. **Avoid Full Resource Object Dumps**: Do **not** output `value = aws_resource.this` by default. Exposing raw provider schemas:
    - Couples module consumers to provider schema changes.
    - Increases accidental exposure of sensitive or computed internal attributes.
    - Restricts internal module refactoring without breaking callers.
 3. **Sensitive Flags**: Set `sensitive = true` **only** when the exported value contains passwords, private keys, or generated secrets:
+
    ```hcl
    output "master_password" {
      description = "The generated database master password."
@@ -85,6 +96,7 @@ Outputs form the public consumption layer of the module. They must remain stable
      sensitive   = true
    }
    ```
+
    Do not add `sensitive = false` to standard outputs.
 
 ---
@@ -104,8 +116,10 @@ Modules adhere strictly to [Semantic Versioning 2.0.0](https://semver.org/). Any
 ## 4. Provider Versioning & Configuration Rules
 
 ### 4.1. Reusable Child Modules
+
 - **Never Include Provider Configurations**: Reusable child modules must **never** declare `provider "aws" { ... }`, hardcode regions, or specify credentials. The caller/root module owns provider configuration.
 - **Minimum Bounds Only**: In `versions.tf`, specify the minimum provider version required by features used:
+
   ```hcl
   terraform {
     required_version = ">= 1.5.0"
@@ -118,8 +132,10 @@ Modules adhere strictly to [Semantic Versioning 2.0.0](https://semver.org/). Any
     }
   }
   ```
+
   Do **not** enforce an upper bound (e.g. `< 7.0.0`) in reusable child modules, as this creates artificial dependency conflicts in consumer stacks.
 - **Provider Aliases**: Declare `configuration_aliases` **only** when the module strictly requires secondary provider instances (e.g., multi-region replication):
+
   ```hcl
   required_providers {
     aws = {

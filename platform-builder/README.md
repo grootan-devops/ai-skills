@@ -245,7 +245,7 @@ considered opinions, given with evidence so the user can overrule them. The engi
 
 ## 8. Directory Layout & Overrides
 
-```
+```bash
 platform-builder/
 ├── SKILL.md                      runbook (Claude frontmatter)
 ├── AGENTS.md                     same skill, other agent conventions → SKILL.md

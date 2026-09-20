@@ -162,7 +162,7 @@ The canonical example is the empty-entrypoint workaround above. The micro base i
 declare an `ENTRYPOINT` that is a directory, so a job started from the **string** form
 dies before its first script line:
 
-```
+```bash
 sh: line 1: /usr/local/node/bin: Is a directory
 ERROR: Job failed: exit code 126
 ```

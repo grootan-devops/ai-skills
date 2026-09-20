@@ -206,9 +206,11 @@ platform (with confidence and signals), shape, what will be created, and anythin
 the shape does not need. **Stop and confirm before writing.**
 
 **Phase 3 — Scaffold, then validate.**
+
 ```bash
 python3 core/scripts/audit.py [repo] --strict [--lib NAME=SOURCE ...]
 ```
+
 Pass the same `--lib` sources you scaffolded against, so the validation measures the repo
 against the library it was built for.
 
@@ -217,6 +219,7 @@ against the library it was built for.
 ## 3. Standards
 
 ### 3.1 Adaptive Selection
+
 A repository declares **only the CI it can actually execute**. On GitLab that means the
 `WORKFLOW` option list matching the `include:` list; on GitHub it means only the workflow files
 the shape needs. Either way an option or file with nothing behind it produces an empty pipeline
@@ -251,11 +254,13 @@ to `when: never`), and a GitHub dispatch is looser still because it can target
 any ref, so without that guard a release can be cut from a feature branch.
 
 ### 3.2 Job Grouping
+
 One concern per workflow/dispatch mode: checks are existence and drift assertions; lint is
 linters; build is dependencies → build → test; publish is publish. A job running outside its
 class is a defect to report.
 
 ### 3.3 Job Wiring
+
 Every job declares its dependencies explicitly. The platform-specific trap differs and both are
 in the snippets: GitLab requires an explicit `optional:` on every `needs:` entry; GitHub has no
 `optional:` at all, so cleanup jobs must declare `if: always()` or they are skipped exactly when
@@ -281,12 +286,14 @@ costs nothing and still lets nothing ship untested. Place a gate where it stops 
 **without** serialising work that could have run concurrently.
 
 ### 3.4 Least-Privilege Tokens
+
 Prefer the short-lived job-scoped token (`CI_JOB_TOKEN` / `GITHUB_TOKEN`) over any long-lived
 credential, and scope it to the minimum. Cross-project publishing needs an explicitly granted
 credential — if it "just works", something is over-permissioned. Mechanics differ per platform;
 see the addendum.
 
 ### 3.5 Docker & Helm
+
 Identical on both platforms — `core/references/language-stacks-core.md` §3 and
 `core/references/helm-chart-standard.md`.
 
@@ -311,11 +318,13 @@ Two rules that are broken often enough to name here:
   `helm-chart-standard.md` §2.1 has the four-question test and worked examples.
 
 ### 3.6 File Mounts
+
 **Assess on every chart.** Any file the application reads at runtime — `nginx.conf`,
 `application.properties`, `appsettings.json`, a certificate — is declared in `values.yaml` under
 `mounts:`, not baked into the image and not hand-written as a ConfigMap template.
 
 Three decisions, all confirmed with the user, never inferred silently:
+
 1. **Does the app need one?** Check the stack's usual config file and any `COPY` of a config file
    in the Dockerfile — that `COPY` is the anti-pattern this replaces.
 2. **ConfigMap or Secret?** Judge the *content*, never the filename. `application.properties`
@@ -343,10 +352,12 @@ mechanism.
 library's `README.md` and `MIGRATION.md` at the resolved path.
 
 **Step 2 — Run the engine.**
+
 ```bash
 python3 core/scripts/audit.py [repo] [--platform gitlab|github] [--strict] [--json]
                               [--lib NAME=SOURCE ...] [--refresh]
 ```
+
 It runs the common checks (Dockerfile, chart, ignore files, hygiene) plus the detected
 platform's CI checks in one pass.
 

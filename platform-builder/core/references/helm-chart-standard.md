@@ -32,11 +32,14 @@ Consumer charts must clearly state the business purpose, runtime architecture, a
      - Confirm with the user before generating the chart.
 3. **`Chart.yaml`**:
    The confirmed description must be set in the `description:` field:
+
    ```yaml
    description: Acme website CMS backend service providing headless content management, PostgreSQL persistence, and S3 media storage.
    ```
+
 4. **`chart/README.gotmpl`**:
    Must include the standard headers and an explicit `## Overview & Purpose` section:
+
    ```gotmpl
    {{ template "chart.header" . }}
 
@@ -55,6 +58,7 @@ Consumer charts must clearly state the business purpose, runtime architecture, a
    ## Architecture & Template Library
    ...
    ```
+
 5. **Documentation Synchronization**:
    Re-render `chart/README.md` with the exact `helm-docs` invocation the library's own
    README specifies — the flags are part of that contract, not a detail to improvise.
@@ -275,13 +279,14 @@ and are not the same field — deriving `SMTP_USER` from `smtp.from` breaks the 
 account differs from the sender, which is the normal case for a shared or no-reply sender.
 The same distinction applies to a database owner versus the connecting role.
 
-
 ---
 
 ## 6. Mandatory Pre-Flight Verification via `helm template`
 
 To guarantee zero template compilation errors, missing variable references, or nil pointer exceptions:
+
 ```bash
 helm template <chart_name> chart/
 ```
+
 Every scaffolded or updated Helm chart must successfully render all Kubernetes resources (Deployment, Service, ConfigMap, Secret, Routes [Ingress / HTTPRoute], PDB, and HPA) before it can be committed or released.

@@ -44,7 +44,7 @@ Both exit 1 on a P0, and neither replaces `yamllint`, `actionlint` or `shellchec
 
 ## Layout
 
-```
+```text
 SKILL.md        the runbook
 AGENTS.md       the same skill for agents that read AGENTS.md
 references/     gitlab-job-anatomy, github-job-anatomy, construct-mapping,

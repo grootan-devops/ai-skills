@@ -15,6 +15,7 @@ locals {
 ```
 
 ### 1.1. Absolute Project & Brand Neutrality
+
 - **No Hardcoded Project Names**: No project names, company names, or internal brand labels (e.g., `Plainr`, `takween`, `xyz`, customer identifiers) may ever appear in resource names, locals, defaults, tags, or documentation.
 - **Dynamic Parameterization**: All naming must flow through `var.application`, `var.environment`, and `var.name`. If a developer mentions an internal brand in a prompt, the skill must abstract it into generic variables.
 
@@ -56,13 +57,16 @@ locals {
 ## 3. Tagging Governance & Precedence Contract
 
 ### 3.1. Reserved Governance Tags
+
 The following standard tags are reserved for organizational compliance, cost allocation (FinOps), and auditing:
+
 - `Application`: Product or system name (`var.application`).
 - `Environment`: Target deployment tier (`var.environment`, validated via regex `^[a-z0-9-]+$`).
 - `Name`: Resolved resource identifier (`local.rendered_name` or sub-resource name).
 - `ManagedBy`: Always hardcoded to `"Terraform"`.
 
 ### 3.2. Merge Precedence
+
 To prevent callers from accidentally or maliciously overriding reserved governance tags, **consumer tags are merged first and reserved tags are merged last**:
 
 ```hcl
@@ -80,7 +84,9 @@ locals {
 ```
 
 If a specific sub-resource has a distinct role (e.g. public vs private subnet), append the sub-resource name to the base tags:
+
 ```hcl
 tags = merge(local.tags, { Name = "${local.rendered_name}-public-${each.key}" })
 ```
+
 Do **not** force tags onto cloud resources that do not support tagging in the provider schema.

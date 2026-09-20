@@ -6,7 +6,7 @@ This document defines the structural contract for Kubernetes GitOps repositories
 
 ## 1. Directory Structure
 
-```
+```bash
 gitops-repo/ (branch: {product}/{environment})
 ├── Chart.yaml              # Root chart declaration (name: {product-prefix})
 ├── values.yaml             # Master applications registry (apps: { ... })
@@ -33,6 +33,7 @@ gitops-repo/ (branch: {product}/{environment})
 ## 2. Helm Service Registry Contract
 
 ### 2.1. Registration in Root `values.yaml`
+
 When a new service is onboarded, it is registered under `.apps`.
 
 > [!CRITICAL]
@@ -52,9 +53,12 @@ apps:
 ```
 
 ### 2.2. Service Values Overrides (`values/<service>.yaml`)
+
 Create `values/<service>.yaml` (or `values/<group>/<service>.yaml`) with the following enterprise baselines:
+
 1. **Mandatory Memory Limits**:
    Default to `128Mi` for requests and `128Mi` for limits.
+
    ```yaml
    resources:
      requests:
@@ -62,14 +66,18 @@ Create `values/<service>.yaml` (or `values/<group>/<service>.yaml`) with the fol
      limits:
        memory: 128Mi
    ```
+
 2. **Dev Image Repository Suffix**:
    In `dev` environments, the repository path MUST include the `/dev` suffix:
+
    ```yaml
    image:
      repository: registry.contoso.com/myapp/chat-frontend/dev
    ```
+
 3. **Ingress & Route Discovery**:
    Inspect existing `values/*.yaml` files in the repository (e.g., `values/docs.yaml`) to discover the active base domain (e.g. `contoso.com`). Auto-compute:
+
    ```yaml
    routes:
      enabled: true
@@ -81,6 +89,7 @@ Create `values/<service>.yaml` (or `values/<group>/<service>.yaml`) with the fol
 ## 3. Raw Manifest Stack Contract ("Extras")
 
 For workloads that do not package Helm charts:
+
 1. Create a subdirectory under `extras/manifests/<service-name>/`.
 2. The primary deployment manifest **MUST ALWAYS BE NAMED** `deployment.yaml` (or `deployment.yml`).
 3. **Production-Grade Standard (Exact Replica of `helm-tpl-library`)**:
@@ -98,7 +107,8 @@ For workloads that do not package Helm charts:
    - **Ingress**: Ingress with TLS termination, `nginx.ingress.kubernetes.io/ssl-redirect: "true"`, and host routing `${service}.${env}.${domain}`.
 4. **ArgoCD Application Naming**:
    ArgoCD discovers each subdirectory and automatically generates a single Application CR named:
-   ```
+
+   ```text
    {chartBase}-extras-{environment}-{serviceName}
    ```
 
@@ -146,14 +156,18 @@ spec:
 ## 5. Sync & Health Verification
 
 When triggering or verifying synchronization:
+
 1. **Via CLI** (if `argocd` CLI is installed and authenticated):
+
    ```bash
    argocd app get "<app>" --hard-refresh --grpc-web
    argocd app sync "<app>" --grpc-web --async
    argocd app wait "<app>" --health --sync --timeout 600 --grpc-web
    ```
+
 2. **Via Web UI**:
    Provide the user with clickable direct links:
-   ```
+
+   ```text
    https://{argocd_server}/applications/argo-cd/{app_name}?view=tree&resource=&orphaned=false
    ```

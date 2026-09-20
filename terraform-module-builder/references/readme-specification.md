@@ -1,5 +1,7 @@
 # Module README Specification & Template
 
+<!-- markdownlint-disable MD033 -->  <!-- <br> is a line break inside table cells -->
+
 This document defines the canonical documentation standard for all Terraform modules. The standard establishes **baseline mandatory content** while remaining flexible to accommodate upgrade guides, limitations, and operational runbooks.
 
 ---
@@ -53,6 +55,7 @@ module "<module_name>" {
 ```
 
 ### Complete Production Example
+
 ```hcl
 module "<module_name>" {
   source = "<source_path_or_registry_url>"
@@ -95,14 +98,18 @@ module "<module_name>" {
 ## Additional Permitted Sections (When Applicable)
 
 ### Migration & Upgrade Notes
+
 Document any state refactors, `moved` blocks, or breaking changes between major versions.
 
 ### Ownership Boundaries & Lifecycle Assumptions
+
 Document external systems responsible for secret rotation, deployment artifacts, or out-of-band updates.
 
 ### Limitations & Known Caveats
+
 Document cloud provider quota limits, regional availability restrictions, or IAM permission prerequisites.
-```
+
+```text
 
 ---
 

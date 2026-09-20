@@ -21,7 +21,9 @@ Once resolved, two paths matter:
 | Catalog documentation | `docs/AWS.md` (and the sibling per-provider docs) |
 
 ## Module Layout
+
 Modules in the reference repository are partitioned by provider and domain under `modules/`:
+
 ```text
 modules/
 └── aws/
@@ -34,7 +36,9 @@ modules/
 ```
 
 ## Architectural Guidelines
+
 When inspecting existing modules for code patterns:
+
 1. Observe file decomposition (`<service>.tf`, `security.tf`, `variables.tf`, `outputs.tf`, `locals.tf`, `data.tf`, `versions.tf`).
 2. Verify patterns against official Terraform documentation and `terraform providers schema -json` rather than assuming local code is 100% bug-free.
 3. Observe known remediation requirements documented in `references/state-migration-guide.md` and `references/security-capability-matrix.md`.

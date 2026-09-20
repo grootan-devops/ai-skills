@@ -104,9 +104,11 @@ shellcheck but **not** by actionlint's embedded pass.
 
 - Prefer fixing the finding. Single-quoted `printf` formats containing markdown backticks
   are the common false positive — rewrite as `echo` with escaped backticks:
+
   ```bash
   { echo "### Title"; echo; echo "✅ \`${TAG}\` is available."; } >> "${GITHUB_STEP_SUMMARY}"
   ```
+
 - Where the finding is genuinely wrong (a `$var` inside a `jq`/`yq` expression, a `$schema`
   JSON key), use a **line-scoped** directive immediately above the line.
 

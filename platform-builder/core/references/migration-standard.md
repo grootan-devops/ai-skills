@@ -55,10 +55,12 @@ When upgrading a repository:
 > Skills, automated scripts, and AI agents **MUST NOT** hardcode static variable renames, boolean inversion tables, or deprecated anchor lists. Any examples found in documentation (such as mock `[1.0.0...2.0.0]` blocks) are purely sample reference standards and **not** actual migrations.
 >
 > The authoritative, active migration instructions are maintained exclusively in the root **`MIGRATION.md`** of each library:
+>
 > - **CI Template Library**: `<ci_repo>/MIGRATION.md`
 > - **Helm Template Library**: `<helm_repo>/MIGRATION.md`
 >
 > When executing `platform update` or upgrading a consumer project:
+>
 > 1. **Fetch & Read**: Ingest `MIGRATION.md` and `README.md` from the paths
 >    `core/scripts/libraries.py` resolved for this run. Never a path you guessed.
 > 2. **Sequential Multi-Version Processing**: `core/scripts/audit.py` compares the consumer's
@@ -73,17 +75,22 @@ When upgrading a repository:
 When upgrading consumer repositories to the latest `helm-tpl-library` (incorporating Gateway API HTTPRoute and consolidated Ingress):
 
 ### 3.1. `chart/templates/manifest.yaml`
+
 - **Action**: Delete `{{- include "tpl.ingress" . }}`.
 - **Specification**: `manifest.yaml` must contain ONLY:
+
   ```yaml
   {{- include "tpl.deployment" . }}
   ```
+
 - **Rationale**: `tpl.deployment` now directly invokes `{{- include "tpl.routes" . }}` at line 96. `tpl.ingress` is deleted from `helm-tpl-library`; attempting to include it causes fatal compilation failure.
 
 ### 3.2. `chart/values.yaml`
+
 1. **Global Block**:
    - Remove `global.ingress` and `global.istio`.
    - Add `global.routes`:
+
      ```yaml
      global:
        routes:
@@ -95,8 +102,10 @@ When upgrading consumer repositories to the latest `helm-tpl-library` (incorpora
            namespace: "gateway-system"
            class: "gateway"
      ```
+
 2. **Routes Block**:
    - Replace `virtualService:` with `routes:`:
+
      ```yaml
      routes:
        default:
@@ -115,12 +124,15 @@ When upgrading consumer repositories to the latest `helm-tpl-library` (incorpora
          annotations: {}
          paths: []
      ```
+
 3. **Environment & CORS Expressions**:
    - Replace `.Values.global.istio.gateway.host` with `.Values.global.routes.domain` across all public URLs and CORS allowlists in `configmapEnvs`.
 
 ### 3.3. `chart/values.schema.json`
+
 - Replace `"virtualService"` in `properties` with `"routes": { "type": "object" }`.
 - Update `$defs.globalSettings.properties`: replace `ingress` and `istio` with `routes`.
 
 ### 3.4. `chart/README.md`
+
 - Re-run `helm-docs -c chart --template-files "README.gotmpl" --sort-values-order file --document-dependency-values` to synchronize documentation.

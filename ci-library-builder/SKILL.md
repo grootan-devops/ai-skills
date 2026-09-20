@@ -43,7 +43,7 @@ Two libraries, one set of decisions:
 This skill takes **the path to each library it will touch**. Never work from memory of what a
 library contains; the ref moves.
 
-```
+```bash
 ci-library <command> --gitlab <path-to-ci-templates> --github <path-to-github-ci-library>
 ```
 
@@ -58,6 +58,7 @@ python3 scripts/verify-github-library.py <github_path>
 top of a broken gate buries the defect. P1s are judgement calls: quote them and continue.
 
 Then read, in the library itself and not from this file:
+
 - `common/.gitlab-ci.yml` — `stages:`, `default:`, every `.*-rules` anchor, every variable.
 - the module file the job would live in, in full.
 - the library's own `README.md` and `MIGRATION.md`.

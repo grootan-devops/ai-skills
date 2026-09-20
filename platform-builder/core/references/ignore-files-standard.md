@@ -91,7 +91,7 @@ the resolved library's own `README.md`.
 
 ### The baseline
 
-```
+```text
 .DS_Store
 .git/
 .gitignore
@@ -123,7 +123,7 @@ What is **absent** matters as much as what is present: no bare `*.tgz`, and no `
 basename at *any* depth. So `*.tgz` reaches into `charts/` and hides the dependency
 archives `helm dependency update` has just downloaded. Helm then reports:
 
-```
+```text
 [WARNING] chart directory is missing these dependencies: tpllib
 [ERROR] templates/: ... at <include "tpl.deployment" .>:
         template: no template "tpl.deployment" associated with template "gotpl"
@@ -136,7 +136,7 @@ worth knowing by sight.
 
 If a packaged chart at the chart root must be excluded, anchor it:
 
-```
+```text
 /*.tgz      # chart root only -- charts/*.tgz still loads
 ```
 

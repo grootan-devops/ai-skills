@@ -42,7 +42,7 @@ Two rules that follow:
 
 `stages:` in `common/.gitlab-ci.yml` is the closed list, in order:
 
-```
+```text
 .pre  init  prepare  lint  check  test  build  push  security  qa  report
 deploy  release  notify  trigger  destroy  .post
 ```
@@ -119,7 +119,7 @@ needs:
 A job with no `rules:` runs in every pipeline, including ones where it is meaningless. Extend
 one of the existing anchors in `common/.gitlab-ci.yml` rather than writing a new condition:
 
-```
+```text
 .build-test-rules  .lint-workflow-rules  .unit-test-workflow-rules  .common-init-rules
 .chart-*-rules     .image-*-rules        .release-rules             .deploy-workflow-rules
 .sbom-scan-workflow-rules  .secret-scan-workflow-rules  .license-scan-workflow-rules

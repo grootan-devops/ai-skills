@@ -36,13 +36,17 @@ gitops diff values <source1> <source2> [--repo-path <path>]
 ## 2. Core Architecture & Naming Conventions
 
 ### 2.1. Environment Branches
+
 GitOps branches are strictly structured as:
-```
+
+```text
 {product-name}/{environment}
 ```
+
 *Examples*: `myapp/dev`, `myapp/qa`, `myapp/prod`, `acme/vpn`.
 
 The skill includes built-in alias normalization and similarity searching:
+
 - `dev` $\leftarrow$ `dev`, `development`, `develop`
 - `qa` $\leftarrow$ `qa`, `test`, `testing`
 - `prod` $\leftarrow$ `prod`, `production`
@@ -101,6 +105,7 @@ When bootstrapping a new environment (`gitops bootstrap env`), the skill runs th
    - If the branch exists, prompts user if they want to onboard services instead.
 
 ### 3.3. ArgoCD New Environment Workflow
+
 1. **Clone & Branch from `origin/main`**: Clones repo and checks out `{product}/{env}`.
 2. **Scaffold Directory Layout**: Scaffolds `Chart.yaml` (referencing `argocd-gitops-tpl-library`), `values.yaml` (apps: {}), `values/.gitkeep`, and `extras/manifests/.gitkeep`.
 3. **User Review Gate**: Displays initialized structure and file contents for user sign-off.
@@ -108,6 +113,7 @@ When bootstrapping a new environment (`gitops bootstrap env`), the skill runs th
 5. **Apply Root App-of-Apps**: Renders and applies `{product-prefix}-{env}-root` Application CR.
 
 ### 3.4. Komodo New Environment Workflow
+
 1. **Target VM SSH Connection Verification**: Collects VM IP, user, and credentials; tests SSH and `sudo` access.
 2. **Automated Docker Engine Installation**: Runs `curl -fsSL https://get.docker.com | sudo sh` and adds user to `docker` group. Verifies daemon.
 3. **Komodo Periphery Agent Deployment**:
@@ -209,7 +215,7 @@ flowchart TD
 
 ## 6. Strict Human-in-the-Loop Protocol (The 4 Gatekeepers)
 
-```
+```text
 ┌─────────────────────────┐
 │ Gatekeeper 1            │ ──> Branch existence & similarity search
 │ Branch Identity         │     (HALT if branch missing -> reach out to DevOps)

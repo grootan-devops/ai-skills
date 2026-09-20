@@ -14,7 +14,7 @@ loads only that platform's rules.
 
 ## Layout
 
-```
+```text
 SKILL.md                                  the runbook — start here
 core/
   libraries.json                          default library sources

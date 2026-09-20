@@ -1,6 +1,7 @@
 # WORKFLOW Execution Matrix, Adaptive Selection & Job Grouping
 
 This reference covers only what the template library does **not** document about itself:
+
 1. How to decide which `WORKFLOW` options a project may declare (§1–§3).
 2. Which class of job each workflow is allowed to trigger (§4).
 3. Open defects to report during an audit (§5).
@@ -47,6 +48,7 @@ python3 -c "import json; print(json.dumps(json.load(open('platforms/gitlab/workf
 ```
 
 Two entries carry judgement rather than data, and are recorded in the JSON's `shared_options`:
+
 - **`build`** is satisfied by *any* language module, so no single provider can be named.
 - **`deploy`** is satisfied by either GitOps module, and is withheld until `platform ship` wires a real `DEPLOY_TARGET`.
 
@@ -57,6 +59,7 @@ Two entries carry judgement rather than data, and are recorded in the JSON's `sh
 Pick the profile that matches, then take its option set verbatim.
 
 ### 3.1 Chart-only (Helm library or umbrella chart)
+
 `Chart.yaml` present, no Dockerfile, no application manifest.
 
 ```yaml
@@ -78,20 +81,25 @@ variables:
 - `chart-scan` is optional; include it only if remote chart scanning by `TARGET_VERSION` is actually used.
 
 ### 3.2 Application, no image, no chart (e.g. AWS Amplify deploy)
+
 ```yaml
 options: ["full-pipeline", "build", "check", "lint", "secret-scanning", "sonarqube"]
 ```
+
 Omit `deploy` until a GitOps module is wired — Amplify deploys outside this library.
 
 ### 3.3 Application + image, no chart
+
 ```yaml
 options: ["full-pipeline", "build", "check", "lint", "image-build-and-push", "image-scan", "secret-scanning", "sonarqube"]
 ```
 
 ### 3.4 Full service (app + image + chart + GitOps)
+
 Every module included ⇒ the full enum applies ⇒ **omit the local `WORKFLOW` block** and inherit from `common/`.
 
 ### 3.5 Terraform module repository
+
 ```yaml
 options: ["full-pipeline", "check", "lint"]
 ```

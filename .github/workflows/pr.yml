@@ -38,7 +38,9 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@dev
     secrets: inherit
     with:
-      lint-md-files: "*.md */*.md */*/*.md */*/*/*.md */*/*/*/*.md"
+      # Every tracked Markdown file except LICENSE.md, which is a canonical licence text
+      # and not Markdown. The root files are named rather than globbed for that reason.
+      lint-md-files: "CHANGELOG.md COMPATIBILITY.md CONTRIBUTING.md MIGRATION.md README.md SECURITY.md */*.md */*/*.md */*/*/*.md */*/*/*/*.md"
 
   # Guards depend on init alone. They ask whether the tag, changelog entry and
   # migration section are still free -- no lint can change that answer.

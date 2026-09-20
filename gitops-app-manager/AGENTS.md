@@ -15,7 +15,7 @@ live in. It scaffolds the GitOps entries, injects the matching delivery block in
 
 ## Layout
 
-```
+```text
 SKILL.md                                  the runbook — start here
 references/  argocd-gitops-contract        GitOps repo structure contract
              ci-templates-delivery-contract  injected CI blocks + delivery job wiring
@@ -31,7 +31,7 @@ assets/      root-app, extras-deployment, gitops-branch-chart, gitops-branch-val
 Seven workflows, described in full in `SKILL.md` §1, each gated by the human-in-the-loop
 protocol in §2 — scaffold disabled, send the review link, activate only on an explicit go-call:
 
-```
+```bash
 gitops onboard helm      <gitops_repo> <branch> <service> [chart_repo]
 gitops onboard manifest  <gitops_repo> <branch> <service> <image>
 gitops onboard komodo    <gitops_repo> <branch> <service> <image>

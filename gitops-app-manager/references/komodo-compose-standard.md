@@ -8,7 +8,7 @@ This document outlines the operational standard for managing Docker Compose stac
 
 In Komodo-managed environments, the GitOps repository contains the active compose stack definition for the target environment:
 
-```
+```text
 komodo-gitops-repo/ (branch: {product}/{environment} or {org}/{stack})
 ├── docker-compose.yml
 ├── .env.example
@@ -20,9 +20,11 @@ komodo-gitops-repo/ (branch: {product}/{environment} or {org}/{stack})
 ## 2. Stack Naming Standard
 
 Komodo stacks must follow the enterprise convention:
-```
+
+```text
 {product-name}-{environment}
 ```
+
 *Example*:
 `myapp-dev`, `myapp-prod`, `vpn-prod`
 
@@ -31,6 +33,7 @@ Komodo stacks must follow the enterprise convention:
 ## 3. Service Definition in `docker-compose.yml`
 
 Services added to the Compose file must follow standard container engineering principles:
+
 ```yaml
 services:
   web:
@@ -53,9 +56,11 @@ services:
 
 1. **YQ Path Precision**:
    Specify the exact yq selector path targeting the container image:
+
    ```yaml
    gitops_service_image_yq_path: .services.web.image
    ```
+
 2. **Review & Approval Gate**:
    - Changes made to `docker-compose.yml` should be reviewed before trigger.
    - Once verified, the CI job commits the image update to the GitOps repo branch with `[skip ci]` and triggers the Komodo stack redeploy API.

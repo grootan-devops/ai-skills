@@ -25,7 +25,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 |---|---|
 | `rules: if: $CI_PIPELINE_SOURCE == "merge_request_event"` | `on: pull_request: branches: [master]` |
 | `rules: if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` | `on: push: branches: [master]` |
-| `rules: if: $CI_PIPELINE_SOURCE =~ /^(web|api)$/` | `on: workflow_dispatch:` |
+| `rules: if: $CI_PIPELINE_SOURCE =~ /^(web\|api)$/` | `on: workflow_dispatch:` |
 | `rules: if: $CI_COMMIT_TAG` | `on: push: tags:` |
 | `rules: exists: [main.tf]` | `if: hashFiles('main.tf') != ''` at job level |
 | `rules: when: never` | Omit the job, or `if:` false |

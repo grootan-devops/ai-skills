@@ -15,6 +15,7 @@ This document defines the protocols for refactoring existing Terraform modules, 
 Terraform 1.1+ provides first-class `moved` blocks to record resource address changes directly in module source code. This eliminates the need for consumers to manually run `terraform state mv`.
 
 ### 2.1. Resource Renaming Migration
+
 When standardizing resource labels (e.g. changing `aws_s3_bucket.main` to `aws_s3_bucket.this`):
 
 ```hcl
@@ -27,6 +28,7 @@ moved {
 ```
 
 ### 2.2. Migrating from `count` or List Indexing to `for_each`
+
 When fixing unstable integer-indexed subnets (e.g. in VPC):
 
 ```hcl
@@ -49,6 +51,7 @@ moved {
 ```
 
 ### 2.3. Decomposing into Child Modules
+
 When extracting inline resources into a nested submodule:
 
 ```hcl
@@ -83,4 +86,5 @@ terraform -chdir=examples/complete show -json refactor.tfplan > /tmp/plan.json
 # 3. Assert zero delete actions
 jq '.resource_changes[] | select(.change.actions[] == "delete")' /tmp/plan.json
 ```
+
 If any unexpected `delete` action is detected, the refactor is immediately halted and the missing `moved` block is identified.

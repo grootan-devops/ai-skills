@@ -2,6 +2,7 @@
 
 **Platform-independent facts.** What each stack must do, and why. The YAML that expresses it
 differs per platform and lives in:
+
 - `platforms/gitlab/references/stack-snippets.md`
 - the resolved library's own `README.md` (GitHub has no snippets file; the library README is the contract)
 
@@ -31,6 +32,7 @@ of a lint-only run, a hard dependency makes pipeline creation fail outright.
 ## 2. Per-stack requirements
 
 ### Node.js
+
 - **`npm ci`, never `npm install`** in CI — `install` can mutate the lockfile, so the tree you
   test is not the tree you committed.
 - Cache keyed on `package-lock.json` (or `pnpm-lock.yaml`), never on a mutable value.
@@ -41,6 +43,7 @@ of a lint-only run, a hard dependency makes pipeline creation fail outright.
   builds everything.
 
 ### Python
+
 - **`pyproject.toml` only.** A `requirements.txt` is legacy — migrate it and delete it.
 - Install from the lockfile with `uv sync --frozen` or `pip install --require-hashes`, so CI
   cannot silently resolve a different dependency tree than the one reviewed.
@@ -48,16 +51,19 @@ of a lint-only run, a hard dependency makes pipeline creation fail outright.
 - Lint jobs (`ruff`, `mypy`) run standalone — see §1.
 
 ### Go
+
 - **`-race` in CI.** It catches what local runs do not, and the cost is acceptable for unit tests.
 - Cache keyed on `go.sum`.
 - Cross-compilation belongs in the image build, not the CI build job.
 
 ### Java
+
 - **Batch mode** (`mvn -B`) or the log fills with download progress bars.
 - Split `package -DskipTests` from `test` so a test failure does not re-run the build.
 - Cache the local repository (`~/.m2`, or Gradle's own cache).
 
 ### Chart-only repositories
+
 No dependencies/build/test — there is nothing to compile. The pipeline is
 `helm dependency update` → `helm lint --strict` → `helm template`.
 

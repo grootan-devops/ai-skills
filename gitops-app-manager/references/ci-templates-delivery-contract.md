@@ -7,6 +7,7 @@ This document provides the operational reference for injecting GitOps deployment
 ## 1. ArgoCD GitOps Template: `deploy/gitops/.argocd.gitlab-ci.yml`
 
 ### 1.1. Helm-Based Deployment Schema
+
 Used for services that package a Helm chart and deploy via GitOps chart version updates.
 
 ```yaml
@@ -25,7 +26,8 @@ include:
       # Server & token default to CI/CD variables (ARGOCD_SERVER, ARGOCD_TOKEN)
 ```
 
-#### Validation Guards (Hard Failures):
+#### Validation Guards (Hard Failures)
+
 - `environment`, `gitops_repo_url`, `gitops_branch`, and `argocd_apps` are mandatory.
 - `gitops_chart_values_file` strictly requires `gitops_chart_app_yq_path`.
 - Cannot provide both `gitops_chart_values_file` and `gitops_manifest_file`.
@@ -33,6 +35,7 @@ include:
 ---
 
 ### 1.2. Manifest-Based Deployment Schema ("Extras")
+
 Used for services deploying raw Kubernetes YAML manifests.
 
 ```yaml
@@ -50,7 +53,8 @@ include:
       environment_url: https://clamav.dev.contoso.com           # (optional)
 ```
 
-#### Validation Guards (Hard Failures):
+#### Validation Guards (Hard Failures)
+
 - `gitops_manifest_file` strictly requires `gitops_new_image`.
 - Container image in `deployment.yaml` is updated directly via `yq`.
 - Syncs only the single extras application.
@@ -76,7 +80,8 @@ include:
       # Credentials default to CI/CD variables (KOMODO_SERVER, KOMODO_API_KEY, KOMODO_API_SECRET)
 ```
 
-#### Validation Guards (Hard Failures):
+### Validation Guards (Hard Failures)
+
 - `environment`, `gitops_repo_url`, `gitops_branch`, `gitops_compose_file`, `gitops_service_image_yq_path`, and `komodo_stack_name` are mandatory.
 - CI clones the GitOps repo, updates the target image using `yq`, pushes to branch, and executes redeployment against the Komodo stack API.
 

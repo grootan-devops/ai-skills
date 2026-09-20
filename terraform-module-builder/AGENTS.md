@@ -16,7 +16,7 @@ security baselines.
 
 ## Layout
 
-```
+```text
 SKILL.md                                  the runbook — start here
 references/  module-api-contract, naming-conventions, naming-standards,
              provider-schema-guide, readme-specification, reference-repo-link,
@@ -31,7 +31,7 @@ assets/      architecture-template.svg, architecture-template.png
 Three workflows, described in full in `SKILL.md` §1. Invoked bare, the skill prompts for one
 of them rather than guessing:
 
-```
+```bash
 terraform-module add    <provider> <resource_type> <module_name>   # end-to-end creation
 terraform-module update <module_path>                              # upgrade & modernise
 terraform-module audit  <module_path_or_repo>                      # read-only verification

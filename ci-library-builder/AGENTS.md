@@ -14,7 +14,7 @@ scaffolding a *consuming* repository, use `platform-builder` instead.
 
 ## Layout
 
-```
+```text
 SKILL.md                            the runbook — start here
 references/  gitlab-job-anatomy     the eight decisions, in order          (required)
              github-job-anatomy     what changes in Actions, plus its traps (required)
@@ -30,7 +30,7 @@ scripts/     verify-gitlab-library.py   structural gates for the GitLab library
 
 Every command takes the path to the library it touches; nothing is assumed from memory.
 
-```
+```bash
 ci-library verify   --gitlab <path> --github <path>
 ci-library add job  "<description>" --gitlab <path> [--github <path>]
 ci-library extend   <job-name>      --gitlab <path> [--github <path>]

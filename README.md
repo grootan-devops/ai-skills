@@ -21,14 +21,14 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 
 Install a skill with the [Skills CLI](https://skills.sh/):
 
-```
+```bash
 npx skills add https://github.com/grootan-devops/ai-skills \
   --skill platform-builder
 ```
 
 Use `--global` for a user-level installation:
 
-```
+```bash
 npx skills add https://github.com/grootan-devops/ai-skills \
   --skill platform-builder \
   --global
@@ -48,14 +48,18 @@ never reaches outside its own folder for a reference.
 If you prefer to configure your environment manually, follow the instructions for your specific AI assistant below:
 
 ### 3.1. Google Antigravity (AGY)
+
 Antigravity automatically discovers skills placed in `.agents/skills/` or declared in `.agents/skills.json`.
 
 - **Project-Level (Workspace)**:
+
   ```bash
   mkdir -p .agents/skills
   ln -sfn ../../skills/terraform-module-builder .agents/skills/terraform-module-builder
   ```
+
   Or register the path in `.agents/skills.json`:
+
   ```json
   {
     "entries": [
@@ -63,11 +67,14 @@ Antigravity automatically discovers skills placed in `.agents/skills/` or declar
     ]
   }
   ```
+
 - **Global (All Projects on Machine)**:
+
   ```bash
   mkdir -p ~/.gemini/config/skills
   ln -sfn /path/to/library/skills/terraform-module-builder ~/.gemini/config/skills/terraform-module-builder
   ```
+
 - **Activation**: Antigravity automatically indexes the skill's `name` and `description`. Trigger it by prompting:
   - `"terraform-module audit path/to/module"`
   - `"terraform-module add <registry-url> <name>"`
@@ -77,9 +84,11 @@ Antigravity automatically discovers skills placed in `.agents/skills/` or declar
 ---
 
 ### 3.2. Cursor AI
+
 Cursor supports project-specific rules (`.cursor/rules/*.mdc`) and agent skills (`.cursor/skills/`).
 
 - **Installation**:
+
   ```bash
   # 1. Link skills folder
   mkdir -p .cursor/skills
@@ -88,7 +97,9 @@ Cursor supports project-specific rules (`.cursor/rules/*.mdc`) and agent skills 
   # 2. Create Cursor Rule (.cursor/rules/terraform-module-builder.mdc)
   mkdir -p .cursor/rules
   ```
+
   Create `.cursor/rules/terraform-module-builder.mdc`:
+
   ```yaml
   ---
   description: Industrial-grade Terraform module engineering skill
@@ -103,41 +114,51 @@ Cursor supports project-specific rules (`.cursor/rules/*.mdc`) and agent skills 
   - Apply standards in `.cursor/skills/terraform-module-builder/references/`.
   - Execute audit scripts from `.cursor/skills/terraform-module-builder/scripts/`.
   ```
+
 - **Activation**: Cursor Agent auto-activates this rule whenever you open or edit Terraform files, or when you tag `@terraform-module-builder` in chat.
 
 ---
 
 ### 3.3. Anthropic Claude (Claude Code & Claude Projects)
+
 Claude Code supports project-level skills and `CLAUDE.md` instruction files.
 
 - **Claude Code Installation**:
+
   ```bash
   mkdir -p .claude/skills
   ln -sfn ../../skills/terraform-module-builder .claude/skills/terraform-module-builder
   ```
+
   Add the skill reference to your project's `CLAUDE.md`:
+
   ```markdown
   ## Skills
   - **terraform-module-builder**: Located at `.claude/skills/terraform-module-builder/SKILL.md`. Consult this runbook whenever designing, auditing, testing, or documenting Terraform modules.
   ```
+
 - **Claude Projects (Web)**:
   Upload `SKILL.md` and the documents in `references/` directly into your Claude Project's **Project Knowledge**.
 
 ---
 
 ### 3.4. Kiro / Kirao IDE
+
 Kiro recognizes skills in `.kiro/skills/` or standard `.agent/skills/`.
 
 - **Installation**:
+
   ```bash
   mkdir -p .kiro/skills
   ln -sfn ../../skills/terraform-module-builder .kiro/skills/terraform-module-builder
   ```
+
 - **Activation**: Kiro reads `.kiro/skills/terraform-module-builder/SKILL.md` when executing infrastructure automation tasks or when prompting with `terraform-module audit` or `terraform-module add`.
 
 ---
 
 ### 3.5. OpenAI / Codex / ChatGPT
+
 - **Custom GPTs**:
   Create a Custom GPT (e.g. "Terraform Module Platform Architect"), paste the contents of `SKILL.md` into the **Instructions**, and upload the files in `references/` into **Knowledge**.
 - **Codex / API Agents**:
@@ -146,6 +167,7 @@ Kiro recognizes skills in `.kiro/skills/` or standard `.agent/skills/`.
 ---
 
 ### 3.6. Universal Multi-Agent Frameworks (Windsurf, Roo, Continue, GitHub Copilot)
+
 Most modern agentic tools natively parse `.agent/skills/` or workspace instruction files:
 
 ```bash
@@ -154,6 +176,7 @@ ln -sfn ../../skills/terraform-module-builder .agent/skills/terraform-module-bui
 ```
 
 For **GitHub Copilot Workspace**, add to `.github/copilot-instructions.md`:
+
 ```markdown
 For Terraform module tasks, follow the architectural and security standards defined in `.agent/skills/terraform-module-builder/SKILL.md`.
 ```
@@ -173,7 +196,9 @@ skills/<skill_name>/
 ```
 
 ### Progressive Disclosure
+
 To prevent overwhelming the AI assistant's context window:
+
 1. Only the skill's `name` and `description` from the YAML frontmatter are indexed initially.
 2. The complete `SKILL.md` is loaded only when a prompt matches the skill's triggers.
 3. Bulky reference guides in `references/` are read on-demand when specific deep-dive procedures are required.

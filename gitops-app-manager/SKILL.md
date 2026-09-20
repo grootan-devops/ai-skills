@@ -8,6 +8,8 @@ description: >-
 
 # GitOps Application & Environment Manager Skill
 
+<!-- markdownlint-disable MD033 -->  <!-- <br> is a line break inside table cells -->
+
 An industrial-grade platform engineering skill that automates the onboarding, scaffolding, lifecycle management, and CI/CD delivery integration for applications running under **ArgoCD** (Helm & raw Manifest "Extras" via `argocd-gitops-tpl-library`) and **Komodo** (Docker Compose stacks via `devops/ci-templates` (`deploy/gitops/`)).
 
 ---
@@ -35,7 +37,7 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
 > The agent MUST NOT scaffold, modify files, or execute syncs in a single silent turn.
 > Every onboarding workflow MUST pass through the following 4 sequential gatekeepers:
 
-```
+```text
 ┌─────────────────────────┐
 │ Gatekeeper 1            │ ──> Target branch verification & similarity search
 │ Branch & Repo Identity  │     (HALT if branch not found -> contact DevOps)
@@ -68,9 +70,11 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
    If the user specifies colloquial environment names (`development`, `develop`, `test`, `testing`, `stage`, `production`):
    - Normalize via alias dictionary (`development` $\rightarrow$ `dev`, `develop` $\rightarrow$ `dev`, `production` $\rightarrow$ `prod`).
    - Run similarity match against available remote branches:
+
      ```bash
      python3 skills/gitops-app-manager/scripts/gitops-helper.py --match-branch "<branch>" --available-branches <branch_list> --json
      ```
+
    - If a similar candidate is detected (e.g. user asks for `myapp/development` and repository contains `myapp/dev`):
      Ask the user: *"We detected existing branch `myapp/dev` in repository `<repo>`. Should we use `myapp/dev`?"*
 3. **Hard Stop (Branch Missing)**:
@@ -90,9 +94,11 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
 2. **Auto-Compute Configuration Parameters**:
    - **Environment URL**:
      If the microservice chart exposes routes, auto-compute:
-     ```
+
+     ```text
      https://{hostname-based-on-chart}.{environment}.{domain}
      ```
+
      *(Example: `https://chat-frontend.dev.contoso.com`)*. If no routes are exposed, leave empty.
    - **ArgoCD Application Names**:
      - **For Helm (2 apps to sync)**:
@@ -124,6 +130,7 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
 
 1. **Scaffold with Mandatory `enabled: false` Law**:
    - In root `values.yaml`, insert the service registration:
+
      ```yaml
      apps:
        chat:
@@ -134,7 +141,9 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
              name: chat-frontend
              version: 0.1.0
      ```
+
    - In `values/<service>.yaml` (or `values/<group>/<service>.yaml`), scaffold:
+
      ```yaml
      image:
        repository: registry.contoso.com/myapp/chat-frontend/dev  # /dev suffix for dev
@@ -151,6 +160,7 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
        enabled: true
        host: chat-frontend.dev.contoso.com
      ```
+
 2. **Generate CI/CD Delivery Injection Snippet**:
    Provide the exact YAML block to be placed in the application repository's `.gitlab-ci.yml`.
 3. **Commit & Send Review Link**:
@@ -165,18 +175,21 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
 ### 2.4. Gatekeeper 4: Activation & Synchronization
 
 Only AFTER the user gives approval ("go call", "approved", "looks good"):
+
 1. **Remove `enabled: false`**:
    Update `values.yaml` to remove `enabled: false` (or set `enabled: true`).
 2. **Commit & Push**:
    Commit with message: `chore(gitops): activate <service> in <env>` and push to GitOps branch.
 3. **Execute Sync**:
    - **If ArgoCD CLI is available**:
+
      ```bash
      argocd app get "<root_app>" --hard-refresh --grpc-web
      argocd app sync "<root_app>" --grpc-web --async
      argocd app get "<service_app>" --hard-refresh --grpc-web
      argocd app sync "<service_app>" --grpc-web --async
      ```
+
    - **If ArgoCD CLI is NOT available**:
      Inform the user and output the exact Web UI sync links:
      - Root App: `https://<argocd_server>/applications/argo-cd/<root_app>?view=tree&resource=&orphaned=false`
@@ -187,6 +200,7 @@ Only AFTER the user gives approval ("go call", "approved", "looks good"):
 ## 3. Step-by-Step Command Procedures
 
 ### 3.1. `gitops onboard helm`
+
 ```bash
 # 1. Run similarity check & repo introspection
 python3 skills/gitops-app-manager/scripts/gitops-helper.py --introspect /path/to/gitops/clone --json
@@ -199,6 +213,7 @@ python3 skills/gitops-app-manager/scripts/gitops-helper.py --introspect /path/to
 ```
 
 ### 3.2. `gitops onboard manifest` ("Extras")
+
 ```bash
 # 1. Create directory extras/manifests/<service_name>/
 # 2. Scaffold production-grade manifest stack replicating helm-tpl-library:
@@ -225,6 +240,7 @@ python3 skills/gitops-app-manager/scripts/gitops-helper.py --introspect /path/to
 ```
 
 ### 3.3. `gitops onboard komodo`
+
 ```bash
 # 1. Auto-compute stack: {product}-{env}
 # 2. Append service to docker-compose.yml with restart and logging.
@@ -238,7 +254,9 @@ python3 skills/gitops-app-manager/scripts/gitops-helper.py --introspect /path/to
 Used when bootstrapping a brand-new environment after a developer reports an environment is missing or requested.
 
 #### 3.4.1. Step 1: Inquire & Validate User Inputs
+
 Prompt for the mandatory inputs:
+
 - `product_name`: Core product identity (e.g. `myapp`).
 - `environment`: Target environment (e.g. `dev`, `develop`, `qa`, `prod`).
 - `gitops_repo_url`: GitOps repository URL (e.g. `https://gitlab.contoso.com/devops/gitops/acme-cloud.git`).
@@ -280,15 +298,19 @@ Prompt for the mandatory inputs:
 ---
 
 #### 3.4.3. ArgoCD New Environment Initialization Flow
+
 1. **Clone & Branch from `master`/`main`**:
    - Clone the GitOps repository locally.
    - Checkout a clean branch from `master` or `main`:
+
      ```bash
      git checkout -b {product}/{env} origin/main
      ```
+
 2. **Scaffold Canonical Directory Structure (`argocd-gitops-tpl-library`)**:
    - Create the standard enterprise GitOps layout:
-     ```
+
+     ```text
      {gitops-repo}/ (branch: {product}/{env})
      ├── Chart.yaml             # Initial root chart referencing argocd-gitops-tpl-library
      ├── values.yaml            # Environment base config with empty apps: {}
@@ -298,10 +320,13 @@ Prompt for the mandatory inputs:
          └── manifests/
              └── .gitkeep
      ```
+
    - Render `Chart.yaml` and `values.yaml` from canonical assets:
+
      ```bash
      python3 skills/gitops-app-manager/scripts/gitops-helper.py --render-branch-scaffold {product} {env}
      ```
+
 3. **User Review Gate for Directory Layout**:
    - Present the initialized GitOps structure and files to the user for explicit confirmation:
      > *"I have initialized the GitOps repository structure on branch `{product}/{env}` matching `argocd-gitops-tpl-library` standards. Please review the layout above."*
@@ -315,25 +340,32 @@ Prompt for the mandatory inputs:
 ---
 
 #### 3.4.4. Komodo New Environment Initialization Flow (VM Docker Host)
+
 Komodo manages containerized workloads across dedicated VMs running Docker.
 
 1. **Target VM Connection Verification**:
    - Inquire target VM credentials: SSH Key or Password, VM IP Address, SSH Username (`root` or user with `sudo` privileges).
    - Test SSH connectivity before making changes:
+
      ```bash
      ssh -o BatchMode=yes -o ConnectTimeout=5 <user>@<vm-ip> "echo VM_CONNECTED"
      ```
+
    - If connection fails or credentials lack sudo privileges $\rightarrow$ **HALT** and notify user.
 2. **Automated Docker Installation**:
    - Execute remote Docker installation:
+
      ```bash
      curl -fsSL https://get.docker.com | sudo sh
      sudo usermod -aG docker <username>
      ```
+
    - Verify Docker daemon health:
+
      ```bash
      docker ps && sudo docker ps
      ```
+
 3. **Komodo Periphery Agent Deployment**:
    - Agent is installed as a container with host networking:
      Path: `/opt/komodo-agent/docker-compose.yml`
@@ -343,23 +375,29 @@ Komodo manages containerized workloads across dedicated VMs running Docker.
      - **Via `km` CLI**: Run `km server new ...` to register the host.
      - Prompt user: *"Please paste your Komodo Core URL and Onboarding Key."*
    - Render agent compose:
+
      ```bash
      python3 skills/gitops-app-manager/scripts/gitops-helper.py \
        --render-komodo-agent "<core_url>" "<onboarding_key>" "<server_name>"
      ```
+
    - Deploy agent:
+
      ```bash
      sudo mkdir -p /opt/komodo-agent/config
      sudo docker compose -f /opt/komodo-agent/docker-compose.yml up -d
      ```
+
    - Verify agent logs (`docker compose -f /opt/komodo-agent/docker-compose.yml logs -f --tail 20`).
    - Confirm server status is **OK** in Komodo via `km` CLI or UI. Troubleshoot if connection is not established.
 4. **GitOps Repository Setup & Smoke Test**:
    - In the GitOps repo on branch `{product}/{env}`:
    - Prepare a smoke-test `docker-compose.yml` running an `nginx` service on port 80:
+
      ```bash
      python3 skills/gitops-app-manager/scripts/gitops-helper.py --render-komodo-smoke {product} {env}
      ```
+
    - Commit and push to GitOps branch.
    - Sync stack using Komodo CLI (`km x commit ...`) or dashboard.
    - Test container access: `curl -I http://<vm-ip>:80` and prompt user to verify port 80.
@@ -432,5 +470,6 @@ spec:
 ## 4. Template Library Compatibility (`argocd-gitops-tpl-library`)
 
 This skill integrates with `argocd-gitops-tpl-library`.
+
 - **Naming Law**: Root `Chart.yaml` line 2 establishes `{chartBase}` (e.g. `name: acme-cloud-myapp`).
 - **Extras Naming Fix**: In `argocd-gitops-tpl-library/templates/argocd/_application.tpl`, `tpl.argocd.application.extras` automatically strips legacy `-extras.*` suffixes from `$.Chart.Name` using `regexReplaceAll "-extras(-.*)?$" $.Chart.Name ""` and derives `{chartBase}-extras-{env}-{dirName}` cleanly.

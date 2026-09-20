@@ -61,6 +61,7 @@ For every security domain, each resource category maps to one of six explicit ca
 ## 3. Sensitive Data & Credential Governance
 
 ### 3.1. Cleartext Password Prohibition
+
 - **Never Generate Default Passwords**: Modules must **never** specify fallback passwords, API tokens, or keys in `variables.tf` defaults.
 - **State File Boundary**: `sensitive = true` only masks values in CLI output, logs, and plan diffs; it does **not** prevent cleartext storage in `terraform.tfstate`.
 - **Preferred Patterns**:
@@ -69,6 +70,7 @@ For every security domain, each resource category maps to one of six explicit ca
   3. **IAM Authentication**: Prefer native IAM/managed identity database authentication (`iam_database_authentication_enabled = true`) over static username/password pairs.
 
 ### 3.2. IAM Least-Privilege Rules
+
 - **No Wildcard Actions**: Disallow `Action = ["*"]` and broad prefix wildcards (e.g. `s3:*`, `kms:*`) unless strictly mandated by cloud provider documentation (e.g., KMS root account delegation).
 - **No Wildcard Resources**: Disallow `Resource = ["*"]` on action statements that can be scoped to specific resource ARNs.
 - **Composition**: Prefer `data "aws_iam_policy_document"` for deterministic policy document generation.

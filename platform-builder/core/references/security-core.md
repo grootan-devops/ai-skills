@@ -1,6 +1,7 @@
 # Security Review Core — Judgement, Not Pattern Matching
 
 **Applies to every platform.** Read this first, then the addendum for the detected platform:
+
 - `platforms/gitlab/references/security-addendum.md`
 - `platforms/github/references/security-addendum.md`
 
@@ -17,7 +18,6 @@ code and are tagged `[engine]`.
 > worded per platform (dependency proxy on GitLab, digest or mirror on GitHub). **Proxy
 > routing** is GitLab-only, because GitHub has no Dependency Proxy to route through. A
 > GitLab line that already reported as unproxied does not also report as unpinned.
-
 
 **Everything below requires reading a value and reasoning about what it means.** A regex over
 key names cannot do it, and adding more regexes makes the engine noisier without making it
@@ -110,7 +110,7 @@ Platform-specific mechanics — GitLab's `CI_JOB_TOKEN` scoping and protected va
 
 ## Reporting
 
-```
+```text
 [P0] [judged]  Embedded credential   chart/values.yaml:42
      -> DATABASE_URL value contains an inline password (postgres://svc:hunter2@...).
         Move it to the secret store and source from the cluster secret manager.

@@ -23,6 +23,7 @@ terraform-module audit <module_path_or_repo> [--strict]
 
 > [!IMPORTANT]
 > **Interactive Guardrails**:
+>
 > - **Invoked bare or ambiguously?** The skill halts, displays the 3 workflows above (`terraform-module add`, `terraform-module update`, `terraform-module audit`), and prompts you to select one.
 > - **Missing mandatory arguments?** The skill prompts you specifically for the missing input(s) rather than rejecting your request.
 
@@ -31,11 +32,13 @@ terraform-module audit <module_path_or_repo> [--strict]
 ## 2. Core Architecture & Non-Negotiable Standards
 
 ### 2.1. Always Latest Official/Partner Provider Versions
+
 - **Trusted Provider Tiers**: Production modules strictly consume providers in the `official`, `partner`, or `partner-premier` tiers per the Terraform Registry.
 - **Latest Version Enforcement**: When creating (`terraform-module add`) or modernizing (`terraform-module update`), the skill dynamically resolves and targets the latest available stable provider release (`version = ">= <latest>"`).
 - **No Upper Bounds in Child Modules**: Child modules declare minimum bounds only (`version = ">= 6.64.0"`), omitting artificial upper constraints (`< 7.0.0`) so consumer stacks maintain upgrade flexibility.
 
 ### 2.2. Capability-Aware Security Model (No "KMS Everywhere" Fallacy)
+
 Never enforce blanket security rules where cloud APIs do not support them. The skill evaluates resources against a 6-tier capability taxonomy:
 
 | Capability Tier | Definition | Examples |
@@ -48,24 +51,30 @@ Never enforce blanket security rules where cloud APIs do not support them. The s
 | **`not_applicable`**| Architectural pattern does not apply. | IAM Roles, Security Group Rules |
 
 ### 2.3. Strict API Contracts (Zero `lookup()` Object Abuse)
+
 - **Mandatory Attributes**: Every variable declares explicit `description` and `type` constraints.
 - **Strongly-Typed Structural Objects**: Complex objects use `optional(type, default)`. Dynamic `lookup()` on typed objects is **strictly banned**.
 - **Zero Default Credentials**: Never provide default passwords, tokens, or mock secrets in variable definitions.
 
 ### 2.4. Resource-Specific Naming & Tag Governance
+
 - **Deterministic Naming**: `${var.application}-${var.environment}-${var.name}` with cloud-specific limit handling (e.g. AWS ALB 32-character maximum with deterministic MD5 hash truncation).
 - **Inverted Tag Merge Law**: Governance tags are merged **after** user-supplied tags:
+
   ```hcl
   tags = merge(var.tags, local.governance_tags)
   ```
+
   This prevents consumers from clobbering mandatory enterprise audit tags (`Application`, `Environment`, `Name`, `ManagedBy`).
 
 ### 2.5. Zero-Destruction State Migrations
+
 - Any refactor that renames resources, decomposes files, or converts `count` to `for_each` **must** append `moved` blocks into `moved.tf`.
 - Historical `moved` blocks are preserved permanently to protect consumer upgrades.
 - Speculative plans must assert **0 unexpected deletions**.
 
 ### 2.6. Absolute Brand & Project Neutrality
+
 - Reusable modules are 100% project-neutral. Zero internal project names, company names, or brand labels across HCL code, locals, defaults, tags, documentation, or diagrams.
 
 ---
@@ -203,7 +212,7 @@ flowchart TD
 
 ## 6. Strict Human-in-the-Loop Protocol (The 4 Gatekeepers)
 
-```
+```text
 ┌─────────────────────────┐
 │ Gatekeeper 1            │ ──> Provider Schema & Version Verification
 │ Schema Introspection    │     (Resolve latest provider version; inspect schema JSON)
