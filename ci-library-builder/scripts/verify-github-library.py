@@ -106,6 +106,28 @@ def check_workflows(root: Path, f: Findings) -> None:
         is_reusable = isinstance(on, dict) and "workflow_call" in on
         jobs = doc.get("jobs") or {}
 
+        if is_reusable:
+            call = on.get("workflow_call") or {}
+            for name, spec in (call.get("inputs") or {}).items():
+                if not isinstance(spec, dict):
+                    continue
+                itype = spec.get("type")
+                if itype not in ("boolean", "number", "string"):
+                    f.add(
+                        "P0",
+                        rel,
+                        f"workflow_call input '{name}' declares type '{itype}'. "
+                        "Only boolean, number and string are valid; every caller "
+                        "fails at startup with no job and no usable error.",
+                    )
+                if itype == "boolean" and isinstance(spec.get("default"), str):
+                    f.add(
+                        "P1",
+                        rel,
+                        f"workflow_call input '{name}' is boolean but its default "
+                        f"is the string {spec['default']!r}.",
+                    )
+
         # --- image coordinate defaults -------------------------------------
         raw = path.read_text()
         for m in re.finditer(

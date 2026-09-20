@@ -6,7 +6,6 @@ on:
     branches: [main]
     paths-ignore:
       - ".github/**"
-  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -16,28 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-          echo "Releasing from the default branch '${DEFAULT_BRANCH}'."
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read

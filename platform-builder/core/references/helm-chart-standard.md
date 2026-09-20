@@ -279,6 +279,71 @@ and are not the same field — deriving `SMTP_USER` from `smtp.from` breaks the 
 account differs from the sender, which is the normal case for a shared or no-reply sender.
 The same distinction applies to a database owner versus the connecting role.
 
+### 3.0d. Application values: top level, before the workload plumbing, documented per leaf
+
+The library's `values.yaml` is workload plumbing only — it declares no key for application
+configuration. Whatever this application needs is yours to add, under three rules.
+
+**Top level, not wrapped.** A domain group sits at the root of `values.yaml`, exactly as
+`database:` and `smtp:` do in §3.0c. Do **not** invent a `app:` / `config:` / `settings:`
+envelope:
+
+```yaml
+# right                          # wrong
+nextauth:                        app:
+  url: ""                          nextauth:
+keycloak:                            url: ""
+  issuer: ""                       keycloak:
+                                     issuer: ""
+```
+
+The wrapper buys nothing and costs on every reference: `.Values.app.nextauth.url` instead of
+`.Values.nextauth.url`, in every `configmapEnvs` line and every `helm --set` a deployer
+types. The one thing to check is collision: the name must not be one the library already
+declares (`global`, `component`, `subComponent`, `replicas`, `revisionHistoryLimit`,
+`strategy`, `restartPolicy`, `initContainers`, `containers`, `serviceAccount`, `hostAliases`,
+`pod`, `jobs`, `cronjobs`, `scheduling`, `service`, `routes`, `networkPolicy`, `persistence`,
+`mounts`, `pdb`, `autoscaling`, `metrics`). Pick a domain noun — `nextauth`, `keycloak`,
+`database`, `smtp` — and a collision cannot arise.
+
+**Placed after `strategy:` and before `restartPolicy:`.** Application configuration is what a
+deployer edits; the workload plumbing is what they inherit and rarely touch. Appending the
+application block to the end of the file buries the only section anyone opens the file for
+behind 700 lines they do not. The library's own key order is otherwise preserved, so the
+replica still diffs cleanly against the library (§3.0, reason 3).
+
+**Every leaf carries its own `# --` and `# @section --`.** A consumer key whose sub-keys are
+each set individually is not one opaque value, so it does not get the parent-level
+`# @default -- Check values.yaml` treatment:
+
+```yaml
+# right
+apps:
+  operation:
+    # -- Host of the Operation console, substituted into the bundle at container start.
+    # @section -- Application Settings
+    host: ""
+    # -- Path the launcher appends to the Operation host.
+    # @section -- Application Settings
+    path: ""
+
+# wrong -- one comment on the parent, leaves undocumented
+# -- Sibling application hosts and redirect paths.
+# @section -- Application Settings
+# @default -- Check values.yaml
+apps:
+  operation:
+    host: ""
+    path: ""
+```
+
+`# @default -- Check values.yaml` belongs to a library key rendered opaquely through
+`toYaml`, where the sub-keys are the caller's shape (§3.0, "Where the copy stops"). Using it
+on a consumer map collapses every leaf into a single `helm-docs` row, so the generated
+`README.md` never names `apps.operation.host` — the same under-description §3.0 reason 2
+rejects for omitted keys. If the map is genuinely free-form (arbitrary keys a deployer
+invents), `@default` is correct; if the keys are fixed and you wrote them, document each one.
+
 ---
 
 ## 6. Mandatory Pre-Flight Verification via `helm template`

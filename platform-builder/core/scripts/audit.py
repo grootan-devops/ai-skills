@@ -175,6 +175,7 @@ def run(repo_path: str, platform_name: Optional[str] = None,
         for r in resolved_libs:
             if r.name == "helm-tpl-library" and getattr(r, "path", None):
                 findings += common.check_values_parity(cdir, Path(r.path) / "values.yaml")
+                findings += common.check_app_values_shape(cdir, Path(r.path) / "values.yaml")
     findings += common.check_project_hygiene(repo)
 
     p0 = [f for f in findings if f.severity == "P0"]

@@ -304,6 +304,68 @@ def _opaque_block_keys(values_text: str) -> Set[str]:
 _VALUES_PARITY_IGNORE = {"component", "subComponent"}
 
 
+_WRAPPER_SMELL = {"app", "application", "config", "configuration", "settings", "env", "params"}
+
+
+def check_app_values_shape(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
+    """Consumer application values: top level, ahead of the workload plumbing.
+
+    The library declares no key for application configuration, so whatever the app needs
+    is the consumer's to add. Two shapes go wrong on their own (helm-chart-standard
+    §3.0d): wrapping the domain groups in an `app:` envelope, which lengthens every
+    reference a deployer types for no gain, and appending them after the library's keys,
+    which buries the only section anyone opens the file for behind hundreds of lines of
+    plumbing they inherit and never touch.
+    """
+    findings: List[Finding] = []
+    values_file = chart_dir / "values.yaml"
+    if not values_file.exists() or not tpllib_values.exists():
+        return findings
+    try:
+        import yaml  # noqa: WPS433
+        raw = values_file.read_text(encoding="utf-8")
+        consumer = yaml.safe_load(raw) or {}
+        library = yaml.safe_load(tpllib_values.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return findings
+    if not isinstance(consumer, dict) or not isinstance(library, dict):
+        return findings
+
+    lib_keys = set(library)
+    rel = f"{chart_dir.name}/values.yaml"
+
+    # --- an invented envelope around the domain groups ----------------------
+    for key in consumer:
+        if key in lib_keys or key not in _WRAPPER_SMELL:
+            continue
+        val = consumer[key]
+        if isinstance(val, dict) and any(isinstance(v, dict) for v in val.values()):
+            inner = sorted(k for k, v in val.items() if isinstance(v, dict))
+            findings.append(Finding(
+                "P2", "Application values wrapped in an envelope", rel,
+                f"`{key}:` wraps {', '.join(inner[:4])}, so every reference reads "
+                f"`.Values.{key}.{inner[0]}...` instead of `.Values.{inner[0]}...`. "
+                "Lift the domain groups to the top level; the library declares none of "
+                "these names, so nothing collides (helm-chart-standard §3.0d).",
+            ))
+
+    # --- appended after the plumbing instead of ahead of it -----------------
+    order = [m.group(1) for m in re.finditer(r"^([A-Za-z_][\w-]*):", raw, re.M)]
+    if "restartPolicy" in order:
+        cut = order.index("restartPolicy")
+        late = [k for k in order[cut:] if k not in lib_keys]
+        if late:
+            findings.append(Finding(
+                "P2", "Application values sit below the workload plumbing", rel,
+                f"{', '.join(late[:4])} "
+                f"{'appears' if len(late) == 1 else 'appear'} after `restartPolicy:`. Application "
+                "configuration is what a deployer edits; the plumbing is inherited. Move "
+                "these above `restartPolicy:` and keep the library's own key order "
+                "otherwise, so the replica still diffs cleanly (helm-chart-standard §3.0d).",
+            ))
+    return findings
+
+
 def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
     """Consumer values.yaml must mirror the library's values.yaml key-for-key.
 
