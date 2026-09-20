@@ -137,20 +137,8 @@ it has usually skipped the container (SKILL.md §1.4) rather than found a real n
 ```
 
 Non-`actions/*` entries carry a 40-character SHA plus the version comment. Two workflows must
-never sit on different majors of the same action — that is the failure a grouped Dependabot
-config exists to prevent:
-
-```yaml
-# .github/dependabot.yml
-version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule: { interval: weekly }
-    groups:
-      actions:
-        patterns: ["*"]
-```
+never sit on different majors of the same action. Dependency-update automation is currently
+deferred, so maintainers update these pins together as one reviewed change.
 
 ## 5. The `init` contract
 
