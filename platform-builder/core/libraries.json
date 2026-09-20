@@ -1,0 +1,44 @@
+{
+  "$comment": [
+    "Default source for each shared library, used when nothing higher in the precedence",
+    "chain names one. Precedence, highest first:",
+    "  1. --<library-name> SOURCE  (or the generic --lib NAME=SOURCE)",
+    "  2. $PLATFORM_BUILDER_LIB_<NAME>",
+    "  3. <repo>/.platform-builder.json",
+    "  4. this file",
+    "A source is a local path, a git URL with an optional '@<ref>' or '#<ref>', or a",
+    "GitHub/GitLab web URL of the form '<repo>/tree/<ref>'. The ref may be a branch, a",
+    "tag or a commit SHA, and may be omitted for the default branch.",
+    "The defaults below track 'main'. Pin a tag here once the libraries cut releases: a",
+    "default branch moves, so an unpinned default makes two runs a week apart generate",
+    "different pipelines from the same inputs.",
+    "'platforms' says which libraries a run on that platform actually reads."
+  ],
+  "trusted_registries": [
+    "registry-1.docker.io/grootantech"
+  ],
+  "libraries": {
+    "gitlab-ci-library": {
+      "source": "https://github.com/grootan-devops/gitlab-ci-library",
+      "ref": "main"
+    },
+    "github-ci-library": {
+      "source": "https://github.com/grootan-devops/github-ci-library",
+      "ref": "main"
+    },
+    "helm-tpl-library": {
+      "source": "https://github.com/grootan-devops/helm-tpl-library",
+      "ref": "main"
+    }
+  },
+  "platforms": {
+    "gitlab": [
+      "gitlab-ci-library",
+      "helm-tpl-library"
+    ],
+    "github": [
+      "github-ci-library",
+      "helm-tpl-library"
+    ]
+  }
+}

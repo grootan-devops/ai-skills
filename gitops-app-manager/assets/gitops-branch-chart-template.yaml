@@ -1,0 +1,11 @@
+apiVersion: v2
+name: ${CHART_NAME}
+description: GitOps root chart for ${PRODUCT_NAME} (${ENVIRONMENT})
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: argocd-gitops-tpl-library
+    version: 1.0.0
+    repository: oci://registry.contoso.com/devops/charts
