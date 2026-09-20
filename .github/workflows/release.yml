@@ -1,0 +1,77 @@
+name: CD · Tag, Release & Notify
+
+run-name: "Release · ${{ github.ref_name }} · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  push:
+    branches: [main]
+    # A pipeline-only change must not cut a release.
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+# Least privilege at the top: only the publish job writes. Elevating here instead would
+# hand every job in the run a token that can push to the repository.
+permissions:
+  contents: read
+
+jobs:
+  # workflow_dispatch accepts any ref, so a release cut from a feature branch
+  # would tag and publish work that never passed a pull request.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+          echo "Releasing from the default branch '${DEFAULT_BRANCH}'."
+
+  init:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  # The release waits on the guards: without that the tag publishes past a failed
+  # changelog or migration check.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+
+  release:
+    needs: [init, check]
+    permissions:
+      contents: write
+      actions: read
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@dev
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+      notify: true
