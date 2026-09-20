@@ -155,3 +155,30 @@ The same reason as the Dockerfile grouping rule in
 keys with no break reads as one thing, and the next person edits the wrong one. `on:` and
 `permissions:` govern the whole file and answer different questions — when it runs, and what
 it may touch. Crammed together they scan as a single block of preamble.
+
+## 8. Concurrency
+
+**Every workflow that starts itself declares a `concurrency:` block** — not just the
+pull-request one. Two manual runs, or a schedule landing on top of one, race the same
+caches and registry tags. A `workflow_call`-only workflow is exempt: the caller's group
+already covers it.
+
+```yaml
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+```
+
+`cancel-in-progress` is the decision, not the group:
+
+| Workflow | `cancel-in-progress` |
+|---|---|
+| Verification — PR, lint, scan, audit | `true` — a superseded run is answering a stale question |
+| Anything that publishes or provisions — release, deploy, terraform apply | `false`, and a group that does not collide with verification, e.g. `release-${{ github.ref }}` |
+
+Cancelling a run that has already pushed a tag or created infrastructure leaves the
+half-done state behind, and the next run inherits it.
+
+GitLab's equivalent is per job, not per file: `interruptible: true` on verification jobs
+(the library sets it as a default) and `resource_group:` where two pipelines must not touch
+the same target at once.

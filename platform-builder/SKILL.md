@@ -256,6 +256,13 @@ If the answer is yes and the fixture does not exist yet, scaffold it:
   buys nothing and breaks on every library upgrade. A consumer's tests cover what only that
   chart knows.
 
+**Generated YAML carries no narration.** A comment in a consumer's pipeline earns its place
+only by preventing a specific mistake — why a job accepts a skipped dependency, why a value
+must not be re-declared. Explaining what a workflow *is*, or how it differs from another
+one, is what this skill's references and the library README are for; repeated into every
+generated file it becomes something to maintain and, on the next library change, something
+that is quietly wrong. Applies to both platforms.
+
 **Phase 3 — Scaffold, then validate.**
 
 ```bash

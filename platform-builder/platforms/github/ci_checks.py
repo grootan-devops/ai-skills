@@ -283,13 +283,18 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
                     f"`if: failure()`. A needed job that fails skips this one, leaking "
                     f"whatever it was meant to tear down."))
 
+    # Any workflow that starts itself needs a group, not just a PR one: two manual runs,
+    # or a schedule landing on top of one, race the same caches and registry tags. A
+    # `workflow_call`-only workflow is exempt -- the caller's group already covers it.
     triggers = _on_triggers(wf)
-    if "pull_request" in triggers and "concurrency" not in wf:
+    self_starting = [t for t in triggers if t != "workflow_call"]
+    if self_starting and "concurrency" not in wf:
         out.append(Finding(
             "P2", "No concurrency group", f"{rel}:concurrency",
-            "PR-triggered workflow without a `concurrency:` block. Successive pushes to the "
-            "same branch run in parallel and burn minutes. Add a group keyed on the ref with "
-            "`cancel-in-progress: true`."))
+            f"No `concurrency:` block on a workflow triggered by {', '.join(sorted(self_starting))}. "
+            "Two runs of it proceed in parallel, racing the same caches and registry tags. Add a "
+            "group keyed on the ref. `cancel-in-progress: true` for verification; false where a "
+            "run publishes or provisions and must finish."))
 
     return out
 
