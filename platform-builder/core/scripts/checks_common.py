@@ -732,17 +732,25 @@ def check_dockerignore(root: Path) -> List[Finding]:
                 "'.dockerignore' should follow the Inverted Allowlist Standard: block everything by default ('*' or '**') at the top."
             ))
 
+        copies_context = False
+        for _, ins in _logical_instructions(df_file.read_text(encoding="utf-8").splitlines()):
+            op = ins.split(None, 1)[0].upper() if ins.split() else ""
+            if op in ("COPY", "ADD") and "--from=" not in ins:
+                copies_context = True
+                break
+
         has_unignore = any(line.startswith("!") for line in lines)
-        if not has_unignore:
+        if copies_context and not has_unignore:
             findings.append(Finding(
                 "P2", ".dockerignore Empty Allowlist", str(di_file),
-                "'.dockerignore' has no allowlist rules ('!'). Specify exact artifacts or sources required for packaging."
+                "'.dockerignore' denies everything, but the Dockerfile copies from the build "
+                "context, so nothing it needs can reach it. Admit exactly those paths with '!'."
             ))
 
     return findings
 
 
-def check_gitignore(root: Path) -> List[Finding]:
+def check_gitignore(root: Path, chart_dir: Optional[Path] = None) -> List[Finding]:
     findings: List[Finding] = []
     gi_file = root / ".gitignore"
     if not gi_file.exists():
@@ -761,11 +769,20 @@ def check_gitignore(root: Path) -> List[Finding]:
     is_java = (root / "pom.xml").exists() or (root / "build.gradle").exists()
     is_go = (root / "go.mod").exists()
 
+    has_chart = (
+        (chart_dir is not None and (chart_dir / "Chart.yaml").exists())
+        or (root / "Chart.yaml").exists()
+        or (root / "chart" / "Chart.yaml").exists()
+    )
+
     required_checks = [
         (".env", "Environment file '.env' must be ignored."),
-        ("charts", "Helm dependency directory 'charts' must be ignored."),
-        ("chart.lock", "Helm dependency lock file 'Chart.lock' must be ignored."),
     ]
+    if has_chart:
+        required_checks.extend([
+            ("charts", "Helm dependency directory 'charts' must be ignored."),
+            ("chart.lock", "Helm dependency lock file 'Chart.lock' must be ignored."),
+        ])
 
     if is_python:
         required_checks.extend([

@@ -156,15 +156,23 @@ grep -nE '^\s*\*\.tgz\s*$|^\s*charts/?\s*$' chart/.helmignore
 
 ## 4. Audit checklist
 
-| Check | File | Severity |
-|---|---|---|
-| exists at all | all three | P1 / P1 / P2 |
-| `charts` + `Chart.lock` ignored | `.gitignore` | P2 |
-| `.env` ignored, `.env.example` re-admitted | `.gitignore` | P2 |
-| starts `**` then `*`, has at least one `!` | `.dockerignore` | P2 |
-| cache dir (`.npm`/`.uv`) admitted | `.dockerignore` | P1 |
-| no bare `*.tgz`, no `charts` | `.helmignore` | **P1** |
-| baseline entries present | `.helmignore` | P2 |
+**Every entry below is conditional on the repository actually producing the thing it
+ignores.** An ignore file is a statement about what this project generates; padding it with
+entries for a stack the project does not use is noise, and noise in a findings list is how a
+reader learns to skim it. The stack entries (`.venv`, `node_modules`, `target`) were already
+gated on the manifest that implies them; these two are gated the same way.
+
+| Check | File | Severity | Applies when |
+|---|---|---|---|
+| exists at all | all three | P1 / P1 / P2 | always |
+| `.env` ignored, `.env.example` re-admitted | `.gitignore` | P2 | always — any project can grow a local `.env` |
+| `charts` + `Chart.lock` ignored | `.gitignore` | P2 | **only with a chart** — `helm dependency update` produces both; without a chart neither can appear |
+| stack caches (`.venv`, `node_modules`, `target`, …) | `.gitignore` | P2 | only with that stack's manifest |
+| starts `**` then `*` | `.dockerignore` | P2 | always, where a Dockerfile exists |
+| has at least one `!` | `.dockerignore` | P2 | **only when the Dockerfile copies from the build context** — an image assembled from earlier stages or a base image alone correctly admits nothing |
+| cache dir (`.npm`/`.uv`) admitted | `.dockerignore` | P1 | only where the image installs offline from it |
+| no bare `*.tgz`, no `charts` | `.helmignore` | **P1** | chart repositories |
+| baseline entries present | `.helmignore` | P2 | chart repositories |
 
 `core/scripts/checks_common.py` enforces these as `check_gitignore`, `check_dockerignore`
 and `check_helmignore`. Add a rule there, not to a platform adapter — all three files are

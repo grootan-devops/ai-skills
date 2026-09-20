@@ -166,7 +166,7 @@ def run(repo_path: str, platform_name: Optional[str] = None,
     if df.exists():
         findings += common.check_dockerfile(df, shape)
         findings += common.check_dockerignore(repo)
-    findings += common.check_gitignore(repo)
+    findings += common.check_gitignore(repo, cdir)
     if (cdir / "Chart.yaml").exists():
         findings += common.check_helm_chart(cdir)
         findings += common.check_helmignore(cdir)

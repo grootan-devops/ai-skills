@@ -117,6 +117,33 @@ Report the resolved `name @ ref (kind, via layer)` for every library in the Phas
 confirmation table. An audit whose library provenance is unstated cannot be reproduced —
 half its findings depend on the version the repo was measured against.
 
+#### The ref you scaffold with is the ref you resolved
+
+**Every generated `uses:` and every `include: ref:` carries the ref the resolver reported —
+never a version copied out of a README example.** Those examples write `@1.0.0` to show the
+shape; writing it into a consumer pins the pipeline to a tag that may not exist. A caller
+pinned to a ref the library has never published fails to resolve, and the error names the
+caller, not the mistake.
+
+| Resolved as | Write |
+|---|---|
+| a tag — `@1.0.0` | that tag |
+| a branch — `@dev` | that branch |
+| a commit | that SHA |
+| a **local path** | the branch that copy is checked out at |
+
+A local path deserves care. GitHub cannot consume `/Users/me/lib`: the generated workflow
+has to name the library on its remote, so use the branch the local copy sits on and say so.
+Two things then need stating rather than assuming:
+
+- **Uncommitted changes.** The resolver warns when the working copy is dirty. The pipeline
+  will run against what is *pushed*, not what you read. Say which, and let the user decide.
+- **No such ref upstream.** If the local branch has never been pushed, the scaffold cannot
+  work yet. Say so at Phase 2, before writing — not after.
+
+Check before you write: `git -C <library> tag --list` and `git -C <library> status
+--porcelain` answer both questions in one step.
+
 ### 0.1 Single-Source Law
 
 Every fact has one home. When two places disagree, the one listed here wins — never reconcile
@@ -204,6 +231,30 @@ and never read a library the resolver did not hand you a path for.
 **Phase 2 — Classify and confirm.** Run the engine to get the detected shape, then present:
 platform (with confidence and signals), shape, what will be created, and anything present that
 the shape does not need. **Stop and confirm before writing.**
+
+**Phase 2b — Ask about tests. They are off by default, so silence disables them.**
+
+Both libraries ship the jobs; neither runs without being asked for. A scaffold that omits
+them is not "no tests yet", it is a pipeline that builds an artifact nobody executed.
+
+| Present | Ask | Turns on |
+|---|---|---|
+| a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
+| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `test`). Runs `helm unittest` against a mock consumer chart. |
+
+Ask for each artifact that exists, and ask **both** where both exist — they are independent
+decisions. If the repository already ships the script or the mock chart, say so and default
+to enabling; a test that exists and never runs is the worst of the three outcomes.
+
+If the answer is yes and the fixture does not exist yet, scaffold it:
+
+- **Image** — a `ci_image_test.sh` that asserts what the image promises: the binary is on
+  `PATH` and reports the expected version, the declared `EXPOSE` port is listening, the
+  process runs as `10001`. Assert the contract, not the base image's contents.
+- **Chart** — see the scope rule in **helm-tpl-library's own README**. `tpllib` already
+  tests the Kubernetes-level rendering it owns, and duplicating that in a consumer chart
+  buys nothing and breaks on every library upgrade. A consumer's tests cover what only that
+  chart knows.
 
 **Phase 3 — Scaffold, then validate.**
 

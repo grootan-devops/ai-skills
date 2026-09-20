@@ -97,19 +97,61 @@ Cleanup and teardown jobs need `if: always()`, or they are skipped exactly when 
 
 ## 5. Pinning
 
-| What | Pin to |
-|---|---|
-| Library reusable workflows | a release tag — `@1.0.0` |
-| Third-party actions in a consumer workflow | a full 40-char commit SHA, version in a trailing comment |
+A reference is a **release tag or a commit SHA**. Nothing else, and the owner does not
+change the answer.
 
-A tag on a *third-party* action is mutable: the author can repoint `v1` at new code that then runs
-with your `GITHUB_TOKEN`. The library is a first-party, reviewed repository, so a release tag is
-the right trade there — it keeps migrations legible.
+| Reference | Verdict |
+|---|---|
+| `@1.0.0`, `@v7`, `@v2.1.0-rc.1` | fine — a release tag |
+| `@a1b2c3…` (40 hex) | fine — an exact tree |
+| `@dev`, `@latest`, any other alias | **P1** — pin to a SHA |
+| `@main`, `@master`, `@HEAD` | **P0** — a branch runs whatever is on it when the job starts |
+
+Publishing a release tag is a deliberate act, and moving one afterwards is visible in the
+repository. A branch or a floating alias states no version at all: it resolves at run time,
+to code the author can change, running with your `GITHUB_TOKEN`. Where an action publishes
+no tags, a SHA with the version in a trailing comment is the only option.
 
 ## 6. Permissions
 
-Declare at the workflow level, minimum first, and elevate per job. The library's own quick start
-shows the pattern: `contents: read` for `pr.yml`, `contents: write` only for `release.yml`.
+`permissions: contents: read` at the workflow level, and elevate on the individual job — a
+job calling a reusable workflow takes a `permissions:` block like any other. Putting the union
+at the top hands `packages: write` to the lint job and the secret scan, which push nothing and
+are the jobs most likely to run third-party code.
+
+The library's README carries the per-workflow requirement: which scope each called workflow
+needs, so a caller can grant exactly that. Under-grant and the call fails at **startup**, not
+midway — a reusable workflow cannot request a scope its caller did not have.
 
 An absent `permissions:` block inherits the repository default, which on older repositories is
 read/write on every scope. Full reasoning in [`security-addendum.md`](./security-addendum.md).
+
+## 7. File layout
+
+One blank line between top-level sections — `name`, `on`, `permissions`, `concurrency`,
+`defaults`, `env`, `jobs` — and between jobs. `run-name` sits directly under `name`: both name
+the run, so they are one section. A comment introducing a section belongs to it, so the blank
+line goes **above** the comment.
+
+```yaml
+name: Security · Secret Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+```
+
+The same reason as the Dockerfile grouping rule in
+[`language-stacks-core.md`](../../../core/references/language-stacks-core.md) §3.1: a run of
+keys with no break reads as one thing, and the next person edits the wrong one. `on:` and
+`permissions:` govern the whole file and answer different questions — when it runs, and what
+it may touch. Crammed together they scan as a single block of preamble.

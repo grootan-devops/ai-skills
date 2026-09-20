@@ -126,8 +126,15 @@ def check_permissions(wf: Dict[str, Any], rel: str) -> List[Finding]:
     return out
 
 
+_VERSION_TAG = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?$")
+
+
 def check_action_pinning(wf: Dict[str, Any], rel: str) -> List[Finding]:
-    """Third-party actions must be pinned to an immutable commit SHA."""
+    """An action is referenced by a version tag or a commit SHA. Nothing else.
+
+    A tag states a version; a SHA states an exact tree. A branch or a floating alias
+    states neither, and runs whatever is on it at the moment the job starts.
+    """
     out: List[Finding] = []
     for job_name, job in _jobs(wf).items():
         steps = job.get("steps")
@@ -145,18 +152,20 @@ def check_action_pinning(wf: Dict[str, Any], rel: str) -> List[Finding]:
                     f"`uses: {uses}` has no ref at all."))
                 continue
             repo, ref = uses.rsplit("@", 1)
-            if SHA_PIN.match(ref):
+            if SHA_PIN.match(ref) or _VERSION_TAG.match(ref):
                 continue
             severity = "P1"
-            note = ""
+            note = (" Pin to a full commit SHA with the version in a trailing comment, "
+                    "or reference a release tag.")
             if ref in ("main", "master", "HEAD"):
                 severity = "P0"
-                note = " A branch ref executes whatever is on that branch at run time."
+                note = (" A branch ref executes whatever is on that branch at run time. "
+                        "Pin to a full commit SHA.")
             out.append(Finding(
                 severity, "Unpinned action", f"{rel}:jobs.{job_name}.steps[{idx}]",
-                f"`{repo}@{ref}` is a mutable ref; the author can move it to new code that "
-                f"then runs with your GITHUB_TOKEN. Pin to a full commit SHA with the version "
-                f"in a trailing comment.{note}"))
+                f"`{repo}@{ref}` is neither a release tag nor a commit SHA, so it names "
+                f"whatever that ref points at when the job starts -- which the author can "
+                f"move to new code that then runs with your GITHUB_TOKEN.{note}"))
     return out
 
 
