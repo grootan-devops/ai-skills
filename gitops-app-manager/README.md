@@ -1,6 +1,6 @@
 # GitOps Application & Environment Manager AI Skill (`gitops-app-manager`)
 
-An industrial-grade platform engineering skill that automates the onboarding, scaffolding, lifecycle management, and CI/CD delivery integration for applications running under **ArgoCD** (Helm & raw Manifest "Extras" via `argocd-gitops-tpl-library`) and **Komodo** (Docker Compose stacks via `devops/ci-templates` (`deploy/gitops/`)).
+An industrial-grade platform engineering skill that automates the onboarding, scaffolding, lifecycle management, and CI/CD delivery integration for applications running under **ArgoCD** (Helm & raw Manifest "Extras" via `argocd-gitops-tpl-library`) and **Komodo** (Docker Compose stacks via `devops/library/cicd` (`deploy/gitops/`)).
 
 ---
 

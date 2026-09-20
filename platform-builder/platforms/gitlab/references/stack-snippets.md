@@ -17,10 +17,18 @@ The common failure is the *opposite* of over-declaring: an include list carrying
 SonarQube, secret scanning, licence compliance, SBOM and releases. A service repository
 starts from the library README's Quick Start set and removes only what it can justify:
 
+> [!IMPORTANT]
+> `project:` is the library's path **on the GitLab instance that runs this pipeline**, not
+> the repository it is developed in. GitLab's `include: project:` resolves only within its
+> own instance, so a GitHub URL there fails. `ref:` is the version this run resolved — read
+> it from the `name @ ref` line `core/scripts/libraries.py` prints, never invent one. On an
+> update it becomes the newest release tag, and the `MIGRATION.md` sections between the old
+> ref and it are the work.
+
 ```yaml
 include:
-  - project: 'devops/ci-templates'
-    ref: <pinned ref>
+  - project: 'devops/library/cicd'
+    ref: <resolved library ref>
     file:
       - common/.gitlab-ci.yml                   # required by every pipeline
       - nodejs/.gitlab-ci.yml                   # or python/ golang/ java/

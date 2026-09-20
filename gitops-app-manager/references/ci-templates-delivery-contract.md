@@ -1,6 +1,6 @@
 # CI Templates GitOps Delivery Contract
 
-This document provides the operational reference for injecting GitOps deployment jobs into `.gitlab-ci.yml` via the shared enterprise template library (`devops/ci-templates`).
+This document provides the operational reference for injecting GitOps deployment jobs into `.gitlab-ci.yml` via the shared enterprise template library (`devops/library/cicd`).
 
 ---
 
@@ -12,7 +12,7 @@ Used for services that package a Helm chart and deploy via GitOps chart version 
 
 ```yaml
 include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: 2.0.0/dev
     file: deploy/gitops/.argocd.gitlab-ci.yml
     inputs:
@@ -40,7 +40,7 @@ Used for services deploying raw Kubernetes YAML manifests.
 
 ```yaml
 include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: 2.0.0/dev
     file: deploy/gitops/.argocd.gitlab-ci.yml
     inputs:
@@ -67,7 +67,7 @@ Used for docker-compose based services managed by Komodo.
 
 ```yaml
 include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: 2.0.0/dev
     file: deploy/gitops/.komodo.gitlab-ci.yml
     inputs:

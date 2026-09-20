@@ -1,6 +1,6 @@
 # GitLab Job Anatomy — the eight decisions, in order
 
-Every job in `devops/ci-templates` is the answer to the same eight questions. Answer them in
+Every job in `devops/library/cicd` is the answer to the same eight questions. Answer them in
 this order: a later answer never changes an earlier one, and skipping one is how a job ends up
 in the wrong file with the wrong image.
 

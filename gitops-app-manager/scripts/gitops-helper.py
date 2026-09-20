@@ -337,7 +337,7 @@ def generate_ci_injection_block(
 
     if delivery_type == "argocd-helm":
         return f"""include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: {ci_ref}
     file: deploy/gitops/.argocd.gitlab-ci.yml
     inputs:
@@ -351,7 +351,7 @@ def generate_ci_injection_block(
 
     elif delivery_type == "argocd-manifest":
         return f"""include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: {ci_ref}
     file: deploy/gitops/.argocd.gitlab-ci.yml
     inputs:
@@ -365,7 +365,7 @@ def generate_ci_injection_block(
 
     elif delivery_type == "komodo":
         return f"""include:
-  - project: 'devops/ci-templates'
+  - project: 'devops/library/cicd'
     ref: {ci_ref}
     file: deploy/gitops/.komodo.gitlab-ci.yml
     inputs:
