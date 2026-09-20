@@ -1,11 +1,9 @@
 name: CD · Tag, Release & Notify
-
-run-name: "Release · ${{ github.ref_name }} · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Release · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
     branches: [main]
-    # A pipeline-only change must not cut a release.
     paths-ignore:
       - ".github/**"
   workflow_dispatch:
@@ -14,14 +12,10 @@ concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: false
 
-# Least privilege at the top: only the publish job writes. Elevating here instead would
-# hand every job in the run a token that can push to the repository.
 permissions:
   contents: read
 
 jobs:
-  # workflow_dispatch accepts any ref, so a release cut from a feature branch
-  # would tag and publish work that never passed a pull request.
   guard-ref:
     name: Verify Ref
     if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -43,7 +37,6 @@ jobs:
 
   init:
     needs: guard-ref
-    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
     if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
     permissions:
       contents: read
@@ -55,8 +48,6 @@ jobs:
       ignore-docker: "true"
       ignore-chart: "true"
 
-  # The release waits on the guards: without that the tag publishes past a failed
-  # changelog or migration check.
   check:
     needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev

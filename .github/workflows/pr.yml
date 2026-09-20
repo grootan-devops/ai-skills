@@ -1,10 +1,5 @@
 name: CI · PR Verification
-
-run-name: "CI · ${{ github.head_ref || github.ref_name }} · ${{ github.event_name }} · ${{ github.sha }}"
-
-# A skills repository ships documentation and verifier scripts, not an artifact:
-# no image, no chart, no package. What can be verified is that the Markdown and
-# YAML lint, the release guards are still free, and no secret has been committed.
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -14,9 +9,6 @@ concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 
-# Least privilege at the top; each job asks for exactly what the reusable workflow it
-# calls declares. A reusable workflow cannot request more than its caller grants, so
-# under-granting fails at startup rather than midway.
 permissions:
   contents: read
 
@@ -32,18 +24,12 @@ jobs:
       ignore-docker: "true"
       ignore-chart: "true"
 
-  # Every tracked Markdown file, not just the changelog: the skills themselves are
-  # Markdown, so a broken reference page is a broken skill.
   lint:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@dev
     secrets: inherit
     with:
-      # Every tracked Markdown file except LICENSE.md, which is a canonical licence text
-      # and not Markdown. The root files are named rather than globbed for that reason.
       lint-md-files: "CHANGELOG.md COMPATIBILITY.md CONTRIBUTING.md MIGRATION.md README.md SECURITY.md */*.md */*/*.md */*/*/*.md */*/*/*/*.md"
 
-  # Guards depend on init alone. They ask whether the tag, changelog entry and
-  # migration section are still free -- no lint can change that answer.
   check:
     needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
