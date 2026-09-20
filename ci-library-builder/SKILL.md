@@ -19,7 +19,7 @@ Two libraries, one set of decisions:
 
 | | GitLab | GitHub |
 |---|---|---|
-| Library | `devops/library/cicd` | `github-ci-library` |
+| Library | `gitlab-ci-library` | `github-ci-library` |
 | Unit of reuse | hidden template `.Job:` + concrete `Job:` | reusable `workflow_call` workflow + job |
 | Verifier | `scripts/verify-gitlab-library.py` | `scripts/verify-github-library.py` |
 

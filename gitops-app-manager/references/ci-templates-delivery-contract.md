@@ -1,6 +1,6 @@
 # CI Templates GitOps Delivery Contract
 
-This document provides the operational reference for injecting GitOps deployment jobs into `.gitlab-ci.yml` via the shared enterprise template library (`devops/library/cicd`).
+This document provides the operational reference for injecting GitOps deployment jobs into `.gitlab-ci.yml` via the shared enterprise template library (`gitlab-ci-library`).
 
 ---
 
@@ -12,9 +12,7 @@ Used for services that package a Helm chart and deploy via GitOps chart version 
 
 ```yaml
 include:
-  - project: 'devops/library/cicd'
-    ref: 2.0.0/dev
-    file: deploy/gitops/.argocd.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/dev/deploy/gitops/.argocd.gitlab-ci.yml'
     inputs:
       environment: dev                                      # (required, e.g. dev, qa, prod)
       gitops_repo_url: https://gitlab.contoso.com/gitops.git    # (required)
@@ -40,9 +38,7 @@ Used for services deploying raw Kubernetes YAML manifests.
 
 ```yaml
 include:
-  - project: 'devops/library/cicd'
-    ref: 2.0.0/dev
-    file: deploy/gitops/.argocd.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/dev/deploy/gitops/.argocd.gitlab-ci.yml'
     inputs:
       environment: dev                                      # (required)
       gitops_repo_url: https://gitlab.contoso.com/gitops.git    # (required)
@@ -67,9 +63,7 @@ Used for docker-compose based services managed by Komodo.
 
 ```yaml
 include:
-  - project: 'devops/library/cicd'
-    ref: 2.0.0/dev
-    file: deploy/gitops/.komodo.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/dev/deploy/gitops/.komodo.gitlab-ci.yml'
     inputs:
       environment: dev                                      # (required)
       gitops_repo_url: https://gitlab.contoso.com/compose.git   # (required)

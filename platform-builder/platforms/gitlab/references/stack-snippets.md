@@ -27,19 +27,16 @@ starts from the library README's Quick Start set and removes only what it can ju
 
 ```yaml
 include:
-  - project: 'devops/library/cicd'
-    ref: <resolved library ref>
-    file:
-      - common/.gitlab-ci.yml                   # required by every pipeline
-      - nodejs/.gitlab-ci.yml                   # or python/ golang/ java/
-      - image/.docker.gitlab-ci.yml             # builder (or .buildah)
-      - image/.gitlab-ci.yml                    # image lifecycle
-      - chart/.gitlab-ci.yml                    # chart lifecycle
-      - sonarqube/.gitlab-ci.yml                # needs sonar.properties in the repo
-      - secret-scanning/.gitlab-ci.yml          # git history; applies to every repo
-      - license/.gitlab-ci.yml
-      - sbom/.gitlab-ci.yml
-      - release/.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/common/.gitlab-ci.yml'  # required by every pipeline
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/nodejs/.gitlab-ci.yml'  # or python/ golang/ java/
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/image/.docker.gitlab-ci.yml'  # builder (or .buildah)
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/image/.gitlab-ci.yml'  # image lifecycle
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/chart/.gitlab-ci.yml'  # chart lifecycle
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/sonarqube/.gitlab-ci.yml'  # needs sonar.properties in the repo
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/secret-scanning/.gitlab-ci.yml'  # git history; applies to every repo
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/license/.gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/sbom/.gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/release/.gitlab-ci.yml'
 ```
 
 For an **image-only** repository (a Dockerfile with no application dependency manifest), include

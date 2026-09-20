@@ -329,7 +329,7 @@ def generate_ci_injection_block(
     gitops_service_image_yq_path: Optional[str] = None,
     gitops_compose_file: str = "docker-compose.yml",
     environment_url: Optional[str] = None,
-    ci_ref: str = "2.0.0/dev"
+    ci_ref: str = "dev"
 ) -> str:
     """Generates the CI include block for .gitlab-ci.yml."""
     clean_env = normalize_env(env)
@@ -337,9 +337,7 @@ def generate_ci_injection_block(
 
     if delivery_type == "argocd-helm":
         return f"""include:
-  - project: 'devops/library/cicd'
-    ref: {ci_ref}
-    file: deploy/gitops/.argocd.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/{ci_ref}/deploy/gitops/.argocd.gitlab-ci.yml'
     inputs:
       environment: {clean_env}
       gitops_repo_url: {gitops_repo_url}
@@ -351,9 +349,7 @@ def generate_ci_injection_block(
 
     elif delivery_type == "argocd-manifest":
         return f"""include:
-  - project: 'devops/library/cicd'
-    ref: {ci_ref}
-    file: deploy/gitops/.argocd.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/{ci_ref}/deploy/gitops/.argocd.gitlab-ci.yml'
     inputs:
       environment: {clean_env}
       gitops_repo_url: {gitops_repo_url}
@@ -365,9 +361,7 @@ def generate_ci_injection_block(
 
     elif delivery_type == "komodo":
         return f"""include:
-  - project: 'devops/library/cicd'
-    ref: {ci_ref}
-    file: deploy/gitops/.komodo.gitlab-ci.yml
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/{ci_ref}/deploy/gitops/.komodo.gitlab-ci.yml'
     inputs:
       environment: {clean_env}
       gitops_repo_url: {gitops_repo_url}
