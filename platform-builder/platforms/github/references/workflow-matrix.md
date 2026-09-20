@@ -191,7 +191,7 @@ is to open them.
 
 ```yaml
 name: CD · Production Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 ```
 
 The label is the first segment of `name:` — `CI`, `CD`, `Lint`, `Check`, `Scan`, `Audit`.

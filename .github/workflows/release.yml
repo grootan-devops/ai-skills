@@ -1,5 +1,5 @@
 name: CD · Tag, Release & Notify
-run-name: "Release · ${{ github.event_name }} · ${{ github.short_sha }}"
+run-name: "Release · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   push:
