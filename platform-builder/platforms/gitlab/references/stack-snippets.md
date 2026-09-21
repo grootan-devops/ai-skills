@@ -25,6 +25,13 @@ starts from the library README's Quick Start set and removes only what it can ju
 > update it becomes the newest release tag, and the `MIGRATION.md` sections between the old
 > ref and it are the work.
 
+> [!IMPORTANT]
+> The ref must be a published tag. `Common:Check:Library:Pin` runs in the `check` stage for
+> every consumer and fails a branch, a commit or a pre-release — for `project:`/`ref:` and
+> equally for a `remote:` raw URL, where the ref is a path segment
+> (`…/gitlab-ci-library/<ref>/<file>`). `ALLOW_UNSTABLE_LIBRARY_REFS: "true"` downgrades it
+> to a warning for testing only; never scaffold it.
+
 ```yaml
 include:
   - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/common/.gitlab-ci.yml'  # required by every pipeline
@@ -126,12 +133,11 @@ variables:
   PROJECT_CACHE_KEY: "node"     # or "python", "go", "java"
 ```
 
-The library defaults it to `""`, which technically works — but leave it empty and every
-cache key in the repo degrades to a bare lockfile hash, and `sonarqube/` builds the literal
-`sonar-`. Neither is readable in the cache list, and neither survives a repo growing a
-second stack. **Always declare it, and use the plain language name**: `node`, `python`,
-`go`, `java`. Not the project name, not a version — the language module whose cache it
-prefixes. A monorepo child appends its own segment (`node-admin`, `go-collector`).
+The library's default and what an empty value degrades to are in the README's Key Variables
+table. What that table cannot tell you is what to *call* it: **use the plain language
+name** — `node`, `python`, `go`, `java`. Not the project name, not a version: the language
+module whose cache it prefixes. A monorepo child appends its own segment (`node-admin`,
+`go-collector`).
 
 ### Never override `image:` in a consumer job
 

@@ -47,10 +47,8 @@ Read it directly:
 python3 -c "import json; print(json.dumps(json.load(open('platforms/gitlab/workflow-map.json')), indent=2))"
 ```
 
-Two entries carry judgement rather than data, and are recorded in the JSON's `shared_options`:
-
-- **`build`** is satisfied by *any* language module, so no single provider can be named.
-- **`deploy`** is satisfied by either GitOps module, and is withheld until `platform ship` wires a real `DEPLOY_TARGET`.
+`build` and `deploy` map to no single provider. The reason for each is in the JSON's
+`shared_options`; read it there rather than from a second copy here.
 
 ---
 

@@ -98,23 +98,16 @@ Use `stringData` for plain text; `data` requires values already base64-encoded.
 
 ## 4. Schema
 
-```yaml
-mounts:
-  configmap|secret|emptyDir|pvc:
-    <mount-name>:
-      enabled: true          # optional, default true; templated
-      mountTo: "main"        # "main" | "both" | a container name | a list
-      path: /etc/config      # directory the volume mounts at
-      data:                  # file name -> content (templated)
-        <filename>: |
-          ...
-      params: {}             # type-specific extras (readOnly, sizeLimit, claimName, …)
-```
+The block shape is the library's, and the library documents it — see **File Mounts
+(`mounts:`)** under *Chart standards to follow* in `helm-tpl-library/README.md`, read at the
+ref this run resolved. Do not restate it here; a copy drifts silently.
 
-`mountTo: "both"` targets the main and init containers. A list targets several by name.
+One thing to carry into every mount you author, because getting it wrong is invisible:
 
-`emptyDir` (scratch space, caches) and `pvc` (durable state) use the same block but carry no
-`data:` — they are storage, not configuration.
+> `mountTo` **defaults to `"both"`**, not `"main"`. A mount that omits it is mounted into the
+> init containers as well. Set `mountTo: "main"` explicitly whenever a file is for the
+> application only — a database credential reaching an init container that runs a migration
+> as a different identity is the failure this prevents.
 
 ## 5. Assess this during onboarding
 

@@ -255,6 +255,6 @@ A shim's last action decides whether it needs an init:
 
 - Every job sets an explicit timeout. Platform defaults are generous enough that a hung job
   burns hours before anything intervenes.
-- Cache keys hash a lockfile. A cache keyed on a branch name or a mutable ref can be poisoned by
-  whoever can push that ref.
-- Never cache `node_modules` or a `.venv` as an *artifact*; restore them from cache instead.
+- A cache keyed on a branch name or a mutable ref can be poisoned by whoever can push that
+  ref. Key on a lockfile. Which lockfile each module uses is in the library's module
+  catalog — do not restate it here.

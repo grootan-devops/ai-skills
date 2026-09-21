@@ -300,11 +300,11 @@ keycloak:                            url: ""
 The wrapper buys nothing and costs on every reference: `.Values.app.nextauth.url` instead of
 `.Values.nextauth.url`, in every `configmapEnvs` line and every `helm --set` a deployer
 types. The one thing to check is collision: the name must not be one the library already
-declares (`global`, `component`, `subComponent`, `replicas`, `revisionHistoryLimit`,
-`strategy`, `restartPolicy`, `initContainers`, `containers`, `serviceAccount`, `hostAliases`,
-`pod`, `jobs`, `cronjobs`, `scheduling`, `service`, `routes`, `networkPolicy`, `persistence`,
-`mounts`, `pdb`, `autoscaling`, `metrics`). Pick a domain noun — `nextauth`, `keycloak`,
-`database`, `smtp` — and a collision cannot arise.
+declares. **Read the root keys off the resolved library's `values.yaml`** rather than a list
+kept here — a copy is correct until the library adds a key, and then it is silently wrong.
+
+A domain noun usually clears it, but do not assume: `service`, `metrics`, `routes`,
+`persistence` and `pod` are all ordinary application nouns *and* library root keys. Check.
 
 **Placed after `strategy:` and before `restartPolicy:`.** Application configuration is what a
 deployer edits; the workload plumbing is what they inherit and rarely touch. Appending the

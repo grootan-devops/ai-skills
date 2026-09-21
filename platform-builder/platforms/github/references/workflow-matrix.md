@@ -112,6 +112,24 @@ repository. A branch or a floating alias states no version at all: it resolves a
 to code the author can change, running with your `GITHUB_TOKEN`. Where an action publishes
 no tags, a SHA with the version in a trailing comment is the only option.
 
+### 5a. CI enforces this, not just the audit
+
+`check.yml` runs a `Library Pinning` guard for every consumer: a job-level
+`uses: …/.github/workflows/x.yml@<ref>` must pin a published tag. A branch, a commit SHA and
+a pre-release tag all fail it. So a scaffold that emits `@dev` produces a repository whose
+own pipeline refuses it — resolve a real tag, and only fall back to a branch when the
+library has published none.
+
+There is one escape hatch and it is not a default: `allow-unstable-library-refs: true` on
+the `check.yml` caller — **testing only**, for a pull request tracking a library branch
+while that branch is being written. Never scaffold it. If the user asks for it, add the
+comment `# TESTING ONLY -- remove before merging.` above it, because the guard's whole value
+is that nobody forgets.
+
+The same rule reaches Helm: `chart-dependency-check.sh` rejects a `Chart.yaml` dependency
+whose `version:` is a range (`^1.2.0`, `~1.2`) or a pre-release, as well as one pointing at
+the dev repository. Scaffold chart dependencies with the exact version.
+
 ## 6. Permissions
 
 `permissions: contents: read` at the workflow level, and elevate on the individual job — a
