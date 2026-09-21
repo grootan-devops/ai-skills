@@ -156,6 +156,62 @@ keys with no break reads as one thing, and the next person edits the wrong one. 
 `permissions:` govern the whole file and answer different questions — when it runs, and what
 it may touch. Crammed together they scan as a single block of preamble.
 
+## 7a. A scanning repository needs a scheduled cache warm
+
+`trivy-cache.yml` warms the Trivy databases into the Actions cache. Scaffold a companion
+`cache-warm.yml` **only when the repository actually scans** — when a scenario calls
+`scan.yml` with `scan-type: image`, or calls `sbom.yml`.
+
+Ask before adding it. A repository whose image is a CI toolkit that never leaves the build
+farm is a legitimate reason not to scan at all, and one that ships no image has nothing to
+scan; in both cases `trivy-cache.yml`, `cache-warm.yml` and the scan scenario all come out
+together. Do not leave a `cache-warm.yml` behind for a repository that stopped scanning —
+it warms a cache nothing reads.
+
+When scanning is on, the warm workflow is not optional, and its absence is silent. The
+library writes every cache only from the default branch, because GitHub scopes an entry to
+the ref that wrote it: a run reads its own ref, its base branch and the default branch, so
+a write from anywhere else is a duplicate nobody can use. Pull requests restore the cache
+and never write it. If nothing runs on the default branch, the entry never exists and every
+run re-downloads the vulnerability database.
+
+A schedule executes on the default branch, which is what makes it the right trigger:
+
+```yaml
+# .github/workflows/cache-warm.yml
+name: Cache · Trivy Database
+run-name: "Cache · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: "cache-warm-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-cache:
+    permissions:
+      contents: read
+      actions: write
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@<ref>
+    secrets: inherit
+    with:
+      enable-java-db: false
+```
+
+`enable-java-db: true` only for a JVM artifact — the Java database is roughly 900MB and
+dominates the cached tree. Vary the cron minute per repository so an organisation's
+repositories do not all warm at once.
+
+This bites hardest on the promote-only release shape (§3): that `release.yml` never calls
+`trivy-cache.yml`, so the scheduled run is the only writer in the repository.
+
 ## 8. Concurrency
 
 **Every workflow that starts itself declares a `concurrency:` block** — not just the
