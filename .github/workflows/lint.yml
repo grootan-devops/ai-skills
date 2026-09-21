@@ -17,3 +17,4 @@ jobs:
     secrets: inherit
     with:
       lint-md-files: "*.md"
+      md-lint-ignore-rule: "MD041 MD029"

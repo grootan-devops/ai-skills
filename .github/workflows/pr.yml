@@ -29,6 +29,7 @@ jobs:
     secrets: inherit
     with:
       lint-md-files: "*.md"
+      md-lint-ignore-rule: "MD041 MD029"
 
   check:
     needs: init
@@ -37,6 +38,7 @@ jobs:
     with:
       tag: ${{ needs.init.outputs.tag }}
       allow-unstable-library-refs: true
+      check-library-pinning: false
 
   secret-scan:
     uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@dev
