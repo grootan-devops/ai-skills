@@ -29,53 +29,31 @@ terraform-module audit <module_path_or_repo> [--strict]
 
 ---
 
-## 2. Core Architecture & Non-Negotiable Standards
+## 2. Where the Standards Live
 
-### 2.1. Always Latest Official/Partner Provider Versions
+The engineering standards these modules are built to are **not** duplicated here. They are
+the reference repository's, and the skill reads them at the ref each run resolves:
 
-- **Trusted Provider Tiers**: Production modules strictly consume providers in the `official`, `partner`, or `partner-premier` tiers per the Terraform Registry.
-- **Latest Version Enforcement**: When creating (`terraform-module add`) or modernizing (`terraform-module update`), the skill dynamically resolves and targets the latest available stable provider release (`version = ">= <latest>"`).
-- **No Upper Bounds in Child Modules**: Child modules declare minimum bounds only (`version = ">= 6.64.0"`), omitting artificial upper constraints (`< 7.0.0`) so consumer stacks maintain upgrade flexibility.
+| Standard | Where |
+|---|---|
+| Module contract — variables, outputs, provider config, version constraints | `terraform-modules/README.md` §4 |
+| Naming formula, length limits, truncation, governance tags and merge order | `terraform-modules/README.md` §5 |
+| Security capability taxonomy, key governance, credential handling | `terraform-modules/README.md` §6 |
+| Module `README.md` section standard | `terraform-modules/README.md` §7 |
+| SemVer release levels | `terraform-modules/README.md` §8 |
+| Test levels and the `make verify` gate | `terraform-modules/README.md` §9 |
+| Upgrade behaviour, `moved` blocks, the zero-destruction guarantee | `terraform-modules/MIGRATION.md` |
+| Per-service AWS security matrix and module catalog | `terraform-modules/docs/AWS.md` |
 
-### 2.2. Capability-Aware Security Model (No "KMS Everywhere" Fallacy)
+What the skill adds on top is judgement the library cannot record about itself: resolving
+the latest trusted provider and reading its schema, classifying a control the matrix does
+not yet cover, abstracting a brand name out of a prompt, detecting an address change before
+it ships, and emitting the test templates. `SKILL.md` §2 is the runbook for all of it.
 
-Never enforce blanket security rules where cloud APIs do not support them. The skill evaluates resources against a 6-tier capability taxonomy:
-
-| Capability Tier | Definition | Examples |
-|---|---|---|
-| **`required`** | Mandatory encryption, logging, or deletion protection. | S3, RDS, Secrets Manager (`kms_key_arn`) |
-| **`recommended`**| Production default enabled with caller opt-out override. | S3 Bucket Versioning, VPC Flow Logs |
-| **`optional`** | Advanced or niche opt-in features. | S3 Object Lock, RDS Cross-Region Replication |
-| **`provider_managed`**| Rely on cloud provider default without redundant blocks. | CloudWatch Log Group standard encryption |
-| **`not_supported`** | Cloud API lacks capability; never invent synthetic variables. | Route Table associations, Internet Gateways |
-| **`not_applicable`**| Architectural pattern does not apply. | IAM Roles, Security Group Rules |
-
-### 2.3. Strict API Contracts (Zero `lookup()` Object Abuse)
-
-- **Mandatory Attributes**: Every variable declares explicit `description` and `type` constraints.
-- **Strongly-Typed Structural Objects**: Complex objects use `optional(type, default)`. Dynamic `lookup()` on typed objects is **strictly banned**.
-- **Zero Default Credentials**: Never provide default passwords, tokens, or mock secrets in variable definitions.
-
-### 2.4. Resource-Specific Naming & Tag Governance
-
-- **Deterministic Naming**: `${var.application}-${var.environment}-${var.name}` with cloud-specific limit handling (e.g. AWS ALB 32-character maximum with deterministic MD5 hash truncation).
-- **Inverted Tag Merge Law**: Governance tags are merged **after** user-supplied tags:
-
-  ```hcl
-  tags = merge(var.tags, local.governance_tags)
-  ```
-
-  This prevents consumers from clobbering mandatory enterprise audit tags (`Application`, `Environment`, `Name`, `ManagedBy`).
-
-### 2.5. Zero-Destruction State Migrations
-
-- Any refactor that renames resources, decomposes files, or converts `count` to `for_each` **must** append `moved` blocks into `moved.tf`.
-- Historical `moved` blocks are preserved permanently to protect consumer upgrades.
-- Speculative plans must assert **0 unexpected deletions**.
-
-### 2.6. Absolute Brand & Project Neutrality
-
-- Reusable modules are 100% project-neutral. Zero internal project names, company names, or brand labels across HCL code, locals, defaults, tags, documentation, or diagrams.
+Those library sections also carry "current state" callouts recording where the shipped
+`1.0.0` modules diverge from the standard they document — tag merge order, provider upper
+bounds, name truncation. Generate to the standard; a divergence in existing code is a
+finding, not a precedent.
 
 ---
 
@@ -230,78 +208,63 @@ flowchart TD
             │
 ┌───────────▼─────────────┐
 │ Gatekeeper 4            │ ──> Compliance Audit & SemVer Sign-Off
-│ Compliance & Sign-Off   │     (Run check-module-rules.py --strict -> Final User Sign-Off)
+│ Compliance & Sign-Off   │     (check-module-rules.py --strict + make verify -> User Sign-Off)
 └─────────────────────────┘
 ```
 
 ---
 
-## 7. Multi-Cloud Security Capability Matrix
-
-The skill evaluates resource security against proven cloud capabilities:
-
-| Cloud Provider | Service Domain | CMEK KMS Encryption | Network Isolation | IMDSv2 / TLS | Deletion Protection |
-|---|---|:---:|:---:|:---:|:---:|
-| **AWS** | **S3 Buckets** | **`required`** (`kms_key_arn`) | Public Access Block | TLS 1.2+ Enforced | Versioning + MFA |
-| **AWS** | **RDS PostgreSQL** | **`required`** (`kms_key_id`) | `intra_subnet_ids` only | SSL/TLS Enforced | Enabled in `prod` |
-| **AWS** | **EKS Clusters** | **`required`** (Envelope KMS) | Private Endpoint | TLS 1.3 Control Plane | Protected Node Groups |
-| **AWS** | **ECS Tasks** | **`required`** (CloudWatch KMS) | `private_subnet_ids` | IMDSv2 Required | Service Termination Protect |
-| **AWS** | **Secrets Manager**| **`required`** (`kms_key_id`) | PrivateLink VPC Endpoint | TLS 1.2+ Enforced | Automatic Rotation |
-| **Azure** | **Storage Account**| **`required`** (Key Vault CMEK)| Private Endpoints | TLS 1.2+ Enforced | Soft Delete Enabled |
-| **Azure** | **PostgreSQL Flex**| **`required`** (Key Vault CMEK)| VNet Delegated Subnet | SSL/TLS Enforced | High Availability |
-| **GCP** | **Cloud Storage** | **`required`** (Cloud KMS) | Uniform Bucket Level | TLS 1.2+ Enforced | Retention Policies |
-| **GCP** | **Cloud SQL** | **`required`** (Cloud KMS) | Private Services Access | SSL/TLS Enforced | Deletion Protection |
-| **K8s** | **Secrets** | **`provider_managed`** | NetworkPolicy Egress | TLS Ingress Termination | SealedSecrets / Vault |
-
----
-
-## 8. Automated Tooling Engine CLI Reference
+## 7. Automated Tooling Engine CLI Reference
 
 The skill includes a suite of deterministic automation scripts in `scripts/`:
 
 ```bash
 # 1. Audit a module for P0/P1/P2 issues (compatibility, dead variables, tag clobber risks):
-python3 skills/terraform-module-builder/scripts/check-module-rules.py terraform-modules/modules/aws/security/secrets-manager
+python3 ai-skills/terraform-module-builder/scripts/check-module-rules.py terraform-modules/modules/aws/security/secrets-manager
 
 # 2. Run module audit with strict enforcement (fails on P0, P1, and P2 warnings):
-python3 skills/terraform-module-builder/scripts/check-module-rules.py terraform-modules/modules/aws/compute/ecs --strict
+python3 ai-skills/terraform-module-builder/scripts/check-module-rules.py terraform-modules/modules/aws/compute/ecs --strict
 
 # 3. Check for documentation drift in CI:
-python3 skills/terraform-module-builder/scripts/generate-module-docs.py terraform-modules/modules/aws/storage/s3 --check
+python3 ai-skills/terraform-module-builder/scripts/generate-module-docs.py terraform-modules/modules/aws/storage/s3 --check
 
 # 4. Generate or refresh module canonical 8-section README:
-python3 skills/terraform-module-builder/scripts/generate-module-docs.py terraform-modules/modules/aws/storage/s3
+python3 ai-skills/terraform-module-builder/scripts/generate-module-docs.py terraform-modules/modules/aws/storage/s3
 
 # 5. Detect breaking API changes against git baseline:
-python3 skills/terraform-module-builder/scripts/detect-migrations.py terraform-modules/modules/aws/storage/s3
+python3 ai-skills/terraform-module-builder/scripts/detect-migrations.py terraform-modules/modules/aws/storage/s3
 
 # 6. Scaffold an automated moved block into moved.tf:
-python3 skills/terraform-module-builder/scripts/detect-migrations.py terraform-modules/modules/aws/storage/s3 \
+python3 ai-skills/terraform-module-builder/scripts/detect-migrations.py terraform-modules/modules/aws/storage/s3 \
   --scaffold-move aws_s3_bucket.main aws_s3_bucket.this
+```
+
+These audit what the skill knows. The library's own gate is authoritative and checks rules
+these scripts do not — run it from the reference repository root:
+
+```bash
+make verify      # contract checks + fmt + init + validate + terraform test
+make contracts   # contract checks only; no Terraform binary required
 ```
 
 ---
 
-## 9. Directory Layout
+## 8. Directory Layout
 
 ```text
-skills/terraform-module-builder/
+ai-skills/terraform-module-builder/
 ├── README.md                           # Comprehensive skill documentation (this file)
 ├── SKILL.md                            # Main orchestrator & 3-workflow command dispatcher
 ├── assets/
 │   ├── architecture-template.svg       # Neutral multi-cloud architecture & verification diagram
 │   └── architecture-template.png       # High-resolution rendered asset
 ├── references/
-│   ├── module-api-contract.md          # Variable, output, and SemVer specifications
-│   ├── naming-standards.md             # Per-resource naming constraints & deterministic truncation
-│   ├── naming-conventions.md           # Naming conventions summary and alias
-│   ├── security-capability-matrix.md   # Multi-cloud capability-aware security matrices (AWS, Azure, GCP)
-│   ├── security-baselines.md           # Security baselines summary and alias
-│   ├── testing-strategy.md             # 7-level testing pyramid (L0 to L6) and mock test guides
-│   ├── provider-schema-guide.md        # Guide for extracting & consuming terraform providers schema -json
-│   ├── state-migration-guide.md        # Zero-destroy refactoring, moved.tf, and plan assertions
-│   ├── readme-specification.md         # Canonical 8-section README blueprint (extensible)
-│   └── reference-repo-link.md          # Ground-truth mapping to the local reference repository
+│   ├── reference-repo-link.md          # Where the library is, and what to read in it
+│   ├── provider-schema-guide.md        # Extracting & reading terraform providers schema -json
+│   ├── naming-standards.md             # Brand abstraction; naming bounds outside AWS
+│   ├── security-capability-matrix.md   # Deriving a control status; Azure/GCP starters
+│   ├── state-migration-guide.md        # Detecting an address change before it ships
+│   └── testing-strategy.md             # The test templates the skill emits
 └── scripts/
     ├── check-module-rules.py           # AST & schema-aware linter (Python 3)
     ├── generate-module-docs.py         # Introspects HCL/schema to generate/update README tables

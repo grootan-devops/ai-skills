@@ -32,88 +32,102 @@ To eliminate confusion and keep the user experience clean, all module lifecycle 
 
 ## 2. Non-Negotiable Core Engineering Protocols
 
-### 2.1. Always Use Trusted Official/Partner Providers and Latest Versions
+### 2.0. Resolve the Reference Repository First, and Read It
 
-- **Trusted Provider Tiers**: Production modules should strictly consume providers belonging to the **`official`**, **`partner`**, or **`partner-premier`** tiers per the [Terraform Registry](https://registry.terraform.io/browse/providers?tier=official%2Cpartner%2Cpartner-premier).
-- **Community Provider Governance**:
-  - **Reputable & Well-Maintained Community Providers**: Established community providers with high adoption and active maintenance (e.g. `kreuzwerker/docker`, `cyrilgdn/postgresql`, `paultyng/git`) are flagged as advisory notices (`P2`) for visibility, but allowed without blocking changes.
-  - **Untrusted / Obscure Community Providers**: Flagged as **`P1` warnings**, with automatic search and recommendation for an official, partner, or verified community alternative.
-- **Latest Version Enforcement**: When creating (`terraform-module add`) or modernizing (`terraform-module update`), the skill **always resolves and targets the latest stable release** of the target cloud provider.
-- In `versions.tf`, declare the latest provider version as the minimum constraint:
+`terraform-modules` is the source of truth for every standard these modules are built to.
+Before designing an API, naming a resource, choosing a security control, writing a README,
+or classifying a release, resolve the repository per
+[reference-repo-link.md](./references/reference-repo-link.md) and read the relevant section
+of its `README.md` at the ref this run resolved. Upgrade behaviour is in its `MIGRATION.md`.
 
-  ```hcl
-  terraform {
-    required_version = ">= 1.5.0"
+This skill deliberately does not carry a second copy of those standards. When a rule below
+is the library's, the pointer *is* the rule — follow the link rather than working from
+memory, and if the library and this skill disagree, the library wins and the disagreement is
+worth reporting.
 
-    required_providers {
-      aws = {
-        source  = "hashicorp/aws"
-        version = ">= 6.64.0" # Always pin to the latest verified release
-      }
-    }
-  }
-  ```
+That repository's `README.md` also carries "current state" callouts recording where the
+shipped modules diverge from the standard they document. Generate to the standard; treat a
+divergence in existing code as a finding, not a precedent.
 
-- Child modules declare minimum bounds only (`version = ">= <latest_version>"`), omitting artificial upper constraints (`< 7.0.0`) so consumer stacks maintain upgrade flexibility.
-- **Module Call Governance**: Any child module calls (`module "..."`) using the public registry must declare an explicit `version` constraint and stay up to date with the latest release.
+### 2.1. Trusted Providers, Latest Versions
 
-### 2.2. Absolute Project & Brand Neutrality
+- **Trusted tiers**: consume providers from the **`official`**, **`partner`**, or
+  **`partner-premier`** tiers per the
+  [Terraform Registry](https://registry.terraform.io/browse/providers?tier=official%2Cpartner%2Cpartner-premier).
+- **Community providers**: an established, actively maintained one (`kreuzwerker/docker`,
+  `cyrilgdn/postgresql`, `paultyng/git`) is a `P2` advisory — visible, not blocking. An
+  obscure or unmaintained one is a `P1`, with a search for an official or partner
+  alternative.
+- **Latest version**: `add` and `update` both resolve the latest stable release of the
+  target provider from the registry and target it. Never carry a version forward from
+  memory or from a sibling module.
+- **Registry module calls**: any `module "..."` sourced from the public registry declares an
+  explicit `version` and tracks the latest release.
 
-- Reusable modules must remain 100% project-neutral.
-- **Zero Project Names**: Never include internal project names, company names, or brand labels (e.g. `Plainr`, `takween`, `xyz`) in resource names, locals, defaults, tags, documentation, or diagrams.
-- Parameterize naming generically: `${var.application}-${var.environment}-${var.name}`.
-- See: [naming-standards.md](./references/naming-standards.md).
+How that version is then written into `versions.tf` — minimum bound only, no artificial
+upper bound, and how `required_version` is derived — is the library's contract: `README.md`
+§4.4 *Version constraints*.
+
+### 2.2. Project & Brand Neutrality
+
+Reusable modules are 100% project-neutral: no project, company, or customer label in
+resource names, locals, defaults, tags, documentation, or diagrams. Everything flows through
+`var.application`, `var.environment`, and `var.name`.
+
+Lifting a brand name out of the *prompt* that asked for the module is the part the library
+cannot do for itself — see
+[naming-standards.md §1](./references/naming-standards.md).
 
 ### 2.3. Provider Schema & Registry Docs-First Pipeline
 
-Never generate modules from prose documentation alone. Execute:
+Never generate a module from prose documentation alone. Execute:
 
 ```bash
 terraform -chdir=<module_dir> init -backend=false
 terraform -chdir=<module_dir> providers schema -json
 ```
 
-- Compare schema JSON with official Registry documentation for the latest provider version.
-- Inventory capabilities into:
-  - **Tier 1 (Mandatory Security & CMEK)**: Customer-managed keys, audit logging, TLS 1.2+, deletion protection.
-  - **Tier 2 (Production Best Practices)**: High-availability defaults, strongly-typed objects.
-  - **Tier 3 (Provider Inherited)**: Omit redundant provider-level defaults.
-  - **Tier 4 (Advanced/Edge Features)**: Conditional blocks or commented references.
-- See: [provider-schema-guide.md](./references/provider-schema-guide.md).
+Compare the schema JSON against the Registry documentation for the resolved provider
+version, then inventory the capabilities:
 
-### 2.4. Capability-Aware Security Model
+- **Tier 1 (Mandatory security & CMEK)**: customer-managed keys, audit logging, TLS 1.2+,
+  deletion protection.
+- **Tier 2 (Production best practice)**: high-availability defaults, strongly-typed objects.
+- **Tier 3 (Provider inherited)**: omit — a redundant block dates the module against
+  provider defaults.
+- **Tier 4 (Advanced/edge)**: conditional blocks or commented references.
 
-Do **not** enforce blanket "KMS everywhere" rules. Match each resource to its real cloud capabilities:
+See: [provider-schema-guide.md](./references/provider-schema-guide.md).
 
-- `required`: Mandatory encryption, logging, or deletion protection (S3, RDS, Secrets Manager).
-- `recommended`: Production defaults with caller override.
-- `optional`: Niche or advanced opt-in features.
-- `provider_managed`: Rely on cloud provider default without redundant blocks.
-- `not_supported` / `not_applicable`: Never invent synthetic parameters for non-existent controls (IAM, Route Tables).
-- See: [security-capability-matrix.md](./references/security-capability-matrix.md).
+### 2.4. Capability-Aware Security
 
-### 2.5. Variable API Design Contract
+There is no blanket "KMS everywhere" rule. Each control on each resource resolves to one of
+six statuses, and the library defines them: `README.md` §6 *Security Baselines*, with the
+resolved AWS matrix in `docs/AWS.md`.
 
-- **Mandatory**: `description`, `type` (explicit primitives, collections, or strongly-typed structural objects).
-- **Conditional**: `default` (optional variables only), `sensitive` (secrets only), `nullable` (when null is invalid), `ephemeral` (temporary inputs only), `validation` (genuine domain restrictions).
-- **Zero Default Credentials**: Never provide default passwords, tokens, or mock secrets.
-- **Banned**: `lookup()` used to emulate weak object typing. Permitted only on open-ended dynamic maps.
-- See: [module-api-contract.md](./references/module-api-contract.md).
+For a resource the matrix does not cover — including any Azure or GCP resource, since the
+library is AWS-only — derive the status from the schema:
+[security-capability-matrix.md](./references/security-capability-matrix.md).
 
-### 2.6. Deliberate Consumer Outputs
+### 2.5. Public API Design
 
-- Export IDs, ARNs, endpoints, and structured maps.
-- Do **not** output full raw provider resource objects (`value = aws_resource.this`) by default.
-- Set `sensitive = true` **only** when the output contains sensitive data.
+The variable and output contract — mandatory attributes, strongly-typed `optional()`
+objects, the `lookup()` ban, zero default credentials, curated outputs, and the rule against
+exporting a whole resource — is the library's: `README.md` §4 *Module Contract*. Design
+against it directly.
 
-### 2.7. State Migration & Zero-Destroy Refactoring
+### 2.6. State Migration & Zero-Destroy Refactoring
 
-- Any refactor altering resource addresses, converting `count` to `for_each`, or renaming resources **must** append `moved` blocks to `moved.tf`.
-- Historical `moved` blocks are preserved permanently.
-- Pre-refactor plans must assert zero unexpected `delete` actions.
-- See: [state-migration-guide.md](./references/state-migration-guide.md).
+Any refactor that changes a resource address, converts `count` to `for_each`, or renames a
+resource ships a `moved` block. The guarantee, the block shapes, the permanent-retention
+rule, and the plan assertion that proves it are in the library's `MIGRATION.md`; detecting
+the change before it ships is
+[state-migration-guide.md](./references/state-migration-guide.md).
+
+Any change that needs an entry in `MIGRATION.md` gets one in the same change, not later.
 
 ---
+
 
 ## 3. Detailed Workflow Execution Procedures
 
@@ -125,7 +139,7 @@ Executed when provisioning a new module from scratch. It automatically orchestra
    - Query latest provider version and extract `terraform providers schema -json`.
    - Read Registry docs for `<provider>/<resource_type>`.
 2. **Design Public API & Security**:
-   - Classify controls via `security-capability-matrix.md` (CMEK, TLS, deletion protection).
+   - Classify controls against the library's `README.md` §6 and `docs/AWS.md`.
    - Build strongly-typed `variables.tf` (zero secrets in defaults, zero `lookup()` abuse).
    - Design stable consumer `outputs.tf`.
 3. **Scaffold Decomposed File Architecture**:
@@ -135,12 +149,15 @@ Executed when provisioning a new module from scratch. It automatically orchestra
    - `versions.tf`: Pins latest provider version (`version = ">= <latest>"`) and derived core version.
    - `data.tf`: Platform context queries **only** if consumed by expressions.
 4. **Generate Documentation (`add/update readme`)**:
-   - Execute `python3 scripts/generate-module-docs.py <module_dir>` to render the canonical 8-section `README.md`.
+   - Execute `python3 scripts/generate-module-docs.py <module_dir>` to render the module `README.md` to the standard in the library's `README.md` §7. The script generates the Requirements, Inputs, and Outputs tables; the Architecture, Guardrails, and Usage sections are written by hand.
 5. **Scaffold Tests (`add/update test`)**:
    - Scaffold `tests/unit.tftest.hcl` with `mock_provider` for plan assertions and negative validation tests.
 6. **Execute Verification & Security Gate (`validate module` & `audit security`)**:
-   - Run `terraform fmt` and `terraform validate`.
    - Run `python3 scripts/check-module-rules.py <module_dir> --strict`.
+   - Run the library's own gate from the repository root: `make verify`. It is the
+     authority on whether a module is valid, and it checks contract rules this skill does
+     not (required governance variables, README source pinning, no relative sources in any
+     Markdown).
    - Emit Release Readiness Summary.
 
 ---
@@ -166,7 +183,9 @@ Executed when modernizing, upgrading, or refactoring an existing module. It auto
 5. **Update Tests (`add/update test`)**:
    - Updates `tests/*.tftest.hcl` and Terratest fixtures to reflect updated inputs.
 6. **Validate & Emit SemVer Change Report**:
-   - Executes `check-module-rules.py` and classifies change impact (PATCH, MINOR, or MAJOR).
+   - Executes `check-module-rules.py` and `make verify`, and classifies change impact
+     against the library's `README.md` §8 (PATCH, MINOR, or MAJOR).
+   - Writes the `MIGRATION.md` entry when the classification requires one.
 
 ---
 

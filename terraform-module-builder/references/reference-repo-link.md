@@ -1,44 +1,47 @@
-# Reference Repository Mapping & Ground Truth
+# The Reference Repository Is the Source of Truth
 
-This document links the `terraform-module-builder` skill to the reference repository that holds
-the ground-truth modules.
+`terraform-modules` holds the ground-truth modules and the standards they are built to. The
+skill does not carry its own copy of those standards: the contract, the naming and tagging
+rules, the security baselines, the documentation standard, the release levels, and the test
+gate all live in that repository's `README.md`, and the upgrade contract lives in its
+`MIGRATION.md`. Resolve the repository first, then read from it — a rule quoted from memory
+is a rule that has already drifted.
 
-## Locating the reference repository
+## Locating it
 
-The repository is supplied by the operator; the skill hardcodes no path. Resolve it in this
-order, and stop at the first that exists:
+The operator supplies the repository; the skill hardcodes no path. Resolve in this order and
+stop at the first that exists:
 
 1. `$TERRAFORM_MODULES_REPO`, if set.
 2. A `terraform-modules/` checkout beside the directory this skill was installed into.
-3. Ask the user for the path. Never guess, and never carry on without it — the module catalog is
-   the ground truth for existing patterns.
+3. Ask the user for the path.
 
-Once resolved, two paths matter:
+Never guess, and never carry on without it.
 
-| What | Path within the repository |
+## What to read, and when
+
+| Before you… | Read |
 |---|---|
-| Module catalog | `modules/` |
-| Catalog documentation | `docs/AWS.md` (and the sibling per-provider docs) |
+| design any public API | `README.md` §4 *Module Contract* |
+| name a resource or emit a tag | `README.md` §5 *Naming & Tagging Standards* |
+| choose a security control | `README.md` §6 *Security Baselines*, then `docs/AWS.md` |
+| write or refresh a module README | `README.md` §7 *Module Documentation Standard* |
+| classify a change or cut a release | `README.md` §8 *Versioning & Release Contract* |
+| change a resource address | `MIGRATION.md` |
+| claim a module is verified | `README.md` §9, and run `make verify` |
 
-## Module Layout
+The module catalog is `modules/`, partitioned by provider and domain; `docs/AWS.md` carries
+the per-module catalog with its compliance baseline. Both are listed in the repository's own
+`README.md` §1 — read the layout there rather than from a copy here, which is exactly the
+kind of list that goes stale when a module is added.
 
-Modules in the reference repository are partitioned by provider and domain under `modules/`:
+## Reading existing modules for patterns
 
-```text
-modules/
-└── aws/
-    ├── compute/       # batch, ecs, eks, lambda
-    ├── database/      # dynamodb, elasticache/valkey, rds/postgres, rds/proxy
-    ├── integration/   # api-gateway, eventbridge, sqs, step-functions
-    ├── network/       # alb, cloudfront, vpc, waf
-    ├── security/      # cognito, kms, secrets-manager
-    └── storage/       # amplify, efs, s3
-```
+`README.md` §4–§9 contain "current state" callouts recording where the shipped modules
+diverge from the standard they document — tag merge order, provider upper bounds, name
+truncation. Those are live: a module is evidence of what the library does, not proof of what
+it should do. When the two disagree, the standard wins and the divergence is a finding.
 
-## Architectural Guidelines
-
-When inspecting existing modules for code patterns:
-
-1. Observe file decomposition (`<service>.tf`, `security.tf`, `variables.tf`, `outputs.tf`, `locals.tf`, `data.tf`, `versions.tf`).
-2. Verify patterns against official Terraform documentation and `terraform providers schema -json` rather than assuming local code is 100% bug-free.
-3. Observe known remediation requirements documented in `references/state-migration-guide.md` and `references/security-capability-matrix.md`.
+Otherwise, observe file decomposition (`<service>.tf`, `security.tf`, `variables.tf`,
+`outputs.tf`, `locals.tf`, `data.tf`, `versions.tf`), and verify every pattern against
+`terraform providers schema -json` before reusing it.

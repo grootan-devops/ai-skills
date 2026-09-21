@@ -1,92 +1,43 @@
-# Naming & Tagging Standards Specification
+# Naming, Tagging & Neutrality — Authoring Rules
 
-This document defines the naming conventions, length constraints, deterministic truncation algorithms, and tagging governance applied across all modules.
+The naming formula, the AWS length limits, the deterministic truncation algorithm, the
+reserved governance tags and their merge precedence are the **library's** contract. Read
+them in the reference repository's `README.md`, §5 *Naming & Tagging Standards*, at the ref
+this run resolved — and note the "current state" callouts there, which record where the
+shipped modules diverge from the standard. Do not restate that section here; a second copy
+drifts the moment the library changes.
 
----
-
-## 1. Deterministic Naming Formula
-
-All modules implement standard resource naming via `locals.tf`:
-
-```hcl
-locals {
-  rendered_name = var.name != null && var.name != "" ? "${var.application}-${var.environment}-${var.name}" : "${var.application}-${var.environment}"
-}
-```
-
-### 1.1. Absolute Project & Brand Neutrality
-
-- **No Hardcoded Project Names**: No project names, company names, or internal brand labels (e.g., `Plainr`, `takween`, `xyz`, customer identifiers) may ever appear in resource names, locals, defaults, tags, or documentation.
-- **Dynamic Parameterization**: All naming must flow through `var.application`, `var.environment`, and `var.name`. If a developer mentions an internal brand in a prompt, the skill must abstract it into generic variables.
+What follows is what the skill must do that the library cannot state for itself.
 
 ---
 
-## 2. Cloud-Specific Naming Bounds & Truncation
+## 1. Abstracting Brand Names Out of a Prompt
 
-Different cloud resources enforce strict length and character set limits. Modules must never apply blind string concatenation or naive truncation that causes naming collisions.
+The library forbids project, company, and customer labels in module code. That covers the
+artifact. It does not cover the request that produced it.
 
-### 2.1. Provider Resource Constraints Matrix
+When a user says *"build the Plainr document bucket"*, the module is never `plainr-docs`.
+Lift every identifier in the prompt into `var.application`, `var.environment`, and
+`var.name`, and say so in one line rather than silently renaming — the user needs to know
+which variable now carries the name they used.
 
-| Provider | Resource Type | Length Limit | Valid Characters | Renaming Behavior | Collision Mitigation Strategy |
-|---|---|:---:|---|:---:|---|
-| **AWS** | `aws_lb` (ALB/NLB) | 1-32 chars | `^[a-zA-Z0-9-]+$` (no leading/trailing hyphens) | Destructive Recreate | Truncate prefix to 27 chars + `-` + 4-char MD5 hash of full name. |
-| **AWS** | `aws_lb_target_group` | 1-32 chars | `^[a-zA-Z0-9-]+$` | Destructive Recreate | Truncate prefix to 27 chars + `-` + 4-char MD5 hash. |
-| **AWS** | `aws_s3_bucket` | 3-63 chars | Lowercase letters, numbers, hyphens, periods | Destructive Recreate | Global namespace: allow `bucket_name_override` or append deterministic account/region hash. |
-| **AWS** | `aws_iam_role` | 1-64 chars | `^[a-zA-Z0-9+=,.@_-]+$` | Destructive Recreate | Truncate prefix to 58 chars + 5-char hash. |
-| **AWS** | `aws_db_instance` | 1-63 chars | Lowercase letters, numbers, hyphens | Destructive Recreate | Truncate prefix to 57 chars + 5-char hash. |
-| **AWS** | `aws_kms_key` (Alias) | 1-256 chars | `^[a-zA-Z0-9:/_-]+$` (prefixed with `alias/`) | Non-destructive | Native alias naming without truncation. |
-| **Azure**| `azurerm_storage_account` | 3-24 chars | Lowercase alphanumeric only (no hyphens) | Destructive Recreate | Strip hyphens, lowercase, truncate to 18 chars + 6-char hash. |
-| **Azure**| `azurerm_virtual_network` | 2-64 chars | Alphanumeric, underscores, hyphens, periods | Destructive Recreate | Truncate prefix to 58 chars + 5-char hash. |
-| **GCP**  | `google_compute_network` | 1-63 chars | Lowercase letters, numbers, hyphens | Destructive Recreate | Truncate prefix to 57 chars + 5-char hash. |
-
-### 2.2. Deterministic Truncation Algorithm
-
-When a resource name exceeds its cloud length limit, the module must apply deterministic truncation preserving a human-readable prefix while guaranteeing uniqueness via a stable hash:
-
-```hcl
-locals {
-  # Example for 32-character ALB limit:
-  alb_raw_name       = local.rendered_name
-  alb_name_hash      = substr(md5(local.alb_raw_name), 0, 4)
-  alb_truncated_name = length(local.alb_raw_name) > 32 ? "${substr(local.alb_raw_name, 0, 27)}-${local.alb_name_hash}" : local.alb_raw_name
-}
-```
+This applies to resource names, locals, defaults, tag values, descriptions, README prose,
+and diagram labels alike. `check-module-rules.py` catches the known brand terms; it cannot
+catch a customer name it has never seen.
 
 ---
 
-## 3. Tagging Governance & Precedence Contract
+## 2. Naming Bounds Outside AWS
 
-### 3.1. Reserved Governance Tags
+The library is AWS-only, so its README covers AWS resources only. When generating for
+another cloud, the same rule applies — truncate to `limit - (hash + 1)` characters, append a
+hyphen and a stable hash of the *full* name — against these bounds:
 
-The following standard tags are reserved for organizational compliance, cost allocation (FinOps), and auditing:
+| Provider | Resource | Limit | Valid characters | Mitigation |
+|---|---|:---:|---|---|
+| Azure | `azurerm_storage_account` | 3–24 | lowercase alphanumeric only, no hyphens | Strip hyphens, lowercase, truncate to 18 + 6-char hash |
+| Azure | `azurerm_virtual_network` | 2–64 | alphanumeric, `_`, `-`, `.` | Truncate to 58 + 5-char hash |
+| GCP | `google_compute_network` | 1–63 | lowercase, digits, hyphen | Truncate to 57 + 5-char hash |
 
-- `Application`: Product or system name (`var.application`).
-- `Environment`: Target deployment tier (`var.environment`, validated via regex `^[a-z0-9-]+$`).
-- `Name`: Resolved resource identifier (`local.rendered_name` or sub-resource name).
-- `ManagedBy`: Always hardcoded to `"Terraform"`.
-
-### 3.2. Merge Precedence
-
-To prevent callers from accidentally or maliciously overriding reserved governance tags, **consumer tags are merged first and reserved tags are merged last**:
-
-```hcl
-locals {
-  governance_tags = {
-    Application = var.application
-    Environment = var.environment
-    Name        = local.rendered_name
-    ManagedBy   = "Terraform"
-  }
-
-  # Consumer tags can add metadata, but CANNOT clobber governance tags:
-  tags = merge(var.tags, local.governance_tags)
-}
-```
-
-If a specific sub-resource has a distinct role (e.g. public vs private subnet), append the sub-resource name to the base tags:
-
-```hcl
-tags = merge(local.tags, { Name = "${local.rendered_name}-public-${each.key}" })
-```
-
-Do **not** force tags onto cloud resources that do not support tagging in the provider schema.
+Verify the limit against the provider schema before relying on a row here; these are a
+starting point, not an authority.

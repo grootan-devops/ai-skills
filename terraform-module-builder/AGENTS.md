@@ -14,14 +14,25 @@ generates decomposed HCL and a canonical 8-section `README.md`, scaffolds native
 suites, scaffolds `moved.tf` blocks for zero-destroy state migrations, and audits against the
 security baselines.
 
+## Source of truth
+
+The engineering standards are **not** in this skill. They live in the `terraform-modules`
+reference repository — its `README.md` (module contract, naming and tagging, security
+baselines, documentation standard, release levels, test gate) and its `MIGRATION.md`
+(upgrade behaviour). Resolve that repository per
+[`references/reference-repo-link.md`](./references/reference-repo-link.md) and read it;
+this skill holds only what the library cannot state for itself.
+
 ## Layout
 
 ```text
 SKILL.md                                  the runbook — start here
-references/  module-api-contract, naming-conventions, naming-standards,
-             provider-schema-guide, readme-specification, reference-repo-link,
-             security-baselines, security-capability-matrix, state-migration-guide,
-             testing-strategy
+references/  reference-repo-link          where the library is, and what to read in it
+             provider-schema-guide        extracting and reading `providers schema -json`
+             naming-standards             brand abstraction; naming bounds outside AWS
+             security-capability-matrix   deriving a control status; Azure/GCP starters
+             state-migration-guide        detecting an address change before it ships
+             testing-strategy             the test templates the skill emits
 scripts/     check-module-rules.py, detect-migrations.py, generate-module-docs.py
 assets/      architecture-template.svg, architecture-template.png
 ```
