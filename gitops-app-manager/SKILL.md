@@ -19,7 +19,7 @@ An industrial-grade platform engineering skill that automates the onboarding, sc
 All GitOps operations are driven through the enterprise **`gitops`** command suite:
 
 | # | Command | Mandatory Arguments | Unified Execution Pipeline |
-|:---:|---|---|---|
+| :---: | --- | --- | --- |
 | **1** | `gitops onboard helm` (or `gitops add helm`) | `<gitops_repo>` `<branch>` `<service_name>` `[chart_repo]` | **Helm App Onboarding**: Branch similarity validation $\rightarrow$ repo introspection $\rightarrow$ registers `.apps.<service>` with `enabled: false` $\rightarrow$ scaffolds `values/<service>.yaml` (128Mi memory, `/dev` image suffix, auto-computed route) $\rightarrow$ derives ArgoCD root and child apps $\rightarrow$ generates `.gitlab-ci.yml` delivery block $\rightarrow$ user review gate $\rightarrow$ enables and syncs. |
 | **2** | `gitops onboard manifest` (or `gitops add manifest`) | `<gitops_repo>` `<branch>` `<service_name>` `<image>` | **Extras Manifest Onboarding**: Branch similarity validation $\rightarrow$ scaffolds `extras/manifests/<service>/deployment.yaml` (128Mi memory, non-root) $\rightarrow$ computes single ArgoCD extras app `{chartBase}-extras-{env}-{service}` $\rightarrow$ generates `.gitlab-ci.yml` delivery block $\rightarrow$ user review gate $\rightarrow$ syncs app. |
 | **3** | `gitops onboard komodo` (or `gitops add komodo`) | `<gitops_repo>` `<branch>` `<service_name>` `<image>` | **Komodo Compose Onboarding**: Branch similarity validation $\rightarrow$ auto-computes stack `{product}-{env}` $\rightarrow$ appends service to `docker-compose.yml` $\rightarrow$ generates `.gitlab-ci.yml` delivery block with YQ path $\rightarrow$ user review gate $\rightarrow$ triggers Komodo stack redeploy. |
@@ -114,7 +114,7 @@ All GitOps operations are driven through the enterprise **`gitops`** command sui
    Present the auto-computed values to the user and request explicit confirmation before writing any changes:
 
    | Setting | Auto-Computed Value | User Confirmation Required |
-   |---|---|---|
+   | --- | --- | --- |
    | **GitOps Repo** | `<gitops_repo_url>` | Confirmed |
    | **GitOps Branch** | `<product>/<env>` | Verified in remote |
    | **Service Identity** | `<service_name>` | Target microservice |

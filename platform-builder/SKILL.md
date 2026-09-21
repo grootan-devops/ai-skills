@@ -26,7 +26,7 @@ Load the core reference, then the addendum for the **detected** platform. Never 
 platforms' references; they will contradict each other by design.
 
 | Load | Before you… |
-|---|---|
+| --- | --- |
 | `core/references/security-core.md` | Write or audit a chart, Dockerfile, or credential handling. **Required for every onboard and audit.** |
 | `core/references/language-stacks-core.md` | Scaffold build/test jobs for any stack. |
 | `core/references/helm-chart-standard.md` *(shared)* | Create or modify a chart, `values.yaml`, or `values.schema.json`. §2.1 is required before naming any container, sidecar, init container or job container. |
@@ -49,7 +49,7 @@ The skill carries **no copy** of what these do. Read each library's own `README.
 `MIGRATION.md` at the resolved version, **every onboard, update, and audit**.
 
 | Library | Provides |
-|---|---|
+| --- | --- |
 | `gitlab-ci-library` | GitLab CI template modules — `WORKFLOW` options, job/stage tables, publishing & auth |
 | `github-ci-library` | GitHub reusable workflows — module catalog, scenario files, execution matrix |
 | `helm-tpl-library` | the `tpllib` Helm library chart — values contract, `mounts:` schema, template helpers |
@@ -74,7 +74,7 @@ A source is a local path, a git URL with an optional `@<ref>`, or the web URL yo
 browser address bar:
 
 | Source | Means |
-|---|---|
+| --- | --- |
 | `/abs/path/github-ci-library` · `~/lib/x` · `../x` · `file:///srv/x` | local working copy, **read in place** |
 | `https://github.com/org/repo` | git, default branch |
 | `https://github.com/org/repo/tree/dev` | git at a branch, web URL form |
@@ -91,7 +91,7 @@ how `repo.git@feature/x` works. `#` is an alternative separator.
 Precedence — highest first, and per library, so one may be local while another is pinned:
 
 | # | Layer | Use for |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `--<library-name> SOURCE`, or `--lib NAME=SOURCE` | this run only — testing an unreleased library |
 | 2 | `$PLATFORM_BUILDER_LIB_<NAME>` (`-` → `_`, upper-cased) | a whole shell session or CI job |
 | 3 | `<repo>/.platform-builder.json` → `{"libraries": {...}}` | the repo's own pin, committed with it |
@@ -126,7 +126,7 @@ pinned to a ref the library has never published fails to resolve, and the error 
 caller, not the mistake.
 
 | Resolved as | Write |
-|---|---|
+| --- | --- |
 | a tag — `@1.0.0` | that tag |
 | a branch — `@dev` | that branch |
 | a commit | that SHA |
@@ -150,7 +150,7 @@ Every fact has one home. When two places disagree, the one listed here wins — 
 by copying.
 
 | Fact | Single source |
-|---|---|
+| --- | --- |
 | Module/workflow → option mapping | `platforms/<platform>/workflow-map.json` |
 | Helm chart structure, values contract, schema | `core/references/helm-chart-standard.md` |
 | Stack requirements (what and why) | `core/references/language-stacks-core.md` |
@@ -191,7 +191,7 @@ python3 core/scripts/platform.py [repo]
 Signals, ranked by how directly they express *intent* rather than hosting:
 
 | Rank | Signal | Confidence |
-|---|---|---|
+| --- | --- | --- |
 | 1 | caller passed `--platform` | explicit |
 | 2 | `.gitlab-ci.yml` or `.github/workflows/` committed | certain |
 | 3 | `$GITLAB_CI` / `$GITHUB_ACTIONS` in the environment | certain |
@@ -212,7 +212,7 @@ where a repo is *hosted* is not always where its CI should *run*.
 ## 2. Commands
 
 | Command | Purpose |
-|---|---|
+| --- | --- |
 | `platform onboard [repo]` | Scaffold CI, Dockerfile, and chart for a repo that has none. |
 | `platform update [repo]` | Migrate to current standards, applying only what is required. |
 | `platform ship [repo] <env>` | Add deployment wiring for a target environment. |
@@ -238,7 +238,7 @@ Both libraries ship the jobs; neither runs without being asked for. A scaffold t
 them is not "no tests yet", it is a pipeline that builds an artifact nobody executed.
 
 | Present | Ask | Turns on |
-|---|---|---|
+| --- | --- | --- |
 | a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
 | a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `test`). Runs `helm unittest` against a mock consumer chart. |
 
@@ -332,7 +332,7 @@ teaches people to ignore it.
 Audit every edge for **both** directions of waste:
 
 | Symptom | Fix |
-|---|---|
+| --- | --- |
 | Work that runs when it cannot succeed | add the missing `needs:` edge |
 | Work that waits when it needn't | remove the edge — a job that reads none of an upstream's artifacts must not wait on it |
 | A ~10s job blocked behind a whole stage | declare `needs:` instead of relying on stage order |

@@ -47,7 +47,7 @@ a single mega-workflow unreadable. The library's answer is one file per scenario
 clean graph and a specific `run-name`.
 
 | Scenario | Trigger | Calls |
-|---|---|---|
+| --- | --- | --- |
 | `pr.yml` | `pull_request: [master]` | init + lint + *-build + docker + chart + scan + check |
 | `release.yml` | `push: [master]` | init + docker/chart promote + release + notify |
 | `build.yml` · `check.yml` · `lint.yml` | dispatch | the matching single concern |
@@ -101,7 +101,7 @@ A reference is a **release tag or a commit SHA**. Nothing else, and the owner do
 change the answer.
 
 | Reference | Verdict |
-|---|---|
+| --- | --- |
 | `@1.0.0`, `@v7`, `@v2.1.0-rc.1` | fine — a release tag |
 | `@a1b2c3…` (40 hex) | fine — an exact tree |
 | `@dev`, `@latest`, any other alias | **P1** — pin to a SHA |
@@ -258,7 +258,7 @@ concurrency:
 `cancel-in-progress` is the decision, not the group:
 
 | Workflow | `cancel-in-progress` |
-|---|---|
+| --- | --- |
 | Verification — PR, lint, scan, audit | `true` — a superseded run is answering a stale question |
 | Anything that publishes or provisions — release, deploy, terraform apply | `false`, and a group that does not collide with verification, e.g. `release-${{ github.ref }}` |
 

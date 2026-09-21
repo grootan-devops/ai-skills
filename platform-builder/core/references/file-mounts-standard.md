@@ -33,7 +33,7 @@ Not baked into the image, and not written as a hand-rolled ConfigMap template in
 The top-level key **is** the decision:
 
 | Use | When the file content… |
-|---|---|
+| --- | --- |
 | `mounts.configmap` | is safe in plaintext in git and readable by anyone with cluster read — routing rules, log format, feature flags, tuning |
 | `mounts.secret` | contains or derives a credential, private key, certificate, token, or connection string with a password |
 
@@ -117,7 +117,7 @@ missing config file usually surfaces as a runtime crash loop rather than a faile
 Signals, by stack:
 
 | Stack | Look for |
-|---|---|
+| --- | --- |
 | Frontend SPA | `nginx.conf`, `default.conf`, `httpd.conf` |
 | Java / Spring | `application.properties`, `application.yml`, `logback.xml` |
 | .NET | `appsettings.json`, `appsettings.<env>.json` |
@@ -134,7 +134,7 @@ and which values it should derive.** Do not infer sensitivity silently.
 ## 6. Anti-patterns
 
 | Anti-pattern | Why it fails |
-|---|---|
+| --- | --- |
 | `COPY nginx.conf` in the Dockerfile | Cannot vary per environment; a config change needs an image rebuild |
 | A hand-written ConfigMap in `chart/templates/` | Duplicates what the library generates; drifts from it |
 | A credential in `mounts.configmap` | Readable by anyone with namespace read |

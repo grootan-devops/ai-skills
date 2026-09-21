@@ -44,7 +44,7 @@ starting point:
 ### Azure (`azurerm`)
 
 | Resource | CMEK at rest | TLS ≥ 1.2 | Audit logging | Deletion protection | Public boundary |
-|---|:---:|:---:|:---:|:---:|:---:|
+| --- | :---: | :---: | :---: | :---: | :---: |
 | `azurerm_storage_account` | `required` (Key Vault) | `required` (`min_tls_version`) | `required` (diagnostics) | `recommended` (management lock) | `required` (`public_network_access_enabled=false`) |
 | `azurerm_postgresql_flexible_server` | `required` (Key Vault) | `required` (SSL enforcement) | `required` (audit logs) | `not_supported` (use a resource lock) | `required` (VNet delegation) |
 | `azurerm_key_vault` | `required` (soft delete + purge protection) | `required` | `required` (diagnostics) | `required` (`purge_protection_enabled=true`) | `required` |
@@ -53,7 +53,7 @@ starting point:
 ### GCP (`google`)
 
 | Resource | CMEK at rest | TLS ≥ 1.2 | Audit logging | Deletion protection | Public boundary |
-|---|:---:|:---:|:---:|:---:|:---:|
+| --- | :---: | :---: | :---: | :---: | :---: |
 | `google_storage_bucket` | `required` (Cloud KMS) | `provider_managed` | `recommended` | `recommended` (retention) | `required` (`uniform_bucket_level_access`) |
 | `google_sql_database_instance` | `required` (Cloud KMS) | `required` (`require_ssl`) | `required` | `required` (`deletion_protection`) | `required` (`ipv4_enabled=false`) |
 | `google_compute_network` | `not_applicable` | `not_applicable` | `required` (flow logs) | `not_applicable` | `required` (Private Google Access) |

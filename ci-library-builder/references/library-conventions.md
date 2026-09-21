@@ -68,7 +68,7 @@ Least privilege cuts both ways: an over-privileged job is a finding, and so is a
 under-privileged one. Deriving the scope from what the job *does*:
 
 | The job… | Needs |
-|---|---|
+| --- | --- |
 | Checks out code, lints, builds, scans | `contents: read` |
 | Pushes an image or chart to the registry | `contents: read` + `packages: write` |
 | Publishes a JUnit report as a Check | `contents: read` + `checks: write` |
@@ -114,7 +114,7 @@ The full set a ported library should need. Anything outside this list needs a st
 in the port report — see SKILL.md §1.6.
 
 | Action | Tier | Why it earns a place |
-|---|---|---|
+| --- | --- | --- |
 | `actions/checkout` | first-party | Nothing else fetches the repository. |
 | `actions/cache/restore` · `actions/cache/save` | first-party | Split restore/save is how the dependency job owns the write and every other job reads. |
 | `actions/upload-artifact` · `actions/download-artifact` | first-party | The artifact API is not reachable from a `run:` step. |

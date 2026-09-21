@@ -16,7 +16,7 @@ Work outward from that question rather than down a checklist: **for each workflo
 it to run, and what does it hold while running?**
 
 | Trigger | Attacker can trigger? | Secrets available? | Token |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pull_request` (fork) | Yes | **No** | read-only |
 | `pull_request_target` | Yes | **Yes** | read/write |
 | `issue_comment`, `issues` | Yes | **Yes** | read/write |

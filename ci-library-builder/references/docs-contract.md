@@ -11,7 +11,7 @@ Mirror the source library's structure so a reader can move between platforms. Re
 sections:
 
 | Section | Must contain |
-|---|---|
+| --- | --- |
 | Quick Start | Two complete, copy-pasteable workflow files (PR + release) |
 | Pipeline Phases & Lifecycle | The phase table, mapping each GitLab stage to the workflow · job that now owns it |
 | Execution Model & Trigger Strategy | The two-tier release model, the scenario-workflow table, an execution matrix |

@@ -5,7 +5,7 @@ set of semantics covers all three — so start from what reads each file, becaus
 what decides whether a mistake is cosmetic or load-bearing.
 
 | File | Read by | Wrong entry costs you |
-|---|---|---|
+| --- | --- | --- |
 | `.gitignore` | git | a secret or a cache in history — permanent |
 | `.dockerignore` | the image build context | a bloated image, or a missing dependency tree |
 | `.helmignore` | the Helm **chart loader**, not just `helm package` | a dependency that resolves as missing while the file is present |
@@ -163,7 +163,7 @@ reader learns to skim it. The stack entries (`.venv`, `node_modules`, `target`) 
 gated on the manifest that implies them; these two are gated the same way.
 
 | Check | File | Severity | Applies when |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | exists at all | all three | P1 / P1 / P2 | always |
 | `.env` ignored, `.env.example` re-admitted | `.gitignore` | P2 | always — any project can grow a local `.env` |
 | `charts` + `Chart.lock` ignored | `.gitignore` | P2 | **only with a chart** — `helm dependency update` produces both; without a chart neither can appear |

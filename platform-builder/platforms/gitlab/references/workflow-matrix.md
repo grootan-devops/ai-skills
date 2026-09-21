@@ -109,7 +109,7 @@ options: ["full-pipeline", "check", "lint"]
 Each workflow triggers exactly one class of work. A job appearing outside its class is a defect.
 
 | Workflow | Admits | Must NOT admit |
-|---|---|---|
+| --- | --- | --- |
 | `check` | Existence & drift assertions only: `Tag:Tag Existence`, `Changelog:Check Existence`, `Migration:Check Existence`, `Chart:Check Existence`, `Chart:Check:README`, `Chart:Check:Dependency`, `Image:Check Existence`, `Terraform:Check:README` | Any build, push, scan, or lint job |
 | `lint` | Linters only: `*:Lint`, `Chart:Lint`, `Chart:Values:Lint`, `Docker:Lint`, `Changelog:Lint`, `Migration:Lint`, `YAML:Lint`, `Terraform:Validate/Lint` | Drift/existence checks, dependency downloads, builds |
 | `build` | `Dependency:Download` → `Project:Build` → `Project:Unit:Test` | Image or chart packaging, pushes |
@@ -139,7 +139,7 @@ Common cases: `Trivy:Cache:Warm` (no Trivy-backed scan is offered) and `Chart:Sc
 Flag these during `platform audit`; they break §4 until fixed upstream.
 
 | Location | Defect |
-|---|---|
+| --- | --- |
 | `common/.gitlab-ci.yml` `.trivy-cache-rules` | Has a bare `- exists: main.tf` rule with no `if:` ⇒ `Trivy:Cache:Warm` runs in **every** workflow for any repo containing `main.tf`. |
 | `common/.gitlab-ci.yml` `.common-init-rules` | Excludes the scan workflows (`chart-scan`, `image-scan`, `license-scanning`, `sbom-scanning`), yet those scan jobs `needs: Common:Init` with `optional: true` ⇒ they run **without `init.env`**, so `TAG` and the registry suffixes are unset and the scan silently targets the wrong artifact. |
 | `terraform/.gitlab-ci.yml` `Terraform:Check:README` | A drift check gated to `lint` instead of `check`, unlike every other `*:Check:README`. |
@@ -160,7 +160,7 @@ and the library documents them itself. Duplicating them guaranteed they would dr
 **Read these at the source, every run:**
 
 | Question | Authoritative source |
-|---|---|
+| --- | --- |
 | What does each `WORKFLOW` value run? | `<ci_templates>/README.md` → *Available Manual Workflows* + *Comprehensive Execution Matrix* |
 | Which jobs are in which stage? | `<ci_templates>/README.md` → the per-module job tables |
 | What changed between library versions? | `<ci_templates>/MIGRATION.md` |

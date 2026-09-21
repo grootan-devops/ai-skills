@@ -9,7 +9,7 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 ## 1. Available Skills Catalog
 
 | Skill Name | Supported Platforms | Description |
-|---|---|---|
+| --- | --- | --- |
 | [`terraform-module-builder`](./terraform-module-builder/) | AWS, Azure, GCP, Kubernetes | Industrial-grade Terraform module engineering platform: provider schema introspection, capability-aware security, 7-level testing pyramid, zero-destroy state migrations, and canonical documentation generation. |
 | [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters. Strict 3-job separation, packaging-only Dockerfiles, Nginx frontend standard, least-privilege `GITHUB_TOKEN` permissions, SHA-pinned actions, breaking-change migrations, and minimal YAML footprints. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
 | [`ci-library-builder`](./ci-library-builder/) | GitLab CI templates, GitHub Actions reusable workflows | Develops the shared CI **libraries** themselves: adds, extends, ports and audits jobs across a GitLab CI template library and its GitHub Actions counterpart, keeping the two in step. Decides stage, hidden vs concrete job, image, script, `needs:` and fail-fast wiring, artifacts, cache, rules and target file — or that the job should not exist. Ships a structural verifier per platform. Absorbs the former `github-port`. |

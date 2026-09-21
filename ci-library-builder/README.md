@@ -3,7 +3,7 @@
 Develops the shared CI **template libraries** — not the pipelines that consume them.
 
 | | GitLab | GitHub |
-|---|---|---|
+| --- | --- | --- |
 | Library | `gitlab-ci-library` | `github-ci-library` |
 | Unit of reuse | hidden `.Job:` template + concrete `Job:` | reusable `workflow_call` workflow + job |
 | Verifier | `scripts/verify-gitlab-library.py` | `scripts/verify-github-library.py` |

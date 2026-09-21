@@ -24,14 +24,14 @@ starts from the library README's Quick Start set and removes only what it can ju
 > it from the `name @ ref` line `core/scripts/libraries.py` prints, never invent one. On an
 > update it becomes the newest release tag, and the `MIGRATION.md` sections between the old
 > ref and it are the work.
-
+>
 > [!IMPORTANT]
 > The ref must be a published tag. `Common:Check:Library:Pin` runs in the `check` stage for
 > every consumer and fails a branch, a commit or a pre-release — for `project:`/`ref:` and
 > equally for a `remote:` raw URL, where the ref is a path segment
 > (`…/gitlab-ci-library/<ref>/<file>`). `ALLOW_UNSTABLE_LIBRARY_REFS: "true"` downgrades it
 > to a warning for testing only; never scaffold it.
-
+>
 ```yaml
 include:
   - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/<resolved library ref>/common/.gitlab-ci.yml'  # required by every pipeline
@@ -54,7 +54,7 @@ dependency graph for them to inspect. The image vulnerability scan remains requi
 Two that are **not** defaults, because they are conditional on the repo:
 
 | Module | Add when | Do not add when |
-|---|---|---|
+| --- | --- | --- |
 | `readme/.migration-guide.gitlab.yml` | the repo publishes a versioned contract others upgrade against | it is an application nobody pins — `Migration:Check Existence` is `allow_failure: false`, so it blocks every release for a `MIGRATION.md` no one reads |
 | `deploy/gitops/.komodo` / `.argocd` | `platform ship` has real target inputs | the GitOps repo, branch and stack/app are still unknown — see `workflow-map.json` |
 
@@ -65,7 +65,7 @@ adding its option hides working jobs; the reverse produces a dead button.
 at pipeline creation, so the engine cannot catch it and you must:
 
 | Module | Requires in the repo |
-|---|---|
+| --- | --- |
 | `sonarqube/` | `sonar.properties` (the job passes `-Dproject.settings=sonar.properties`), plus `SONARQUBE_TOKEN` and `SONAR_URL` |
 | `readme/.migration-guide.gitlab.yml` | `MIGRATION.md` with a `## [<prev>...<curr>]` heading |
 | `license/`, `sbom/`, `image/` | `ignored-cves.yml` if any CVE or licence is waived |
@@ -247,7 +247,7 @@ Because the flag and the Dockerfile are coupled, flipping one without the other 
 build in a way the error does not explain:
 
 | Requirement | Why |
-|---|---|
+| --- | --- |
 | The Dockerfile genuinely needs the `docker-container` driver | otherwise `DOCKER_BUILDKIT: 1` was already enough |
 | `.dockerignore` **admits** every path a `--mount=type=bind` reads (e.g. `!.npm`, `!.npm/**`) | the mount source comes from the build context; denied means an empty mount, not an error |
 | `Image:Build` restores whatever cache the mount expects | `Image:Build` is not a `.Node:24` job, so it carries no language cache of its own — it needs its own `cache:` block keyed on the lockfile |
@@ -272,7 +272,7 @@ Two failures that look like consumer mistakes and are not. Confirm against the l
 at its pinned ref before editing a project file:
 
 | Symptom | Cause | Consumer action |
-|---|---|---|
+| --- | --- | --- |
 | `sh: line 1: <path>: Is a directory` / `exit code 126`, no script output | the stack's runtime anchor declares `image:` in string form, leaving the micro image's `ENTRYPOINT` in place | **fix the anchor** — map form with `entrypoint: [""]`, as `.Python:12` does. Never override `image:` in the consumer |
 | `betterleaks: command not found` | the tool is absent from the `bt-container` tag the library pins | none — drop `secret-scanning/` or get the image fixed |
 

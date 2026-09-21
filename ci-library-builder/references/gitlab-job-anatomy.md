@@ -20,7 +20,7 @@ a candidate is a better outcome than adding it; record the reasoning, never the 
 This is the decision most often got wrong, and the library is consistent about it:
 
 | Kind | Spelling | Consumer writes | Used when |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Hidden template | `.Node:Dependency:Download` | `extends:` + maybe `script:` | the consumer must choose something — a runtime, a build command, a test command |
 | Concrete job | `Chart:Lint` | nothing; `include:` is enough | the library decides everything; the job is identical in every repo |
 
@@ -50,7 +50,7 @@ deploy  release  notify  trigger  destroy  .post
 Pick by **what the job asserts**, never by when it happens to be convenient:
 
 | Stage | Admits |
-|---|---|
+| --- | --- |
 | `init` | computing facts every later job reads (`Common:Init`) |
 | `prepare` | warming caches, downloading dependencies |
 | `lint` | linters and formatters — nothing that needs dependencies installed |
@@ -75,7 +75,7 @@ only these declares no `image:` at all.
 Declare an image **only** when the job needs a runtime or CLI the toolkit lacks:
 
 | Need | Where the image lives |
-|---|---|
+| --- | --- |
 | Node, Python, Go, Java runtime | the runtime anchor — `.Node:24`, `.Python:12`, `.Go`, `.Java:25` |
 | `buildah` | `.buildah` anchor in `image/.buildah.gitlab-ci.yml` |
 | `sonar-scanner` | the `Sonarqube` job's own `image:` |
@@ -168,7 +168,7 @@ artifacts:
 ## 8. Which file?
 
 | The job is… | It goes in |
-|---|---|
+| --- | --- |
 | language-specific | `nodejs/`, `python/`, `golang/`, `java/` |
 | about the container image | `image/.gitlab-ci.yml`, or `.docker`/`.buildah` for a builder |
 | about the Helm chart | `chart/.gitlab-ci.yml` |

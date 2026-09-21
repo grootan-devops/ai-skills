@@ -21,7 +21,7 @@ Never guess, and never carry on without it.
 ## What to read, and when
 
 | Before you… | Read |
-|---|---|
+| --- | --- |
 | design any public API | `README.md` §4 *Module Contract* |
 | name a resource or emit a tag | `README.md` §5 *Naming & Tagging Standards* |
 | choose a security control | `README.md` §6 *Security Baselines*, then `docs/AWS.md` |

@@ -34,7 +34,7 @@ another cloud, the same rule applies — truncate to `limit - (hash + 1)` charac
 hyphen and a stable hash of the *full* name — against these bounds:
 
 | Provider | Resource | Limit | Valid characters | Mitigation |
-|---|---|:---:|---|---|
+| --- | --- | :---: | --- | --- |
 | Azure | `azurerm_storage_account` | 3–24 | lowercase alphanumeric only, no hyphens | Strip hyphens, lowercase, truncate to 18 + 6-char hash |
 | Azure | `azurerm_virtual_network` | 2–64 | alphanumeric, `_`, `-`, `.` | Truncate to 58 + 5-char hash |
 | GCP | `google_compute_network` | 1–63 | lowercase, digits, hyphen | Truncate to 57 + 5-char hash |

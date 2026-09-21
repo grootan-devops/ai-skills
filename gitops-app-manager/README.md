@@ -56,7 +56,7 @@ If a branch does not exist in remote and cannot be resolved, the skill halts imm
 ### 2.2. ArgoCD Application Naming
 
 | Type | Application Name Formula | CI/CD Sync Target (`argocd_apps`) | Example |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Root App** | `{chartBase}-{env}-root` | `acme-cloud-myapp-dev-root` | `acme-cloud-myapp-dev-root` |
 | **Helm Microservice** | `{chartBase}-{service}-{env}` | `{root_app} {service_app}` (2 apps!) | `acme-cloud-myapp-dev-root acme-cloud-myapp-chat-frontend-dev` |
 | **Manifest Extras** | `{chartBase}-extras-{env}-{service}` | `{service_app}` (1 app only!) | `acme-cloud-myapp-extras-dev-clamav` |
@@ -71,21 +71,21 @@ When bootstrapping a new environment (`gitops bootstrap env`), the skill runs th
 ### 3.1. Inputs & Derivation Matrix
 
 | Parameter | Type | Source | Mandatory? | Derivation & Pre-Flight Validation Logic | Confirmation Required? |
-|---|---|---|:---:|---|:---:|
+| --- | --- | --- | :---: | --- | :---: |
 | **`product_name`** | String | **User** | **YES** | Core product name (e.g. `myapp`). | **Yes** |
 | **`environment`** | String | **User** | **YES** | Target environment (e.g. `dev`, `develop`, `qa`, `prod`). | **Yes** |
-| **`canonical_env`**| String | **Skill** | *Auto* | Normalized: `development`/`develop` $\rightarrow$ `dev`, `production` $\rightarrow$ `prod`. | Auto-resolved |
+| **`canonical_env`** | String | **Skill** | *Auto* | Normalized: `development`/`develop` $\rightarrow$ `dev`, `production` $\rightarrow$ `prod`. | Auto-resolved |
 | **`gitops_repo_url`** | String | **User** | **YES** | GitOps repository URL (e.g. `https://gitlab.contoso.com/devops/gitops/acme-cloud.git`). | **Yes** |
 | **`gitops_branch`** | String | **Skill** | *Auto* | Formed as `{product_name}/{canonical_env}` (e.g. `myapp/dev`). | **Yes** |
 | **`platform_type`** | Enum | **User** | **YES** | `argocd` (Kubernetes) or `komodo` (Docker on VMs). | **Yes** |
-| **`platform_endpoint`**| String | **User** | **YES** | **Pre-Flight Verified**: Probe reachability over network + verify signature (ArgoCD API or Komodo Core UI/API). | **MANDATORY** |
+| **`platform_endpoint`** | String | **User** | **YES** | **Pre-Flight Verified**: Probe reachability over network + verify signature (ArgoCD API or Komodo Core UI/API). | **MANDATORY** |
 | **`repo_access`** | CLI Auth | **Skill** | *Auto* | **Pre-Flight Verified**: `gh`/`glab` presence + active auth + read/access verification to `gitops_repo_url`. | **MANDATORY** |
 | **`cli_auth`** | CLI Auth | **Skill** | *Auto* | **Pre-Flight Verified**: `argocd` or `km` CLI must be authenticated against `platform_endpoint` and authorized for `gitops_repo_url`. | **MANDATORY** |
 | **`root_app_name`** | String | **Skill** | *Auto* | **Formula**: `{product_name}-{canonical_env}-root` (e.g. `myapp-dev-root`). | Displayed in table |
-| **`komodo_stack_name`**| String | **Skill** | *Auto* | **Formula**: `{product_name}-{canonical_env}` (e.g. `myapp-dev`). | Displayed in table |
-| **`vm_connection`** | Host/Creds| **User** | **YES (Komodo)** | VM IP, SSH user, key/password (must have `sudo`/`root` access). Tested via SSH before proceeding. | **Yes** |
+| **`komodo_stack_name`** | String | **Skill** | *Auto* | **Formula**: `{product_name}-{canonical_env}` (e.g. `myapp-dev`). | Displayed in table |
+| **`vm_connection`** | Host/Creds | **User** | **YES (Komodo)** | VM IP, SSH user, key/password (must have `sudo`/`root` access). Tested via SSH before proceeding. | **Yes** |
 | **`onboarding_key`** | Secret | **User** | **YES (Komodo)** | Periphery onboarding key (generated from Komodo Core UI or `km` CLI). | **Yes** |
-| **`active_kube_context`**| Context | **System** | **YES (ArgoCD)** | Active cluster context from `kubectl config current-context`. | **MANDATORY** |
+| **`active_kube_context`** | Context | **System** | **YES (ArgoCD)** | Active cluster context from `kubectl config current-context`. | **MANDATORY** |
 
 ### 3.2. Pre-Flight Verification Gates
 

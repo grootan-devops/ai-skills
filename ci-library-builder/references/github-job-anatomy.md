@@ -21,7 +21,7 @@ every matrix — one run should report every problem, not the first.
 GitHub has no hidden-job concept. The equivalent split is:
 
 | GitLab | GitHub |
-|---|---|
+| --- | --- |
 | hidden template `.Node:Build` the consumer extends | a `workflow_call` workflow with `inputs:` the caller passes |
 | concrete job `Chart:Lint` | a job inside a reusable workflow, needing no input |
 
@@ -91,7 +91,7 @@ artifact is required — the default silently uploads nothing.
 GitHub's default token is broad; the library never relies on it.
 
 | The job… | Needs |
-|---|---|
+| --- | --- |
 | checks out, lints, builds, scans | `contents: read` |
 | pushes an image or chart | `+ packages: write` |
 | publishes a JUnit/scan report as a Check | `+ checks: write` |

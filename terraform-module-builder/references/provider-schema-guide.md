@@ -70,7 +70,7 @@ The JSON output contains a nested map keyed by provider name:
 ### 3.1. Type Translation Matrix
 
 | Schema JSON Type Representation | Target Terraform HCL Variable Type |
-|---|---|
+| --- | --- |
 | `"string"` | `string` |
 | `"number"` | `number` |
 | `"bool"` | `bool` |

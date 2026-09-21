@@ -5,7 +5,7 @@ This is the canonical compatibility contract for the Grootan public platform lib
 ## Initial release set
 
 | Component | Compatible release |
-|---|---:|
+| --- | ---: |
 | AI agent skills | `1.0.0` |
 | GitHub CI/CD library | `1.0.0` |
 | GitLab CI/CD library | `1.0.0` |

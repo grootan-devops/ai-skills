@@ -63,33 +63,33 @@ when the user asks for it, not by default.
 package test
 
 import (
-	"testing"
+ "testing"
 
-	"github.com/gruntwork-io/terratest/modules/terraform"
-	"github.com/stretchr/testify/assert"
+ "github.com/gruntwork-io/terratest/modules/terraform"
+ "github.com/stretchr/testify/assert"
 )
 
 func TestModuleLifecycle(t *testing.T) {
-	t.Parallel()
+ t.Parallel()
 
-	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
-		TerraformDir: "../examples/minimal",
-		Vars: map[string]interface{}{
-			"application": "testapp",
-			"environment": "dev",
-		},
-	})
+ terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
+  TerraformDir: "../examples/minimal",
+  Vars: map[string]interface{}{
+   "application": "testapp",
+   "environment": "dev",
+  },
+ })
 
-	defer terraform.Destroy(t, terraformOptions)
+ defer terraform.Destroy(t, terraformOptions)
 
-	terraform.InitAndApply(t, terraformOptions)
+ terraform.InitAndApply(t, terraformOptions)
 
-	outputID := terraform.Output(t, terraformOptions, "id")
-	assert.NotEmpty(t, outputID)
+ outputID := terraform.Output(t, terraformOptions, "id")
+ assert.NotEmpty(t, outputID)
 
-	// A second plan must be empty, or the module is not idempotent.
-	exitCode := terraform.PlanExitCode(t, terraformOptions)
-	assert.Equal(t, 0, exitCode, "expected zero changes on the second plan")
+ // A second plan must be empty, or the module is not idempotent.
+ exitCode := terraform.PlanExitCode(t, terraformOptions)
+ assert.Equal(t, 0, exitCode, "expected zero changes on the second plan")
 }
 ```
 

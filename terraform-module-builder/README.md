@@ -35,7 +35,7 @@ The engineering standards these modules are built to are **not** duplicated here
 the reference repository's, and the skill reads them at the ref each run resolves:
 
 | Standard | Where |
-|---|---|
+| --- | --- |
 | Module contract — variables, outputs, provider config, version constraints | `terraform-modules/README.md` §4 |
 | Naming formula, length limits, truncation, governance tags and merge order | `terraform-modules/README.md` §5 |
 | Security capability taxonomy, key governance, credential handling | `terraform-modules/README.md` §6 |
@@ -64,13 +64,13 @@ When creating a new module (`terraform-module add`), the skill runs through stri
 ### 3.1. Inputs & Derivation Matrix
 
 | Parameter | Type | Source | Mandatory? | Derivation & Pre-Flight Validation Logic | Confirmation Required? |
-|---|---|---|:---:|---|:---:|
+| --- | --- | --- | :---: | --- | :---: |
 | **`provider`** | String | **User** | **YES** | Cloud provider (e.g. `aws`, `azurerm`, `google`). Verified against official/partner tier. | **Yes** |
 | **`resource_type`** | String | **User** | **YES** | Primary resource type (e.g. `aws_sqs_queue`, `aws_rds_cluster`). Probed in schema. | **Yes** |
 | **`module_name`** | String | **User** | **YES** | Canonical module directory name (e.g. `sqs`, `rds-cluster`). Validated for neutrality. | **Yes** |
-| **`provider_version`**| String | **Skill** | *Auto* | Dynamically resolved latest stable release from Terraform Registry. | Displayed in table |
+| **`provider_version`** | String | **Skill** | *Auto* | Dynamically resolved latest stable release from Terraform Registry. | Displayed in table |
 | **`min_tf_version`** | String | **Skill** | *Auto* | Dynamically calculated from features: `>= 1.6.0` (tests), `>= 1.10.0` (ephemeral), `>= 1.11.0` (write-only). | Auto-resolved |
-| **`cmek_requirement`**| Enum | **Skill** | *Auto* | Evaluated via Security Capability Matrix: `required` for S3/RDS, `not_applicable` for IAM. | Displayed in table |
+| **`cmek_requirement`** | Enum | **Skill** | *Auto* | Evaluated via Security Capability Matrix: `required` for S3/RDS, `not_applicable` for IAM. | Displayed in table |
 | **`governance_tags`** | Map | **Skill** | *Auto* | Standard audit tags (`Application`, `Environment`, `Name`, `ManagedBy`) via inverted merge. | Displayed in table |
 | **`test_suites`** | List | **Skill** | *Auto* | Scaffolds native mock tests (`tests/*.tftest.hcl`) and integration suites (`test/*.go`). | Displayed in table |
 

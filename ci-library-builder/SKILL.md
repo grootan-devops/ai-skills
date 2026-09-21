@@ -18,7 +18,7 @@ consuming repository, use `platform-builder`.
 Two libraries, one set of decisions:
 
 | | GitLab | GitHub |
-|---|---|---|
+| --- | --- | --- |
 | Library | `gitlab-ci-library` | `github-ci-library` |
 | Unit of reuse | hidden template `.Job:` + concrete `Job:` | reusable `workflow_call` workflow + job |
 | Verifier | `scripts/verify-gitlab-library.py` | `scripts/verify-github-library.py` |
@@ -28,7 +28,7 @@ Two libraries, one set of decisions:
 ## 0. Reference Index — Load Before Acting
 
 | Load this | Before you… |
-|---|---|
+| --- | --- |
 | `references/gitlab-job-anatomy.md` | touch a GitLab job. **Required.** The eight decisions, in order. |
 | `references/github-job-anatomy.md` | touch a GitHub job. **Required.** Only what differs, plus the Actions-only traps. |
 | `references/construct-mapping.md` | translate any GitLab keyword to GitHub. **Required for a port.** |
@@ -66,7 +66,7 @@ Then read, in the library itself and not from this file:
 ## 2. Commands
 
 | Command | Arguments | Does |
-|---|---|---|
+| --- | --- | --- |
 | `ci-library verify` | `--gitlab` and/or `--github` | Runs both verifiers plus `yamllint` / `actionlint`; writes nothing. |
 | `ci-library add job` | a description of the job, `--gitlab` and/or `--github` | Walks §3, proposes the job on each named platform, applies on approval. |
 | `ci-library extend` | an existing job name | Same decisions, scoped to a change: what must move, and what must not. |

@@ -17,7 +17,7 @@ An industrial-grade, multi-cloud engineering skill that automates the complete l
 To eliminate confusion and keep the user experience clean, all module lifecycle tasks are unified into **three comprehensive, high-leverage workflows**:
 
 | # | Command | Mandatory Arguments | Unified Execution Workflow |
-|:---:|---|---|---|
+| :---: | --- | --- | --- |
 | **1** | `terraform-module add` | `<provider>` `<resource_type>` `<module_name>` | **End-to-End Creation**: Resolves latest provider version & schema → audits capabilities → generates decomposed HCL → generates canonical 8-section `README.md` → scaffolds native & Terratest tests → executes security audit & validation → checks release readiness. |
 | **2** | `terraform-module update` (or `refactor`) | `<module_path>` | **End-to-End Upgrade & Modernization**: Bumps provider to latest version → analyzes AST & scaffolds `moved.tf` blocks for zero-destroy state safety → modernizes types (bans `lookup()` abuse) → refreshes `README.md` → updates tests → validates syntax & emits SemVer report. |
 | **3** | `terraform-module audit` (or repository) | `<module_path_or_repo>` | **Read-Only Verification**: Audits version compatibility, dead/unwired variables, unused context data sources, tag clobber risks, doc drift, and security baselines without modifying code. |
@@ -127,7 +127,6 @@ the change before it ships is
 Any change that needs an entry in `MIGRATION.md` gets one in the same change, not later.
 
 ---
-
 
 ## 3. Detailed Workflow Execution Procedures
 

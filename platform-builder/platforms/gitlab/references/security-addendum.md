@@ -14,7 +14,7 @@ there is no `pull_request_target` equivalent to get wrong.
 The pressure moves elsewhere: **token scope, variable exposure, and cross-project access**.
 
 | Context | Who can trigger | Secrets available |
-|---|---|---|
+| --- | --- | --- |
 | Push / MR from a branch in the project | members with write access | all, subject to protection |
 | MR from a **fork** | any user | **no protected variables**; `CI_JOB_TOKEN` is fork-scoped |
 | Scheduled pipeline | schedule owner | runs as that user — check who owns it |

@@ -7,7 +7,7 @@ platforms. It detects which platform a repository targets, then loads only that 
 CI layer differs. Measured against the two standalone skills it replaces:
 
 | Component | Platform-agnostic | Platform-specific |
-|---|---|---|
+| --- | --- | --- |
 | Rule engine | **62%** — Dockerfile, chart, ignore files, hygiene | 38% — CI config, job wiring, tokens |
 | Project detection | **98%** | 2% |
 
@@ -49,7 +49,7 @@ Exit codes: `0` clean · `1` `--strict` with P1/P2 · `2` any P0.
 Requires Python 3.9+ and PyYAML.
 
 | Command | Purpose |
-|---|---|
+| --- | --- |
 | `platform onboard [repo]` | Scaffold CI, Dockerfile, and chart for a repo that has none |
 | `platform update [repo]` | Migrate to current standards, applying only what is required |
 | `platform ship [repo] <env>` | Add deployment wiring for a target environment |
@@ -63,7 +63,7 @@ The skill carries **no copy** of what these libraries do. It reads them at the r
 every run, because they are the authority on their own behaviour.
 
 | Library | Provides | Read for |
-|---|---|---|
+| --- | --- | --- |
 | `gitlab-ci-library` | GitLab CI template modules | `WORKFLOW` options, job/stage tables, publishing & auth |
 | `github-ci-library` | GitHub reusable workflows | module catalog, scenario files, execution matrix |
 | `helm-tpl-library` | `tpllib` Helm library chart | values contract, mounts schema, template helpers |
@@ -99,7 +99,7 @@ Each library has its own flag; `--lib NAME=SOURCE` is the generic equivalent.
 Precedence, highest first, resolved **per library**:
 
 | # | Layer | Scope |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `--<library-name> SOURCE`, or `--lib NAME=SOURCE` | one invocation |
 | 2 | `$PLATFORM_BUILDER_LIB_<NAME>` | shell session or CI job |
 | 3 | `<repo>/.platform-builder.json` | the repo, committed |
@@ -134,7 +134,7 @@ would mean checking out something in the user's own working tree).
 Signals ranked by how directly they express *intent* rather than hosting:
 
 | Rank | Signal | Confidence | Action |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | `--platform` passed | explicit | proceed |
 | 2 | `.gitlab-ci.yml` / `.github/workflows/` committed | certain | proceed |
 | 3 | `$GITLAB_CI` / `$GITHUB_ACTIONS` set | certain | proceed |
@@ -227,7 +227,7 @@ Four points where the skill stops rather than guesses:
 `core/scripts/audit.py` runs two check classes in one pass:
 
 | Class | Source | Runs |
-|---|---|---|
+| --- | --- | --- |
 | **Common** | `core/scripts/checks_common.py` | always — Dockerfile, chart, `.dockerignore`, `.gitignore`, hygiene |
 | **CI** | `platforms/<name>/ci_checks.py` | for the detected platform only |
 
@@ -277,7 +277,7 @@ platform-builder/
 ### Overriding behaviour
 
 | To change | Edit | Do **not** |
-|---|---|---|
+| --- | --- | --- |
 | Which workflows/options a shape gets | `platforms/<name>/workflow-map.json` | restate it in a reference or SKILL.md |
 | A Docker/chart/ignore rule | `core/scripts/checks_common.py` | duplicate it into a platform adapter |
 | A CI-config rule | `platforms/<name>/ci_checks.py` | put it in `checks_common.py` |

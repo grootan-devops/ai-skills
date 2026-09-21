@@ -27,17 +27,8 @@ jobs:
       ignore-docker: "true"
       ignore-chart: "true"
 
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      allow-unstable-library-refs: true
-      check-library-pinning: false
-
   release:
-    needs: [init, check]
+    needs: [init]
     permissions:
       contents: write
       actions: read

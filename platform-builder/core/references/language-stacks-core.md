@@ -17,7 +17,7 @@ Every application pipeline splits into three jobs. The point is not ceremony: ea
 different cache key, a different failure meaning, and a different reason to re-run.
 
 | Job | Responsibility | Must not |
-|---|---|---|
+| --- | --- | --- |
 | **dependencies** | Populate the dependency cache. Nothing else. | Compile, test, or lint |
 | **build** | Compile or bundle. Emits the artifact later jobs consume. | Install dependencies ad hoc, run tests |
 | **test** | Unit tests against the built artifact. | Rebuild from source |
@@ -182,7 +182,7 @@ Use the runtime image matching the project's language, and fall back to
 dedicated micro image):
 
 | Stack | Build arg |
-|---|---|
+| --- | --- |
 | Java | `JAVA_25_MICRO_BASE_IMAGE` |
 | Python | `PYTHON_312_MICRO_BASE_IMAGE` |
 | Node.js service | `NODE_JS_24_MICRO_BASE_IMAGE` |

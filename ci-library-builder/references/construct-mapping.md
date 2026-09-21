@@ -8,7 +8,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 1. Pipeline structure
 
 | GitLab | GitHub Actions | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `stages: [...]` | `needs:` edges between jobs | No stage keyword. A job starts when *its* dependencies finish, not when a stage drains. Keep the stage order as documentation only. |
 | `stage: build` | Position in the `needs:` graph | Record the original phase in the job name or a table in the README so the mapping stays legible. |
 | `.hidden-template:` + `extends:` | A reusable workflow (`on: workflow_call`) | Each hidden template that a project materialises becomes a callable workflow, or a job inside one. |
@@ -22,7 +22,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 2. Triggers & rules
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `rules: if: $CI_PIPELINE_SOURCE == "merge_request_event"` | `on: pull_request: branches: [master]` |
 | `rules: if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH` | `on: push: branches: [master]` |
 | `rules: if: $CI_PIPELINE_SOURCE =~ /^(web\|api)$/` | `on: workflow_dispatch:` |
@@ -40,7 +40,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 3. Dependencies & artifacts
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `needs: [{job, artifacts: true}]` | `needs: [job]` + `actions/download-artifact` |
 | `needs: [{job, optional: true}]` | `needs: [job]` + `if: !cancelled() && needs.job.result != 'failure'` |
 | `dependencies: []` | Do not download artifacts (the default) |
@@ -55,7 +55,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 4. Caching
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `cache: key: files: [uv.lock]` | `actions/cache` with `key: py-${{ hashFiles('uv.lock') }}` |
 | `cache: policy: pull-push` | `cache/restore` + `cache/save` in the dependency job |
 | `cache: policy: pull` | `cache/restore` only |
@@ -67,7 +67,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 5. Execution environment
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `image: repo:tag` | `container: {image, credentials}` |
 | `image: {name, entrypoint: [""]}` | `container: {image, options: --entrypoint=""}` |
 | `services: [docker:dind]` | **Drop `container:`** and use the runner's daemon. A containerised job has no Docker socket. |
@@ -84,7 +84,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 6. Registries & credentials
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `$CI_REGISTRY` | `vars.IMAGE_REGISTRY` |
 | `$CI_JOB_TOKEN` for the project's own registry | `secrets.IMAGE_REGISTRY_USERNAME` / `_PASSWORD`. **`GITHUB_TOKEN` is not a registry credential for a private third-party registry** — never substitute it silently. |
 | `$CI_DEPENDENCY_PROXY_*` | No equivalent. Pull through the organisation registry instead. |
@@ -97,7 +97,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 7. Variables — the CI_* surface
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | `$CI_PROJECT_DIR` | `${{ github.workspace }}` |
 | `$CI_PROJECT_PATH` | `${{ github.repository }}` |
 | `$CI_PROJECT_PATH_SLUG` | `${{ github.repository }}` with `/` → `_` |
@@ -118,7 +118,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 8. Reporting
 
 | GitLab | GitHub Actions |
-|---|---|
+| --- | --- |
 | Job log sections | `::group::` / `::endgroup::` |
 | Pipeline/MR widget report | `$GITHUB_STEP_SUMMARY` (markdown) — **required on every job** |
 | `artifacts: reports: junit` annotations | `mikepenz/action-junit-report` with `annotate_only` |
@@ -127,7 +127,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 ## 9. Constructs with no equivalent — the honest-adaptation register
 
 | GitLab | Adaptation | Documented where |
-|---|---|---|
+| --- | --- | --- |
 | Parent/child pipelines | `mono.yml` returns a `strategy.matrix` of changed projects | README → Monorepos |
 | `WORKFLOW` dropdown | One workflow file per scenario + `workflow_dispatch` | README → Available Scenario Workflows |
 | `allow_failure: exit_codes` | `fail-on-warnings` input, default `false` | README → Scan Exit Codes |
