@@ -23,7 +23,7 @@ scan:
 # Right: a self-contained job that runs the shared script
 scan:
   steps:
-    - run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh"
+    - run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/trivy.sh"
 ```
 
 ## 2. Shared scripts must be checked out at `github.job_workflow_sha`

@@ -1,9 +1,8 @@
-name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+name: Check · Release Prerequisites
+run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -24,12 +23,6 @@ jobs:
       ignore-docker: "true"
       ignore-chart: "true"
 
-  lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@dev
-    secrets: inherit
-    with:
-      lint-md-files: "*.md"
-
   check:
     needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
@@ -37,9 +30,3 @@ jobs:
     with:
       tag: ${{ needs.init.outputs.tag }}
       allow-unstable-library-refs: true
-
-  secret-scan:
-    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@dev
-    secrets: inherit
-    with:
-      full-history: false

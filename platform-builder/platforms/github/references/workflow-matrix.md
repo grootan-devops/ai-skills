@@ -156,8 +156,6 @@ name: Security · Secret Scan
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 permissions:
   contents: read
@@ -202,7 +200,7 @@ run-name: "Cache · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   schedule:
-    - cron: "17 2 * * *"
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 concurrency:
