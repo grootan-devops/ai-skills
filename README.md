@@ -1,6 +1,6 @@
 # AI Agent Skills
 
-Release `1.0.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.1.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 This directory contains reusable, production-hardened **AI Agent Skills**. Skills are modular packages of procedures, automated validation scripts, reference baselines, and architectural contracts that transform AI coding assistants into specialized platform engineers.
 
@@ -50,7 +50,7 @@ instruction below points at that clone, and none of them copies a skill into you
 
 ```bash
 git clone https://github.com/grootan-devops/ai-skills.git ~/.ai-skills
-git -C ~/.ai-skills checkout 1.0.0
+git -C ~/.ai-skills checkout 1.1.0
 ```
 
 Pin a tag rather than tracking a branch: a branch moves, and a skill that changes underneath
@@ -63,7 +63,7 @@ the same skill:
 
 ```bash
 git submodule add https://github.com/grootan-devops/ai-skills.git .ai-skills
-git -C .ai-skills checkout 1.0.0
+git -C .ai-skills checkout 1.1.0
 ```
 
 The examples below use `~/.ai-skills` and name `terraform-module-builder`. Substitute the

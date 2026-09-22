@@ -21,7 +21,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
     with:
       ignore-docker: "true"
@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: write
       actions: read
-    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}

@@ -109,8 +109,15 @@ the resolved library's own `README.md`.
 Chart.lock
 .helmignore
 .gitlab-ci.yml
-.yamllint
+.yamllint.yml
 README.gotmpl
+.gitleaks.toml
+CODEOWNERS
+CONTRIBUTING.md
+LICENSE.md
+Makefile
+SECURITY.md
+VERSION
 
 test/
 ```

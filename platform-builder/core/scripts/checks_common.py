@@ -895,7 +895,21 @@ _HELMIGNORE_FORBIDDEN = {
 }
 
 #: Entries whose absence leaves repo furniture inside the released artifact.
-_HELMIGNORE_EXPECTED = ("Chart.lock", "README.gotmpl", ".gitlab-ci.yml", "test/", ".helmignore")
+_HELMIGNORE_EXPECTED = (
+    "Chart.lock",
+    "README.gotmpl",
+    ".gitlab-ci.yml",
+    ".yamllint.yml",
+    ".gitleaks.toml",
+    "CODEOWNERS",
+    "CONTRIBUTING.md",
+    "LICENSE.md",
+    "Makefile",
+    "SECURITY.md",
+    "VERSION",
+    "test/",
+    ".helmignore",
+)
 
 
 def check_helmignore(chart_dir: Path) -> List[Finding]:

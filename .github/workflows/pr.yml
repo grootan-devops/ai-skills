@@ -18,29 +18,26 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
     with:
       ignore-docker: "true"
       ignore-chart: "true"
 
   lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
     with:
       lint-md-files: "**/*.md"
 
   check:
     needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
-      allow-unstable-library-refs: true
-      check-library-pinning: false
-
   secret-scan:
-    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@dev
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
     secrets: inherit
     with:
       full-history: false
