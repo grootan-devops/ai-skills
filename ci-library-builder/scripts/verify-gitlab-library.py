@@ -54,7 +54,11 @@ def collect(root: Path):
     """Return (jobs, anchors, stages, files) across the whole library."""
     jobs, anchors, stages, docs = {}, {}, [], {}
     for f in sorted(root.rglob("*.yml")):
-        if ".git/" in str(f) or f.name == ".yamllint.yml":
+        # `.github/` holds this library's own GitHub Actions CI, not GitLab CI.
+        # Those files have an `on:` key, which YAML 1.1 parses as the boolean
+        # True -- and a bool has no .startswith, so scanning them crashed the
+        # whole verifier and every check below it silently never ran.
+        if ".git/" in str(f) or ".github/" in str(f) or f.name == ".yamllint.yml":
             continue
         doc = load(f)
         if not isinstance(doc, dict):
@@ -63,6 +67,8 @@ def collect(root: Path):
         if isinstance(doc.get("stages"), list):
             stages = doc["stages"]
         for name, body in doc.items():
+            if not isinstance(name, str):
+                continue
             if not isinstance(body, dict) or name in ("variables", "workflow", "default", "include", "stages"):
                 continue
             (anchors if name.startswith(".") else jobs)[name] = (f, body)

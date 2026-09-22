@@ -40,7 +40,7 @@ job-name:
   name: "Phase: Human Readable"
   needs: [upstream]                  # unless a root job
   if: ${{ ... }}                     # tolerating skipped upstreams where needed
-  runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+  runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
   timeout-minutes: 15
   permissions:                       # least privilege, never the default set
     contents: read
@@ -168,12 +168,41 @@ Port this behaviour exactly; it is the reason the library exists.
 
 ## 7. Variables and secrets
 
-- Organisation `vars.*` for everything the organisation decides.
-- Inputs only for what the caller alone knows.
-- Image coordinates: **no defaults** (SKILL §1.4).
-- Behavioural values: defaults allowed — `PROJECT_PATH` (`.`), `CI_RUNNER`
-  (`ubuntu-latest`), `CHART_DIR` (`./chart`), `DOCKERFILE` (`Dockerfile`), dev suffixes
-  (`/dev`), file names.
+GitHub splits what GitLab unifies. A GitLab variable set at group level and one set in a job
+share one namespace with built-in precedence; GitHub's `vars.X` and `inputs.x` are separate
+namespaces. Writing `inputs.x || vars.X || 'literal'` to hand-roll that precedence declares
+one fact three times, and forces the input to `default: ""` so the chain can fall through —
+which means the input block can no longer be read on its own.
+
+**Do not write that chain.** Sort each value by who owns it:
+
+| The value is… | Then it is | Default |
+|---|---|---|
+| one repository's layout — chart directory, project root, Dockerfile path, file names | an **input** | a real `default:` in the declaration |
+| shared infrastructure every repo in the org points at — registry host, Trivy or Sonar server, GitOps endpoint | a **`vars.*`** | a literal fallback, or none |
+| an image coordinate | a **`vars.*`** | **none** — SKILL §1.4 |
+| a credential | a **secret** | none |
+
+A layout value gets its default where a reader looks for it:
+
+```yaml
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+```
+
+The cost is real and deliberate: a repository whose chart is not at `./chart` repeats
+`chart-dir:` in every caller workflow that touches the chart, where one organisation
+variable would have covered them all. That is accepted in exchange for a declaration that
+states its own default.
+
+**Mandatory means `required: true` with no default.** `required: false` plus `default: ""`
+on a value the workflow cannot run without is a declaration that lies: GitHub accepts the
+caller, and the empty value fails deep inside a script — or worse, silently builds a wrong
+path, registry reference or cache key. Reserve `default: ""` for inputs where empty is a
+real, handled state, and say in the description what empty means.
 - One registry credential pair, named `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`,
   used library-wide.
 

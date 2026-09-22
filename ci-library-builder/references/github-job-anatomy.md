@@ -25,9 +25,15 @@ GitHub has no hidden-job concept. The equivalent split is:
 | hidden template `.Node:Build` the consumer extends | a `workflow_call` workflow with `inputs:` the caller passes |
 | concrete job `Chart:Lint` | a job inside a reusable workflow, needing no input |
 
-A caller passes only what it alone can know — which artifact, which version. Everything the
-organisation knows is a `vars.*`, never an input. Target **fewer than 8 inputs per workflow**,
-and zero required inputs an upstream `init` job could have produced.
+A caller passes what it alone can know — which artifact, which version — plus its own
+repository layout. **Shared infrastructure** the organisation points every repository at is a
+`vars.*`, never an input; **one repository's layout** is an input with a real `default:`,
+never a `vars.*` fallback chain. See library-conventions §7. Target **fewer than 8 inputs per
+workflow**, and zero required inputs an upstream `init` job could have produced.
+
+Note the limit of the second half: a reusable workflow cannot read another workflow's
+outputs, so an input fed only by `needs.init.outputs.*` still has to be declared and passed.
+It is not removable, however redundant it looks.
 
 ## 3. Which stage → which workflow file, and `needs:`
 
@@ -49,8 +55,9 @@ A GitHub runner is not the toolkit image. State it explicitly, on every job:
 ```
 
 - **No `|| 'fallback'` on an image coordinate.** An unset container variable must fail the pull
-  by name; a plausible-but-wrong default is worse than a missing one. Behavioural defaults
-  (`PROJECT_PATH`, `CI_RUNNER`, file names) keep their fallbacks.
+  by name; a plausible-but-wrong default is worse than a missing one. A `vars.*` that is not an
+  image coordinate — `CI_RUNNER`, a server URL, a file name — keeps its `|| 'literal'`
+  fallback. What must not appear is an input and a variable chained together.
 - The toolkit image already carries the toolchain, so **a containerised job needs no `setup-*`
   action.** Reaching for `setup-python` or `setup-node` here is a porting mistake, not a
   convenience.

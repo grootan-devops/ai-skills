@@ -313,7 +313,9 @@ def check_workflows(root: Path, f: Findings) -> None:
 
 
 def check_scripts(root: Path, f: Findings) -> None:
-    scripts = sorted((root / "scripts").glob("*.sh")) if (root / "scripts").is_dir() else []
+    # rglob, not glob: the library groups scripts into scripts/<domain>/, so a
+    # non-recursive glob silently checked nothing and reported the directory missing.
+    scripts = sorted((root / "scripts").rglob("*.sh")) if (root / "scripts").is_dir() else []
     if not scripts:
         f.add(
             "P2",
@@ -322,11 +324,24 @@ def check_scripts(root: Path, f: Findings) -> None:
             "Long or duplicated shell belongs in scripts/, not inline YAML.",
         )
         return
+    # A file that another script `source`s runs in the caller's shell, so setting
+    # shell options in it silently changes the caller. Those are libraries, not
+    # scripts, and the option gate does not apply to them.
+    corpus = "\n".join(p.read_text() for p in scripts)
+    sourced = {p for p in scripts if f"source " in corpus and (
+        f"/{p.name}" in corpus.split("source ", 1)[-1] or f"source {p.name}" in corpus
+    ) and any(
+        line.strip().startswith("source ") and p.name in line
+        for line in corpus.splitlines()
+    )}
+
     for path in scripts:
         text = path.read_text()
-        rel = f"scripts/{path.name}"
+        rel = path.relative_to(root).as_posix()
         if not text.startswith("#!"):
             f.add("P1", rel, "No shebang.", "Start with #!/usr/bin/env bash.")
+        if path in sourced:
+            continue
         if "set -euo pipefail" not in text and "set -uo pipefail" not in text:
             f.add("P1", rel, "No `set -euo pipefail`.", "Fail fast on error.")
 
@@ -405,7 +420,7 @@ def main() -> int:
             f"\nTotals: P0={len(f.by_sev('P0'))} "
             f"P1={len(f.by_sev('P1'))} P2={len(f.by_sev('P2'))}"
         )
-        print("\nAlso run: actionlint · yamllint -s .github/workflows/ · shellcheck scripts/*.sh")
+        print("\nAlso run: actionlint · yamllint -s .github/workflows/ · shellcheck $(find scripts -name '*.sh')")
 
     if f.by_sev("P0"):
         return 1
