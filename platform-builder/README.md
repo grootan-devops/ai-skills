@@ -66,7 +66,7 @@ every run, because they are the authority on their own behaviour.
 | --- | --- | --- |
 | `gitlab-ci-library` | GitLab CI template modules | `WORKFLOW` options, job/stage tables, publishing & auth |
 | `github-ci-library` | GitHub reusable workflows | module catalog, scenario files, execution matrix |
-| `helm-tpl-library` | `tpllib` Helm library chart | values contract, mounts schema, template helpers |
+| `helm-tpl-library` | `tpl-library` Helm library chart | values contract, mounts schema, template helpers |
 
 Each ships a `README.md` (required) and usually a `MIGRATION.md`. **Re-read both on every
 onboard, update, and audit** — they change between runs, and a stale assumption produces a
@@ -197,7 +197,7 @@ flowchart TD
 
     F --> F1["CI: only the workflows/options the shape can execute"]
     F --> F2["Dockerfile: packaging-only, non-root 10001"]
-    F --> F3["Chart: tpllib dependency, values + mounts"]
+    F --> F3["Chart: tpl-library dependency, values + mounts"]
     F1 --> G["audit.py --strict"]
     F2 --> G
     F3 --> G

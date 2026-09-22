@@ -69,7 +69,7 @@ No dependencies/build/test — there is nothing to compile. The pipeline is
 
 `CHART_DIR` is `.` when `Chart.yaml` sits at the repository root, which library and umbrella
 charts usually do. A **`type: library` chart** has no `values.schema.json`, no `manifest.yaml`,
-and no `tpllib` dependency of its own — the application-chart rules in
+and no `tpl-library` dependency of its own — the application-chart rules in
 [`helm-chart-standard.md`](./helm-chart-standard.md) do not apply to it.
 
 ## 3. Dockerfile (all stacks)

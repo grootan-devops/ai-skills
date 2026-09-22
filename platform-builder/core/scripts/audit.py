@@ -170,7 +170,7 @@ def run(repo_path: str, platform_name: Optional[str] = None,
     if (cdir / "Chart.yaml").exists():
         findings += common.check_helm_chart(cdir)
         findings += common.check_helmignore(cdir)
-        # Measured against the tpllib copy this run actually resolved, so the parity
+        # Measured against the tpl-library copy this run actually resolved, so the parity
         # report moves with the library rather than against a frozen expectation.
         for r in resolved_libs:
             if r.name == "helm-tpl-library" and getattr(r, "path", None):

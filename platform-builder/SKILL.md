@@ -52,7 +52,7 @@ The skill carries **no copy** of what these do. Read each library's own `README.
 | --- | --- |
 | `gitlab-ci-library` | GitLab CI template modules — `WORKFLOW` options, job/stage tables, publishing & auth |
 | `github-ci-library` | GitHub reusable workflows — module catalog, scenario files, execution matrix |
-| `helm-tpl-library` | the `tpllib` Helm library chart — values contract, `mounts:` schema, template helpers |
+| `helm-tpl-library` | the `tpl-library` Helm library chart — values contract, `mounts:` schema, template helpers |
 
 If you are about to write a fact that already lives above, **write a pointer instead**. A second
 copy is a second thing to forget, and copies drift silently.
@@ -251,7 +251,7 @@ If the answer is yes and the fixture does not exist yet, scaffold it:
 - **Image** — a `ci_image_test.sh` that asserts what the image promises: the binary is on
   `PATH` and reports the expected version, the declared `EXPOSE` port is listening, the
   process runs as `10001`. Assert the contract, not the base image's contents.
-- **Chart** — see the scope rule in **helm-tpl-library's own README**. `tpllib` already
+- **Chart** — see the scope rule in **helm-tpl-library's own README**. `tpl-library` already
   tests the Kubernetes-level rendering it owns, and duplicating that in a consumer chart
   buys nothing and breaks on every library upgrade. A consumer's tests cover what only that
   chart knows.
@@ -366,7 +366,7 @@ Two rules that are broken often enough to name here:
   `Application Configuration` banner. `helm-chart-standard.md` §3.0.
 - **`main` is used exactly once per `values.yaml`** — as `containers.main`, the single
   application container. Never as an init container key, and never as a `jobs:` container
-  key; `tpllib` fails the render on both. A `cronjobs:` entry is different: it reuses the
+  key; `tpl-library` fails the render on both. A `cronjobs:` entry is different: it reuses the
   root `containers:`, so `main` appears in its pod by design. Every other key is
   **derived, not
   looked up**: name the role this container performs in this chart, such that the key would
@@ -392,7 +392,7 @@ Three decisions, all confirmed with the user, never inferred silently:
    duplicating them.
 
 **Storage is the sibling question.** A `mounts.pvc` entry names a claim; something has to
-create it. `tpllib` ships `tpl.pvc` for exactly that, but it is an opt-in entrypoint —
+create it. `tpl-library` ships `tpl.pvc` for exactly that, but it is an opt-in entrypoint —
 `tpl.deployment` does not call it, so a chart whose `manifest.yaml` omits it, or whose
 `persistence:` section is empty, leaves the pod `Pending` while `helm template` and
 `helm install` both succeed. Ask "does something create this?" of every reference the values

@@ -124,7 +124,7 @@ basename at *any* depth. So `*.tgz` reaches into `charts/` and hides the depende
 archives `helm dependency update` has just downloaded. Helm then reports:
 
 ```text
-[WARNING] chart directory is missing these dependencies: tpllib
+[WARNING] chart directory is missing these dependencies: tpl-library
 [ERROR] templates/: ... at <include "tpl.deployment" .>:
         template: no template "tpl.deployment" associated with template "gotpl"
 ```

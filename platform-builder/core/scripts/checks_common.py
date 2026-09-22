@@ -299,7 +299,7 @@ def _opaque_block_keys(values_text: str) -> Set[str]:
     return out
 
 
-# Keys tpllib reads but a consumer is never expected to restate verbatim -- either they
+# Keys tpl-library reads but a consumer is never expected to restate verbatim -- either they
 # are the consumer's own identity, or a nested example-only block.
 _VALUES_PARITY_IGNORE = {"component", "subComponent"}
 
@@ -307,7 +307,7 @@ _VALUES_PARITY_IGNORE = {"component", "subComponent"}
 _WRAPPER_SMELL = {"app", "application", "config", "configuration", "settings", "env", "params"}
 
 
-def check_app_values_shape(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
+def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Finding]:
     """Consumer application values: top level, ahead of the workload plumbing.
 
     The library declares no key for application configuration, so whatever the app needs
@@ -319,13 +319,13 @@ def check_app_values_shape(chart_dir: Path, tpllib_values: Path) -> List[Finding
     """
     findings: List[Finding] = []
     values_file = chart_dir / "values.yaml"
-    if not values_file.exists() or not tpllib_values.exists():
+    if not values_file.exists() or not tpl_library_values.exists():
         return findings
     try:
         import yaml  # noqa: WPS433
         raw = values_file.read_text(encoding="utf-8")
         consumer = yaml.safe_load(raw) or {}
-        library = yaml.safe_load(tpllib_values.read_text(encoding="utf-8")) or {}
+        library = yaml.safe_load(tpl_library_values.read_text(encoding="utf-8")) or {}
     except Exception:
         return findings
     if not isinstance(consumer, dict) or not isinstance(library, dict):
@@ -366,7 +366,7 @@ def check_app_values_shape(chart_dir: Path, tpllib_values: Path) -> List[Finding
     return findings
 
 
-def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
+def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Finding]:
     """Consumer values.yaml must mirror the library's values.yaml key-for-key.
 
     The library file is the contract. A key omitted because it is "empty anyway" is
@@ -376,12 +376,12 @@ def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
     """
     findings: List[Finding] = []
     values_file = chart_dir / "values.yaml"
-    if not values_file.exists() or not tpllib_values.exists():
+    if not values_file.exists() or not tpl_library_values.exists():
         return findings
     try:
         import yaml  # noqa: WPS433
         consumer = yaml.safe_load(values_file.read_text(encoding="utf-8")) or {}
-        library = yaml.safe_load(tpllib_values.read_text(encoding="utf-8")) or {}
+        library = yaml.safe_load(tpl_library_values.read_text(encoding="utf-8")) or {}
     except Exception:
         return findings
 
@@ -403,7 +403,7 @@ def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
     # documented keys (see the comments law). Its sub-keys are the consumer's to shape:
     # `strategy: {type: Recreate}` is complete, and demanding `strategy.rollingUpdate`
     # under it would be demanding an invalid manifest.
-    opaque = _opaque_block_keys(tpllib_values.read_text(encoding="utf-8"))
+    opaque = _opaque_block_keys(tpl_library_values.read_text(encoding="utf-8"))
     lib_paths = {
         p for p in paths(library)
         if not any(p.startswith(o + ".") for o in opaque)
@@ -424,7 +424,7 @@ def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
     else:
         findings.append(Finding(
             "P1", "values.yaml Not A Library Replica", f"{chart_dir.name}/values.yaml",
-            "values.yaml declares no containers. tpllib renders the workload from "
+            "values.yaml declares no containers. tpl-library renders the workload from "
             "`containers.<name>`; without one the chart produces a pod with no container."
         ))
 
@@ -434,7 +434,7 @@ def check_values_parity(chart_dir: Path, tpllib_values: Path) -> List[Finding]:
         more = f" (+{len(missing) - 12} more)" if len(missing) > 12 else ""
         findings.append(Finding(
             "P1", "values.yaml Not A Library Replica", f"{values_file.parent.name}/values.yaml",
-            f"Keys present in the tpllib values contract are missing from the chart: {shown}{more}. "
+            f"Keys present in the tpl-library values contract are missing from the chart: {shown}{more}. "
             "The consumer values.yaml is a replica of the library's values.yaml: every key stays, "
             "even when optional and empty, with its comment block and its `### Example`. Copy the "
             "library file and override the values this application needs."
@@ -952,8 +952,8 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
 
     chart_content = chart_yaml_file.read_text(encoding="utf-8")
 
-    # A `type: library` chart (tpllib itself) publishes reusable templates and has no
-    # manifest, no values contract, and no tpllib dependency of its own. Applying the
+    # A `type: library` chart (tpl-library itself) publishes reusable templates and has no
+    # manifest, no values contract, and no tpl-library dependency of its own. Applying the
     # application-chart standard to it produces nothing but false positives.
     if re.search(r"^type:\s*library\s*$", chart_content, re.MULTILINE):
         if not (chart_dir / "README.gotmpl").exists():
@@ -963,11 +963,11 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             ))
         return findings
 
-    # Verify dependency on tpllib
-    if "tpllib" not in chart_content:
+    # Verify dependency on tpl-library
+    if "tpl-library" not in chart_content:
         findings.append(Finding(
             "P0", "Helm Template Library", str(chart_yaml_file),
-            "Chart.yaml must declare a dependency on the enterprise 'tpllib' library."
+            "Chart.yaml must declare a dependency on the enterprise 'tpl-library' library."
         ))
 
     # Verify Chart.yaml has a meaningful description
@@ -997,7 +997,7 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
         if 'include "tpl.deployment"' not in manifest_content:
             findings.append(Finding(
                 "P1", "Manifest Non-Standard", str(manifest_file),
-                "manifest.yaml should include 'tpl.deployment' from tpllib."
+                "manifest.yaml should include 'tpl.deployment' from tpl-library."
             ))
 
     # Verify README.gotmpl exists and contains overview/purpose

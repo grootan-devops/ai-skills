@@ -9,7 +9,7 @@ This document defines the architectural standards for authoring, structuring, an
 Chart **authoring judgement**: how to decide a description, a component name, a container
 key, which values to carry, and how to prove the result renders.
 
-It does **not** restate the `tpllib` contract. The library's `Chart.yaml` stanza, its
+It does **not** restate the `tpl-library` contract. The library's `Chart.yaml` stanza, its
 `templates/manifest.yaml` entrypoints (`tpl.deployment`, `tpl.job`, `tpl.cronjob`,
 `tpl.pvc`, `tpl.servicemonitor`), its values structure and comment law, its sensitive-data
 segregation, its sibling-name helper, its `routes:` contract and its `helm-docs` command
@@ -98,7 +98,7 @@ To ensure deterministic naming across Kubernetes namespaces, ArgoCD applications
 
 ### 2.1. Container Naming Standard — the `main` key is reserved
 
-`tpllib` derives every container name from the **map key**, not from a `name:` field, and
+`tpl-library` derives every container name from the **map key**, not from a `name:` field, and
 reserves `main`. The rendered-name table and the exact scope of that reservation are library
 behaviour and live in helm-tpl-library's `README.md`.
 
@@ -112,7 +112,7 @@ Query `{container="order-backend-main"}` and you have the service; a fleet-wide
 > the chart exists to run. Use it once, as `containers.main`. Anything else is doing a
 > different job and must say what that job is.
 >
-> `tpllib` enforces this for init containers and for `jobs:` containers, and fails the
+> `tpl-library` enforces this for init containers and for `jobs:` containers, and fails the
 > render. It does **not** apply to `cronjobs:`, which reuse the root `containers:` and so
 > legitimately run `main` in their pod.
 
@@ -202,7 +202,7 @@ read as a past-tense outcome rather than a role: `db-migration`, `wait-for-db`,
 `fetch-config`, `chown-data`, `seed-fixtures`, `warm-cache`. The same four questions apply —
 `wait-for-db` survives swapping the wait image, `busybox` does not.
 
-Prefix init keys numerically (`01-`, `02-`) only when ordering actually matters. `tpllib`
+Prefix init keys numerically (`01-`, `02-`) only when ordering actually matters. `tpl-library`
 renders init containers in `sortAlpha` order over the **keys**, not in declaration order,
 and Kubernetes runs them in that rendered order — so two init containers with a real
 dependency between them need the prefix, and independent ones should not carry a false
@@ -219,7 +219,7 @@ injector, a log pipeline you do not control); otherwise leave it empty and let t
 ### 3.0. The Replica Law — start from the library's `values.yaml`
 
 > [!IMPORTANT]
-> **A consumer `values.yaml` is a replica of `tpllib`'s `values.yaml`, not a subset of it.**
+> **A consumer `values.yaml` is a replica of `tpl-library`'s `values.yaml`, not a subset of it.**
 > Copy the library file at the resolved ref and override the values this application needs.
 > Never assemble one from memory of which keys matter.
 
@@ -235,7 +235,7 @@ Three reasons, in the order they bite:
    Present-and-empty answers the question; absent does not.
 2. **`helm-docs` documents what is in the file.** An omitted key produces no table row, so
    the generated `README.md` silently under-describes the chart's own contract.
-3. **It is the only thing that survives a library upgrade.** When `tpllib` adds a key, a
+3. **It is the only thing that survives a library upgrade.** When `tpl-library` adds a key, a
    replica diffs cleanly against the new library file and the addition is obvious. A
    hand-picked subset diffs against nothing.
 

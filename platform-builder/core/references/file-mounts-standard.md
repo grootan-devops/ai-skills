@@ -22,7 +22,7 @@ Not baked into the image, and not written as a hand-rolled ConfigMap template in
 1. **A baked-in file cannot change per environment.** Staging and production need different
    upstreams, origins, pool sizes. Baking means rebuilding the image to change a config value —
    and now the artefact you tested is not the artefact you shipped.
-2. **A hand-written template bypasses the library.** `tpllib` already generates the ConfigMap or
+2. **A hand-written template bypasses the library.** `tpl-library` already generates the ConfigMap or
    Secret, the volume, and the volumeMount, wired to the right container. A bespoke template
    duplicates that and drifts from it.
 3. **The choice between ConfigMap and Secret becomes invisible.** Declared under `mounts:`, it
