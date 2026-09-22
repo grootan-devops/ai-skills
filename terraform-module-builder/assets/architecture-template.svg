@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="boxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#334155" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="540" fill="url(#bgGrad)" />
+
+  <!-- Title Header -->
+  <text x="480" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" fill="#f8fafc" text-anchor="middle" letter-spacing="0.5">
+    Standard Terraform Module Architecture &amp; Lifecycle
+  </text>
+  <text x="480" y="65" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="400" fill="#94a3b8" text-anchor="middle">
+    Project-Neutral • Capability-Aware Security • Multi-Cloud Orchestration
+  </text>
+
+  <!-- Container 1: Root Consumption Layer -->
+  <rect x="40" y="95" width="260" height="405" rx="8" fill="url(#boxGrad)" stroke="#475569" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="40" y="95" width="260" height="38" rx="8" fill="#1e293b" />
+  <text x="55" y="119" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#38bdf8">1. CONSUMPTION LAYER</text>
+
+  <!-- Child elements in Layer 1 -->
+  <g transform="translate(55, 145)" font-family="ui-monospace, monospace" font-size="11" fill="#cbd5e1">
+    <rect x="0" y="0" width="230" height="32" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="12" y="20">root.hcl / backend.tf</text>
+
+    <rect x="0" y="42" width="230" height="32" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="12" y="62">providers.tf (Root Config)</text>
+
+    <rect x="0" y="84" width="230" height="64" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="12" y="104" font-weight="600" fill="#f1f5f9">module "component" {</text>
+    <text x="24" y="122" fill="#94a3b8">source = "../modules/..."</text>
+    <text x="12" y="140" font-weight="600" fill="#f1f5f9">}</text>
+
+    <rect x="0" y="158" width="230" height="32" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="12" y="178">environments/ (dev, prod)</text>
+
+    <rect x="0" y="200" width="230" height="32" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="12" y="220">.terraform.lock.hcl (Committed)</text>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <path d="M 300 290 L 350 290" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4,4" fill="none" marker-end="url(#arrow)" />
+  <polygon points="350,286 358,290 350,294" fill="#38bdf8" />
+
+  <!-- Container 2: Reusable Module Core -->
+  <rect x="350" y="95" width="290" height="405" rx="8" fill="url(#boxGrad)" stroke="#475569" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="350" y="95" width="290" height="38" rx="8" fill="#1e293b" />
+  <text x="365" y="119" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#a78bfa">2. REUSABLE MODULE PACKAGE</text>
+
+  <!-- Files in Layer 2 -->
+  <g transform="translate(365, 145)" font-family="ui-monospace, monospace" font-size="11" fill="#cbd5e1">
+    <rect x="0" y="0" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="18" fill="#e2e8f0"><tspan fill="#38bdf8">main.tf</tspan> (Core Subsystems)</text>
+
+    <rect x="0" y="34" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="52" fill="#e2e8f0"><tspan fill="#38bdf8">variables.tf</tspan> (Typed Objects)</text>
+
+    <rect x="0" y="68" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="86" fill="#e2e8f0"><tspan fill="#38bdf8">outputs.tf</tspan> (Deliberate APIs)</text>
+
+    <rect x="0" y="102" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="120" fill="#e2e8f0"><tspan fill="#38bdf8">locals.tf</tspan> (Naming &amp; Tag Engine)</text>
+
+    <rect x="0" y="136" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="154" fill="#e2e8f0"><tspan fill="#38bdf8">data.tf</tspan> (Consumed Context Only)</text>
+
+    <rect x="0" y="170" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="188" fill="#e2e8f0"><tspan fill="#38bdf8">versions.tf</tspan> (min >= bounds)</text>
+
+    <rect x="0" y="204" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="222" fill="#e2e8f0"><tspan fill="#38bdf8">moved.tf</tspan> (State Migrations)</text>
+
+    <rect x="0" y="238" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="256" fill="#e2e8f0"><tspan fill="#38bdf8">README.md</tspan> (8-Section Canonical)</text>
+
+    <rect x="0" y="272" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="290" fill="#e2e8f0"><tspan fill="#38bdf8">examples/</tspan> (minimal / complete)</text>
+
+    <rect x="0" y="306" width="260" height="28" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="324" fill="#e2e8f0"><tspan fill="#38bdf8">tests/</tspan> (Native .tftest.hcl)</text>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <path d="M 640 290 L 680 290" stroke="#a78bfa" stroke-width="2" stroke-dasharray="4,4" fill="none" />
+  <polygon points="680,286 688,290 680,294" fill="#a78bfa" />
+
+  <!-- Container 3: Quality & Verification Gates -->
+  <rect x="680" y="95" width="240" height="405" rx="8" fill="url(#boxGrad)" stroke="#475569" stroke-width="1.5" filter="url(#shadow)" />
+  <rect x="680" y="95" width="240" height="38" rx="8" fill="#1e293b" />
+  <text x="695" y="119" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" fill="#34d399">3. VERIFICATION GATES</text>
+
+  <!-- Gates in Layer 3 -->
+  <g transform="translate(695, 145)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#cbd5e1">
+    <rect x="0" y="0" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="18" font-weight="600" fill="#f8fafc">L0: Source Quality</text>
+    <text x="10" y="34" fill="#94a3b8" font-size="10">fmt, validate, TFLint</text>
+
+    <rect x="0" y="52" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="70" font-weight="600" fill="#f8fafc">L1: Static Security</text>
+    <text x="10" y="86" fill="#94a3b8" font-size="10">Trivy, Secret &amp; Context Scan</text>
+
+    <rect x="0" y="104" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="122" font-weight="600" fill="#f8fafc">L2: Native Mock Tests</text>
+    <text x="10" y="138" fill="#94a3b8" font-size="10">terraform test (0 creds)</text>
+
+    <rect x="0" y="156" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="174" font-weight="600" fill="#f8fafc">L3: Plan Analysis</text>
+    <text x="10" y="190" fill="#94a3b8" font-size="10">Zero Unintended Destroys</text>
+
+    <rect x="0" y="208" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="226" font-weight="600" fill="#f8fafc">L4: Acceptance (Terratest)</text>
+    <text x="10" y="242" fill="#94a3b8" font-size="10">Apply, Idempotency, Destroy</text>
+
+    <rect x="0" y="260" width="210" height="44" rx="4" fill="#0f172a" stroke="#334155" />
+    <text x="10" y="278" font-weight="600" fill="#f8fafc">L5 &amp; L6: Upgrade &amp; Matrix</text>
+    <text x="10" y="294" fill="#94a3b8" font-size="10">Migration &amp; Core Versioning</text>
+  </g>
+</svg>

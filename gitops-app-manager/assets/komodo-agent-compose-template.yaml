@@ -1,0 +1,18 @@
+# ==============================================================================
+# Komodo Periphery Agent Service Definition
+# Standard Path on Target VM: /opt/komodo-agent/docker-compose.yml
+# Reference: https://komo.do/docs/setup/connect-servers#container
+# ==============================================================================
+services:
+  periphery:
+    image: ghcr.io/mbecker20/periphery:latest
+    container_name: komodo-periphery
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/komodo-agent/config:/etc/komodo
+    environment:
+      PERIPHERY_CORE_ADDRESS: "${KOMODO_CORE_ADDRESS}"
+      PERIPHERY_ONBOARDING_KEY: "${PERIPHERY_ONBOARDING_KEY}"
+      PERIPHERY_CONNECT_AS: "${SERVER_NAME}"

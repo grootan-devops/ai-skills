@@ -1,0 +1,145 @@
+{
+  "$schema_note": "Skill-owned judgement only: which scenario files a repository SHAPE needs. Triggers, called modules, permissions and inputs are NOT restated here -- they live in the library's own README.md, which is re-read every run.",
+  "$library": {
+    "repo": "github-ci-library",
+    "version": "1.0.0",
+    "call_form": "uses: grootan-devops/github-ci-library/.github/workflows/<module>.yml@<version>",
+    "note": "Derived from the library's own README.md (Available Scenario Workflows + Module Catalog). That README is authoritative and must be re-read every run; this file follows it."
+  },
+  "scenarios": {
+    "pr.yml": {
+      "purpose": "Full pre-merge verification."
+    },
+    "release.yml": {
+      "purpose": "Tag, promote candidate by digest, publish release, notify."
+    },
+    "build.yml": {
+      "purpose": "Build and unit test only."
+    },
+    "check.yml": {
+      "purpose": "Release prerequisite guards only."
+    },
+    "lint.yml": {
+      "purpose": "Multi-linter suite."
+    },
+    "deploy.yml": {
+      "purpose": "Targeted GitOps deployment without building."
+    },
+    "image-scan.yml": {
+      "purpose": "Scan an existing remote image tag."
+    },
+    "chart-scan.yml": {
+      "purpose": "Render and scan a local or remote chart."
+    },
+    "license-scan.yml": {
+      "purpose": "Dependency licence compliance audit."
+    },
+    "sbom.yml": {
+      "purpose": "CycloneDX SBOM generation and CVE scan."
+    },
+    "secret-scan.yml": {
+      "purpose": "Betterleaks git-history audit."
+    },
+    "sonarqube.yml": {
+      "purpose": "Analysis and quality gate."
+    }
+  },
+  "shapes": {
+    "image-only": {
+      "match": "Dockerfile present, no application manifest and no Chart.yaml",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "secret-scan.yml"
+      ],
+      "note": "Build and scan the OCI image, but do not add license-scan.yml, sbom.yml, a language build, or SonarQube. Without an application dependency manifest those source-oriented workflows have no dependency graph to inspect. build.yml composes init + docker + the image smoke test for this shape."
+    },
+    "chart-only": {
+      "match": "Chart.yaml present, no Dockerfile, no application manifest",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "check.yml",
+        "lint.yml",
+        "chart-scan.yml",
+        "secret-scan.yml"
+      ],
+      "note": "pr.yml calls init + lint + chart only -- there is nothing to compile, containerise or unit test."
+    },
+    "service": {
+      "match": "application manifest plus Dockerfile",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "service-with-chart": {
+      "match": "application manifest, Dockerfile and Chart.yaml",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "chart-scan.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "library": {
+      "match": "application manifest, no Dockerfile, no chart, publishes a package",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "app-no-artifact": {
+      "match": "application manifest only (deployed by Amplify/Vercel)",
+      "scenarios": [
+        "pr.yml",
+        "build.yml",
+        "lint.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ],
+      "note": "No release.yml unless the repo actually cuts releases; no image or chart scenarios."
+    },
+    "terraform": {
+      "match": "main.tf present",
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "check.yml",
+        "lint.yml",
+        "secret-scan.yml"
+      ],
+      "calls_extra": [
+        "terraform-lint",
+        "terraform-module",
+        "terraform-test"
+      ]
+    }
+  }
+}

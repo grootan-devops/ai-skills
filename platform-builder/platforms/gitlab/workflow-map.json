@@ -1,0 +1,136 @@
+{
+  "$schema_note": "Skill-owned judgement only: which module provides which WORKFLOW option, the job that proves an option is active, and when a module applies. Job lists, stage order and module descriptions are NOT restated here -- they live in the library's own README.md, which is re-read every run.",
+  "shared_options": {
+    "build": "Satisfied by any language module (nodejs/python/golang/java), so it maps to no single provider.",
+    "deploy": "Satisfied by either GitOps module; withheld until `platform ship` wires a real DEPLOY_TARGET."
+  },
+  "modules": {
+    "common/.gitlab-ci.yml": {
+      "provides": [
+        "full-pipeline",
+        "check",
+        "lint"
+      ],
+      "required": true
+    },
+    "readme/.migration-guide.gitlab.yml": {
+      "provides": [],
+      "include_when": "the repo publishes a versioned contract others pin. NOT a default: Migration:Check Existence is allow_failure:false, so it blocks every release of an application nobody upgrades against.",
+      "requires_file": "MIGRATION.md"
+    },
+    "chart/.gitlab-ci.yml": {
+      "provides": [
+        "chart-build-and-push",
+        "chart-scan"
+      ],
+      "signature_jobs": {
+        "chart-scan": "Chart:Scan"
+      }
+    },
+    "image/.gitlab-ci.yml": {
+      "provides": [
+        "image-build-and-push",
+        "image-scan"
+      ],
+      "signature_jobs": {
+        "image-scan": "Image:Scan"
+      }
+    },
+    "nodejs/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "python/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "golang/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "java/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "sonarqube/.gitlab-ci.yml": {
+      "provides": [
+        "sonarqube"
+      ],
+      "signature_jobs": {
+        "sonarqube": "Sonarqube"
+      },
+      "requires_source": true,
+      "requires_file": "sonar.properties"
+    },
+    "secret-scanning/.gitlab-ci.yml": {
+      "provides": [
+        "secret-scanning"
+      ],
+      "signature_jobs": {
+        "secret-scanning": "Git:Secret:Scan"
+      }
+    },
+    "license/.gitlab-ci.yml": {
+      "provides": [
+        "license-scanning"
+      ],
+      "signature_jobs": {
+        "license-scanning": "License:Scan"
+      },
+      "requires_source": true
+    },
+    "sbom/.gitlab-ci.yml": {
+      "provides": [
+        "sbom-scanning"
+      ],
+      "signature_jobs": {
+        "sbom-scanning": "SBOM:Scan"
+      },
+      "requires_source": true
+    },
+    "release/.gitlab-ci.yml": {
+      "provides": []
+    },
+    "terraform/.gitlab-ci.yml": {
+      "provides": [
+        "build",
+        "lint",
+        "check"
+      ]
+    }
+  },
+  "default_include_set": {
+    "$note": "Start here for a service repository and subtract with a stated reason. The common defect is an under-declared include list, which silently drops quality and supply-chain coverage while looking tidy.",
+    "service": [
+      "common/.gitlab-ci.yml",
+      "<language>/.gitlab-ci.yml",
+      "image/.docker.gitlab-ci.yml",
+      "image/.gitlab-ci.yml",
+      "chart/.gitlab-ci.yml",
+      "sonarqube/.gitlab-ci.yml",
+      "secret-scanning/.gitlab-ci.yml",
+      "license/.gitlab-ci.yml",
+      "sbom/.gitlab-ci.yml",
+      "release/.gitlab-ci.yml"
+    ],
+    "image-only": [
+      "common/.gitlab-ci.yml",
+      "image/.docker.gitlab-ci.yml",
+      "image/.gitlab-ci.yml",
+      "secret-scanning/.gitlab-ci.yml",
+      "release/.gitlab-ci.yml"
+    ],
+    "conditional": [
+      "readme/.migration-guide.gitlab.yml",
+      "deploy/gitops/.komodo.gitlab-ci.yml",
+      "deploy/gitops/.argocd.gitlab-ci.yml"
+    ]
+  },
+  "required_variables": {
+    "PROJECT_CACHE_KEY": "Always declared, even though common/ defaults it to \"\". Value is the plain language name -- node, python, go, java -- not the project name or a version. It prefixes every cache key in the repo and sonarqube/ builds sonar-${PROJECT_CACHE_KEY}."
+  }
+}

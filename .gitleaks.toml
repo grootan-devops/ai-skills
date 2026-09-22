@@ -1,0 +1,21 @@
+# betterleaks / gitleaks configuration.
+#
+# The skills documentation explains what a credential-bearing URL looks like, so it
+# necessarily contains strings shaped like one. `generic-credential-uri` is a low-confidence
+# rule and matches the password segment of `scheme://user:pw@host` wherever it appears --
+# including inside the rule that tells a reader to look for it.
+#
+# Scoped to the three files that teach the pattern, and to that one rule: a real credential
+# in any other file, or under any other rule, still fails the scan.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Credential-shaped URLs in documentation that teaches the pattern"
+targetRules = ["generic-credential-uri"]
+paths = [
+  '''platform-builder/core/references/security-core\.md$''',
+  '''platform-builder/SKILL\.md$''',
+  '''platform-builder/core/scripts/checks_common\.py$''',
+]

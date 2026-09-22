@@ -1,0 +1,40 @@
+name: CD · Tag, Release & Notify
+run-name: "Release · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - ".github/**"
+
+concurrency:
+  group: "release-${{ github.ref }}"
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  release:
+    needs: [init]
+    permissions:
+      contents: write
+      actions: read
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@dev
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+      notify: true

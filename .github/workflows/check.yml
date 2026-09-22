@@ -1,0 +1,33 @@
+name: Check · Release Prerequisites
+run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      allow-unstable-library-refs: true
+      check-library-pinning: false

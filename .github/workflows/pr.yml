@@ -1,0 +1,46 @@
+name: CI · PR Verification
+run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@dev
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@dev
+    secrets: inherit
+    with:
+      lint-md-files: "**/*.md"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@dev
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      allow-unstable-library-refs: true
+      check-library-pinning: false
+
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@dev
+    secrets: inherit
+    with:
+      full-history: false
