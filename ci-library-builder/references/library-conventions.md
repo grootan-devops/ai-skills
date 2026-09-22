@@ -177,7 +177,7 @@ which means the input block can no longer be read on its own.
 **Do not write that chain.** Sort each value by who owns it:
 
 | The value is… | Then it is | Default |
-|---|---|---|
+| --- | --- | --- |
 | one repository's layout — chart directory, project root, Dockerfile path, file names | an **input** | a real `default:` in the declaration |
 | shared infrastructure every repo in the org points at — registry host, Trivy or Sonar server, GitOps endpoint | a **`vars.*`** | a literal fallback, or none |
 | an image coordinate | a **`vars.*`** | **none** — SKILL §1.4 |
@@ -203,6 +203,7 @@ on a value the workflow cannot run without is a declaration that lies: GitHub ac
 caller, and the empty value fails deep inside a script — or worse, silently builds a wrong
 path, registry reference or cache key. Reserve `default: ""` for inputs where empty is a
 real, handled state, and say in the description what empty means.
+
 - One registry credential pair, named `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`,
   used library-wide.
 
