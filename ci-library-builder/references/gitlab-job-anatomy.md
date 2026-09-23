@@ -32,11 +32,13 @@ Two rules that follow:
 
 - **A hidden template is never named for a stage it does not own.** `.Node:Build` is a base for
   `Project:Build`, not a job.
-- **A concrete job carries no language segment.** `Dependency:Download`, not
-  `Node:Dependency:Download` — the language lives in the hidden template it extends. The one
-  deliberate exception is `Go:Dependency:Download`, which is concrete because it needs no
-  project-level customisation and the library's own `.Go` / `.go-lint-common` wire `needs:` to
-  that name. Do not "fix" it.
+- **Concrete jobs in the shared library carry no language segment**, except the existing
+  `Go:Dependency:Download`, whose name is part of the library's own `.Go` and
+  `.go-lint-common` `needs:` wiring. This rule applies to library-owned concrete jobs; do not
+  apply it to consumer wrappers. A consuming GitLab project defines stack-scoped jobs such as
+  `Python:Dependency:Download`, `Java:Dependency:Download`, or `Node:Dependency:Download`,
+  extending the matching runtime anchor first and hidden dependency template second. Do not
+  replace those wrappers with a generic `Dependency:Download`.
 
 ## 3. Which stage?
 
@@ -138,13 +140,16 @@ If the job belongs to a `WORKFLOW` option, the option must appear in the anchor'
 
 ```yaml
 cache:
-  key:
-    files: [package-lock.json]     # the lockfile, so the key moves when deps move
-    prefix: ${PROJECT_CACHE_KEY}
+  key: ${PROJECT_CACHE_KEY}
   when: always
   policy: pull                     # pull-push ONLY in the job that warms it
   paths: [${PROJECT_PATH}/.npm/]
 ```
+
+In the GitLab library, the dependency-download job warms this key (`pull-push`) and jobs that
+consume the cache, including `Image:Build`, restore the **same** key and cache path (`pull`).
+Do not add `cache:key:files` or a lockfile digest to only one side of that handoff; the
+language module's `PROJECT_CACHE_KEY` is the cache identity.
 
 One job warms (`policy: pull-push`), every other job reads (`policy: pull`). Two warmers means
 two writers racing for one key.

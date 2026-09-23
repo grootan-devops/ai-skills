@@ -57,12 +57,19 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 | GitLab | GitHub Actions |
 | --- | --- |
 | `cache: key: files: [uv.lock]` | `actions/cache` with `key: py-${{ hashFiles('uv.lock') }}` |
+| GitLab library `cache: key: ${PROJECT_CACHE_KEY}` shared across the dependency warmer and `Image:Build` | No direct equivalent; model the cache handoff explicitly |
 | `cache: policy: pull-push` | `cache/restore` + `cache/save` in the dependency job |
 | `cache: policy: pull` | `cache/restore` only |
 | `cache: key: prefix:` | A literal prefix in the key plus `restore-keys:` |
 
-> Never use a static cache key. A key that does not hash the lockfile silently serves a
-> stale dependency set.
+> For GitHub Actions, use a lockfile-derived cache key. GitLab's stable `${PROJECT_CACHE_KEY}`
+> is specifically for sharing the dependency cache with `Image:Build`; it does not use
+> `cache:key:files` for that handoff.
+> GitHub cache entries can be restored across jobs by key, but restoring one in a job does not
+> put its files on another job's filesystem. Before porting a GitLab dependency-cache mount into
+> a Docker build, verify that the GitHub image workflow itself restores or receives the cache in
+> its build context. In the current `github-ci-library`, `docker.yml` does not receive the `.npm`
+> or `.uv-cache` directories from the Node/Python workflows.
 
 ## 5. Execution environment
 

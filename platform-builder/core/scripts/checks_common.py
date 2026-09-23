@@ -466,20 +466,14 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
     ]
 
     # Dependency resolution is packaging's twin failure, and the one interpreted stacks
-    # hit. It is a defect only when it can reach the NETWORK: an install that resolves
-    # online at image-build time re-resolves what the pipeline already pinned and
-    # scanned, so the image cannot be reproduced from what CI tested.
-    #
-    # Installing OFFLINE from the CI cache, bind-mounted by BuildKit, is the library's
-    # own sanctioned pattern (Pattern A -- see the Python example in the CI library's
-    # README). The cache is the handoff. A dependency directory is NEVER an artifact:
-    # every `needs:` in the language modules uses `artifacts: false`, and the cache
-    # blocks carry `cache: policy: pull`. The cache is warmed by the dependency-download
-    # job; there is no separate install job to point at.
+    # hit. It is a defect when it can reach the network: an install that resolves online
+    # at image-build time re-resolves what the pipeline already pinned and scanned.
+    # Cache locations and, critically, handoff mechanics depend on the selected platform.
     dependency_installs = [
-        (r"\b(npm\s+(ci|install|i)\b|yarn\s+install|pnpm\s+(install|i)\b)", ".npm", "Dependency:Download"),
-        (r"\b(pip\s+install|uv\s+sync|uv\s+pip\s+install|poetry\s+install)\b", ".uv", "Dependency:Download"),
-        (r"\b(go\s+mod\s+download|mvn\s+dependency:go-offline)\b", ".m2", "the dependency-download job"),
+        (r"\b(npm\s+(ci|install|i)\b|yarn\s+install|pnpm\s+(install|i)\b)", ".npm", ".npm", "Node:Dependency:Download"),
+        (r"\b(pip\s+install|uv\s+sync|uv\s+pip\s+install|poetry\s+install)\b", ".uv", ".uv-cache", "Python:Dependency:Download"),
+        (r"\bgo\s+mod\s+download\b", ".cache", ".go-cache", "Go:Dependency:Download"),
+        (r"\bmvn\s+dependency:go-offline\b", ".m2", ".m2", "Java:Dependency:Download"),
     ]
 
     known_stages = set()
@@ -546,9 +540,10 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
     # Dockerfile is tooling for the image itself, not project dependencies the pipeline
     # already resolved. The packaging rule has nothing to say about it.
     for start_line, instruction in (() if shape == "image-only" else _logical_instructions(lines)):
-        for pat, cache_dir, install_tpl in dependency_installs:
+        for pat, gitlab_cache_dir, github_cache_dir, install_tpl in dependency_installs:
             if not re.search(pat, instruction):
                 continue
+            cache_dir = github_cache_dir if _PLATFORM == "github" else gitlab_cache_dir
             mounts_cache = re.search(
                 r"--mount=type=(bind|cache)[^\s]*source=" + re.escape(cache_dir) + r"\b", instruction
             ) or re.search(r"--mount=type=cache[^\s]*target=[^\s]*" + re.escape(cache_dir) + r"\b", instruction)
@@ -563,12 +558,30 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                     "never scanned. Add --offline."
                 ))
                 continue
+            if _PLATFORM == "github":
+                remedy = (
+                    " The current github-ci-library docker.yml does not restore the language "
+                    "workflow's Actions cache into the Docker build context. Do not copy the "
+                    "GitLab PROJECT_CACHE_KEY/cache: policy: pull recipe; an explicit cache or "
+                    "artifact handoff in the image workflow is required before using an offline "
+                    "BuildKit mount."
+                )
+            elif _PLATFORM == "gitlab":
+                remedy = (
+                    f" Warm the cache in {install_tpl}, restore it onto Image:Build with the "
+                    "same PROJECT_CACHE_KEY and cache path (`cache: policy: pull`), then install "
+                    "offline from a read-write BuildKit bind mount."
+                )
+            else:
+                remedy = (
+                    " Provide an explicit cache handoff from the selected CI platform into the "
+                    "Docker build context, then install offline from a read-write BuildKit mount."
+                )
             findings.append(Finding(
                 "P1", "Dockerfile Packaging Violation", f"{df_file.name}:{start_line}",
                 f"Dockerfile resolves dependencies at image-build time with no {cache_dir} cache mount, so "
                 "it reaches the network and re-resolves what the pipeline already pinned and scanned. "
-                f"Warm the cache in a CI job (extends {install_tpl}), restore it onto Image:Build with "
-                f"`cache: policy: pull`, and install offline from a BuildKit bind mount: "
+                f"{remedy} Suggested Dockerfile mount: "
                 f"`RUN --mount=type=bind,source={cache_dir},target=/tmp/{cache_dir},rw ... --offline`. "
                 f"Do NOT publish the dependency directory as an artifact -- it is cached, not artifacted."
             ))

@@ -95,8 +95,10 @@ Work the eight decisions in `gitlab-job-anatomy.md` **in order**, then their Git
 1. **Should it exist?** If the library cannot decide it for every consumer, it is a hidden
    template, not a job. If the platform already provides the outcome, the right job is no job.
 2. **Hidden or concrete.** Consumer must choose something → hidden. Identical everywhere →
-   concrete. A concrete job carries no language segment (`Dependency:Download`, not
-   `Node:Dependency:Download`); `Go:Dependency:Download` is the deliberate exception.
+   concrete. Shared library-owned concrete jobs carry no language segment, except the existing
+   `Go:Dependency:Download`. This rule does not rename consumer wrappers: GitLab consumers use
+   stack-scoped jobs such as `Python:Dependency:Download`, `Java:Dependency:Download`, and
+   `Node:Dependency:Download`; read `gitlab-job-anatomy.md` for that distinction.
 3. **Stage**, from what the job asserts — never from what is convenient.
 4. **Image**: default toolkit first. Declare one only when the toolkit genuinely lacks the tool,
    and put it on the anchor, never on a concrete job and never on a consumer.
@@ -105,7 +107,9 @@ Work the eight decisions in `gitlab-job-anatomy.md` **in order**, then their Git
    not read, gate placed to stop waste earliest without serialising overlappable work.
 6. **`rules:`** — extend an existing anchor. Never unconditional, never an inline copy.
 7. **`cache:` / `artifacts:`** — one warmer (`pull-push`), many readers (`pull`); artifacts always
-   carry `expire_in`.
+   carry `expire_in`. For GitLab dependency caches, use the same `${PROJECT_CACHE_KEY}` and
+   cache path on the warmer and readers, including `Image:Build`; do not apply GitHub's
+   lockfile-hash key pattern to this GitLab handoff.
 8. **Which file** — an existing module unless a consumer would want these jobs *without* the rest
    of that module. A new file is a new `include:` entry, a new `WORKFLOW` option, README,
    CHANGELOG and possibly MIGRATION.

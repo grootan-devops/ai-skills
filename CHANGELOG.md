@@ -11,6 +11,8 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Align GitLab onboarding guidance and checks with stack-scoped dependency jobs, stable shared
+  cache keys, and read-write BuildKit mounts; keep GitHub cache-handoff guidance platform-specific.
 - Load shared-library documentation progressively from README task indexes at the selected ref.
 - Validate linked documentation, examples and topic coverage in both CI-library verifiers.
 - Require meaningful module-index descriptions and preserve explicit source refs independently of example pins.

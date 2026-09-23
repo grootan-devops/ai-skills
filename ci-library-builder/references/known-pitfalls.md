@@ -188,7 +188,7 @@ fails with an unhelpful reference like `registry.contoso.com/`.
 Mitigation is documentation, not code: link required-variable configuration prominently from the README and
 include relevant changes in the MIGRATION guide. Do not add a default to paper over it (SKILL §1.4).
 
-## 13. A static cache key silently serves stale dependencies
+## 13. A static GitHub Actions cache key silently serves stale dependencies
 
 `key: py-cache` never invalidates. Always hash the lockfile:
 

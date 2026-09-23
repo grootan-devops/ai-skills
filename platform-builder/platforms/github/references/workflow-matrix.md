@@ -67,6 +67,19 @@ Secret scanning still applies because it inspects Git history rather than langua
 When a pull-request workflow uses `paths:`, include `.github/**` so changes to workflows,
 actions, and repository automation always run the PR checks that validate them.
 
+### Dependency-cache scope for Docker builds
+
+The Python and Node reusable workflows restore/save `.uv-cache` and `.npm` using lockfile-based
+GitHub Actions cache keys. A job can restore a matching cache entry, but a directory restored
+in one job is not present on another job's filesystem automatically. In the current library,
+`docker.yml` does not restore or download either directory; its BuildKit registry cache is for
+image layers only. Therefore, do not claim that
+`python-build.yml` or `node-build.yml` warms the Docker build context, and do not generate an
+offline `RUN --mount` that assumes this cache handoff exists. If an application requires that
+pattern, report that the current image workflow needs an explicit cache/artifact handoff. Keep
+GitLab's `PROJECT_CACHE_KEY` convention out of GitHub Actions; these are different cache
+mechanisms and workflows.
+
 ## 3. Release promotes, it does not rebuild
 
 `docker.yml` and `chart.yml` in `is-release: true` mode resolve the candidate the pull request

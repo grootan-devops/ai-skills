@@ -244,7 +244,9 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
             and not any("mono/" in f for f in included_files)):
         findings.append(Finding(
             "P1", "Missing CI Job", f"{ci_file.name}",
-            "Missing dedicated Dependency:Download job in stage 'prepare'. Dependencies must be pre-cached."
+            "Missing a stack-specific dependency-download job in stage 'prepare' (for example, "
+            "Python:Dependency:Download, Java:Dependency:Download, or Node:Dependency:Download). "
+            "Go may use the library-provided Go:Dependency:Download job. Dependencies must be pre-cached."
         ))
 
     # Interpreted stacks frequently have nothing to compile. Python was already exempt;
@@ -298,23 +300,23 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
     variables = data.get("variables") if isinstance(data.get("variables"), dict) else {}
 
     # PROJECT_CACHE_KEY: common/ defaults it to "", so an omission is silently legal.
-    # Left empty, every cache key degrades to a bare lockfile hash and sonarqube/ builds
-    # the literal "sonar-". It is always declared, and names the language.
-    _LANG_KEYS = {"node", "python", "go", "java"}
+    # An empty key collapses all caches in the project to the same identity and makes
+    # sonarqube/ build the literal "sonar-". Declare a nonempty stack key.
+    _STACK_KEYS = {"node", "python", "go", "java", "terraform"}
     cache_key = str(variables.get("PROJECT_CACHE_KEY", "") or "").strip()
     if not cache_key:
         findings.append(Finding(
             "P2", "Missing PROJECT_CACHE_KEY", f"{ci_file.name}:variables",
             "PROJECT_CACHE_KEY is not declared. It defaults to an empty string, which leaves "
-            "every cache key a bare lockfile hash and makes sonarqube/'s key the literal "
-            "'sonar-'. Declare it with the plain language name, e.g. PROJECT_CACHE_KEY: \"node\"."
+            "cache identities empty and makes sonarqube/'s key the literal 'sonar-'. Declare "
+            "a nonempty stack key, e.g. PROJECT_CACHE_KEY: \"node\"."
         ))
-    elif cache_key.split("-")[0] not in _LANG_KEYS:
+    elif cache_key.split("-")[0] not in _STACK_KEYS:
         findings.append(Finding(
             "P2", "Non-Standard PROJECT_CACHE_KEY", f"{ci_file.name}:variables",
-            f"PROJECT_CACHE_KEY is '{cache_key}'. The standard value is the plain language name "
-            f"({', '.join(sorted(_LANG_KEYS))}), optionally suffixed for a monorepo child "
-            f"(e.g. 'node-admin') -- not the project or image name."
+            f"PROJECT_CACHE_KEY is '{cache_key}'. Start with a supported stack name "
+            f"({', '.join(sorted(_STACK_KEYS))}), optionally suffixed for a monorepo child "
+            f"(e.g. 'node-admin'); do not use a project or image name as the prefix."
         ))
 
     # A module whose repo-level prerequisite is absent creates a pipeline that fails in
