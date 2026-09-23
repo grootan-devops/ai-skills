@@ -23,6 +23,8 @@ try:
 except ImportError:
     sys.exit("PyYAML is required: pip install pyyaml")
 
+from documentation import check_documentation
+
 # Concrete jobs the library deliberately names with a language segment.
 NAMING_EXCEPTIONS = {"Go:Dependency:Download", "Go:Fmt", "Go:Vet", "Go:Lint", "Go:Security:Scan"}
 LANG_PREFIXES = ("Node:", "Python:", "Java:", "Golang:", "Go:")
@@ -201,10 +203,13 @@ def main():
         sys.exit(f"not a directory: {root}")
 
     findings = check(root)
+    findings.extend(Finding(item["severity"], "documentation", item["where"],
+                            item["message"], item["fix"])
+                    for item in check_documentation(root, github_workflows=False))
     if a.json:
         print(json.dumps([f.as_dict() for f in findings], indent=2))
     else:
-        for sev in ("P0", "P1"):
+        for sev in ("P0", "P1", "P2"):
             group = [f for f in findings if f.sev == sev]
             if not group:
                 continue
@@ -212,7 +217,8 @@ def main():
             for f in group:
                 print(f"  {f.where}\n      {f.msg}\n      → {f.fix}")
         p0 = sum(1 for f in findings if f.sev == "P0")
-        print(f"\nTotals: P0={p0} P1={len(findings) - p0}")
+        print("\nTotals: " + " ".join(f"{sev}={sum(f.sev == sev for f in findings)}"
+                                       for sev in ("P0", "P1", "P2")))
         if not findings:
             print("Clean.")
         print("\nAlso run: yamllint -c .yamllint.yml <library_dir>")

@@ -10,7 +10,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 | GitLab | GitHub Actions | Notes |
 | --- | --- | --- |
 | `stages: [...]` | `needs:` edges between jobs | No stage keyword. A job starts when *its* dependencies finish, not when a stage drains. Keep the stage order as documentation only. |
-| `stage: build` | Position in the `needs:` graph | Record the original phase in the job name or a table in the README so the mapping stays legible. |
+| `stage: build` | Position in the `needs:` graph | Record the original phase in the job name or a table in the README-linked pipeline lifecycle guide so the mapping stays legible. |
 | `.hidden-template:` + `extends:` | A reusable workflow (`on: workflow_call`) | Each hidden template that a project materialises becomes a callable workflow, or a job inside one. |
 | `extends: [.a, .b]` | Job-level duplication, or a matrix leg | Reusable workflows cannot inherit. Duplicate the few lines, or collapse variants into a matrix. |
 | `include: {project, ref, file}` | `uses: org/repo/.github/workflows/x.yml@ref` | The caller pins the ref. |
@@ -88,7 +88,7 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 | `$CI_REGISTRY` | `vars.IMAGE_REGISTRY` |
 | `$CI_JOB_TOKEN` for the project's own registry | `secrets.IMAGE_REGISTRY_USERNAME` / `_PASSWORD`. **`GITHUB_TOKEN` is not a registry credential for a private third-party registry** — never substitute it silently. |
 | `$CI_DEPENDENCY_PROXY_*` | No equivalent. Pull through the organisation registry instead. |
-| GitLab Helm package registry (`/packages/helm/api/...`) | OCI: `helm push oci://${REGISTRY}/${REPO}` |
+| OCI when `CHART_REGISTRY` is set; otherwise the current project's Helm package registry | OCI only, requiring `CHART_REGISTRY` and chart-specific repository/credentials. No HTTP selector or image-credential fallback. |
 | GitLab generic package registry | GitHub Release assets |
 | `release-cli create` | `softprops/action-gh-release` (creates the tag too) |
 | `docker login` inside a container job | `crane auth login` — the container has no daemon |
@@ -128,9 +128,9 @@ here, it has not been ported before — add it with its adaptation, or stop and 
 
 | GitLab | Adaptation | Documented where |
 | --- | --- | --- |
-| Parent/child pipelines | `mono.yml` returns a `strategy.matrix` of changed projects | README → Monorepos |
-| `WORKFLOW` dropdown | One workflow file per scenario + `workflow_dispatch` | README → Available Scenario Workflows |
-| `allow_failure: exit_codes` | `fail-on-warnings` input, default `false` | README → Scan Exit Codes |
+| Parent/child pipelines | `mono.yml` returns a `strategy.matrix` of changed projects | README → integration examples → monorepos |
+| `WORKFLOW` dropdown | One workflow file per scenario + `workflow_dispatch` | README → pipeline lifecycle → Available Scenario Workflows |
+| `allow_failure: exit_codes` | `fail-on-warnings` input, default `false` | README → security and scanning → Scan Exit Codes |
 | `retry: when: [runner_system_failure]` | None. GitHub retries nothing automatically. | Note it in the port report |
 | `resource_group` | `concurrency:` (approximate — it serialises, it does not queue) | Note the difference |
 

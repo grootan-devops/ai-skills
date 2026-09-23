@@ -59,8 +59,8 @@ Requires Python 3.9+ and PyYAML.
 
 ## 2. Reference Libraries
 
-The skill carries **no copy** of what these libraries do. It reads them at the resolved version,
-every run, because they are the authority on their own behaviour.
+The skill carries **no copy** of what these libraries do. It reads their indexes and selected
+topic guides at the resolved version, because they are the authority on their own behaviour.
 
 | Library | Provides | Read for |
 | --- | --- | --- |
@@ -68,9 +68,12 @@ every run, because they are the authority on their own behaviour.
 | `github-ci-library` | GitHub reusable workflows | module catalog, scenario files, execution matrix |
 | `helm-tpl-library` | `tpl-library` Helm library chart | values contract, mounts schema, template helpers |
 
-Each ships a `README.md` (required) and usually a `MIGRATION.md`. **Re-read both on every
-onboard, update, and audit** — they change between runs, and a stale assumption produces a
-wrong pipeline.
+Each ships a `README.md` index (required) and usually a `MIGRATION.md`. Read the index at the
+resolved ref, then only its topic links relevant to the task. Follow relative links from
+their containing page and keep the same checkout/ref throughout. Local sources include
+uncommitted docs; explicit refs override the configured `main` default. Older versions may
+use a monolithic README: read its relevant sections. Read migration sections for upgrades
+and compatibility checks, not on every run. Do not preload the whole docs tree.
 
 ### 2.1 Choosing which copy
 
@@ -179,7 +182,7 @@ flowchart TD
 flowchart TD
     A["platform onboard [repo]"] --> B["Phase 1 · Context"]
     B --> B1["Detect platform"]
-    B --> B2["Fetch libraries · read README + MIGRATION fresh"]
+    B --> B2["Resolve libraries · README index → task-specific docs"]
 
     B1 --> C["Phase 2 · Classify"]
     B2 --> C

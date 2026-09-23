@@ -1,22 +1,26 @@
 # Documentation Contract
 
-A port is not complete until these three files are updated. Documentation drift in a CI
-library is worse than in most code: consumers copy the README verbatim into their pipelines.
+A change is not complete until the README index, affected topic guides, changelog and any
+required migration notes agree. Consumers copy the linked examples into their pipelines.
 
 ---
 
-## 1. README.md
+## 1. README index and linked documentation
 
-Mirror the source library's structure so a reader can move between platforms. Required
-sections:
+Keep the root README short: purpose, minimal start instructions, and a task-to-document map.
+Mirror topic organization across the two CI libraries so readers can move between platforms.
+Keep each contract in one place under `docs/`; one module or complete integration scenario
+per page prevents a new monolithic manual. Use relative links and a path back to the index.
+
+The following topics must be reachable from the README, not embedded in it:
 
 | Section | Must contain |
 | --- | --- |
-| Quick Start | Two complete, copy-pasteable workflow files (PR + release) |
+| Quick Start | Complete copy-pasteable CI setup; GitHub includes PR and release workflows |
 | Pipeline Phases & Lifecycle | The phase table, mapping each GitLab stage to the workflow · job that now owns it |
 | Execution Model & Trigger Strategy | The two-tier release model, the scenario-workflow table, an execution matrix |
 | Workflow DAGs | Mermaid graphs for PR verification, release promotion, deployment, standalone audits |
-| Module Catalog | One subsection per module, with a mermaid job graph and a job table |
+| Module Catalog | An index describing each module's purpose and responsibilities, linking to its detailed job graph and job table |
 | Dockerfile Standards | Packaging-only rule, non-root `10001:10001`, the build-arg base image table, one example per stack |
 | Inverted `.dockerignore` | The default-deny rule plus a per-stack allowlist table |
 | Key Variables & Configuration | Required variables, build/base images, behavioural variables, secrets |
@@ -29,12 +33,20 @@ sections:
 **Verify mechanically** before reporting done:
 
 ```bash
-python3 scripts/verify-port.py <library_dir>   # includes anchor + YAML-fence checks
+python3 scripts/verify-gitlab-library.py <gitlab_library_dir>
+python3 scripts/verify-github-library.py <github_library_dir>
+python3 scripts/verify-docs.py <library_dir>
 ```
 
-Every TOC anchor must resolve, every ```yaml fence must parse, and every workflow file
-referenced must exist. GitHub's heading slug lowercases, strips punctuation, and replaces
-each space with a hyphen **without collapsing** — so `A & B` becomes `a--b`.
+Validate links and anchors relative to each containing page, including nested paths and
+duplicate-heading suffixes. Check YAML fences across README and `docs/**/*.md`; use
+`gotmpl` for unrendered Helm templates rather than pretending they are valid YAML.
+Referenced library workflow files must exist. Preserve Dockerfile example lint coverage
+when examples move. A legacy monolithic README remains valid; a short index does not waive
+topic coverage. Static validation may inspect every page; agents doing scoped work should not.
+
+For generated Helm documentation, move both the rendered output and the generator's source
+template. Regeneration must preserve the short root README and the separate values reference.
 
 ## 2. CHANGELOG.md
 

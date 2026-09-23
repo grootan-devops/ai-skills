@@ -4,7 +4,7 @@
 differs per platform and lives in:
 
 - `platforms/gitlab/references/stack-snippets.md`
-- the resolved library's own `README.md` (GitHub has no snippets file; the library README is the contract)
+- the module and integration-example links in the resolved library's `README.md` (GitHub has no snippets file; those linked pages are the contract)
 
 Nothing on this page mentions a CI platform. If you find yourself adding a `stage:` or an
 `on:` here, it belongs in a snippets file instead.

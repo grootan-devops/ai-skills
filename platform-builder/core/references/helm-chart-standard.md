@@ -13,8 +13,9 @@ It does **not** restate the `tpl-library` contract. The library's `Chart.yaml` s
 `templates/manifest.yaml` entrypoints (`tpl.deployment`, `tpl.job`, `tpl.cronjob`,
 `tpl.pvc`, `tpl.servicemonitor`), its values structure and comment law, its sensitive-data
 segregation, its sibling-name helper, its `routes:` contract and its `helm-docs` command
-are documented in **helm-tpl-library's own `README.md`**, beside the `values.yaml` they
-describe. Read that at the resolved version, every run. The section numbers below have gaps
+are linked from **helm-tpl-library's own `README.md`**, beside the `values.yaml` they
+describe. Follow only the chart standards, templates, configuration, testing or values links
+needed for the task, at the resolved version. The section numbers below have gaps
 where those topics used to be duplicated here.
 
 ---
@@ -61,7 +62,8 @@ Consumer charts must clearly state the business purpose, runtime architecture, a
 
 5. **Documentation Synchronization**:
    Re-render `chart/README.md` with the exact `helm-docs` invocation the library's own
-   README specifies — the flags are part of that contract, not a detail to improvise.
+   documentation guide specifies — including both outputs when values have a separate generated
+   reference. The flags are part of that contract, not a detail to improvise.
 
 ---
 
@@ -100,7 +102,7 @@ To ensure deterministic naming across Kubernetes namespaces, ArgoCD applications
 
 `tpl-library` derives every container name from the **map key**, not from a `name:` field, and
 reserves `main`. The rendered-name table and the exact scope of that reservation are library
-behaviour and live in helm-tpl-library's `README.md`.
+behaviour and live in the templates/naming guide linked from helm-tpl-library's `README.md`.
 
 What matters when you are *choosing* a key is why the prefix exists: the `container` label
 has to be self-describing in Loki and in cAdvisor metrics without a collector relabel rule.

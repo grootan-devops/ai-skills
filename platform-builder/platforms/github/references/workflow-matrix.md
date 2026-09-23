@@ -4,10 +4,10 @@ Covers what is specific to GitHub. The machine-readable map is
 [`../workflow-map.json`](../workflow-map.json) — the only copy, loaded at runtime by
 `ci_checks.py`.
 
-> **The library documents its own behaviour.** Read `github-ci-library/README.md` and
-> `MIGRATION.md` **every run**: the module catalog, per-module inputs and outputs, the execution
-> matrix, and the two-tier release model live there and are authoritative. This page carries
-> only what the library does not state about itself.
+> **The library documents its own behaviour.** Start at the resolved `github-ci-library/README.md`
+> index, then follow its pipeline lifecycle, relevant module and matching example links.
+> Keep the same ref for all pages; read migration notes when comparing versions. This page
+> carries only what the library does not state about itself.
 
 ---
 
@@ -137,7 +137,7 @@ job calling a reusable workflow takes a `permissions:` block like any other. Put
 at the top hands `packages: write` to the lint job and the secret scan, which push nothing and
 are the jobs most likely to run third-party code.
 
-The library's README carries the per-workflow requirement: which scope each called workflow
+The module and example guides linked from the library's README carry the per-workflow requirement: which scope each called workflow
 needs, so a caller can grant exactly that. Under-grant and the call fails at **startup**, not
 midway — a reusable workflow cannot request a scope its caller did not have.
 

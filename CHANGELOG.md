@@ -7,6 +7,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-23
+
+### Changed
+
+- Load shared-library documentation progressively from README task indexes at the selected ref.
+- Validate linked documentation, examples and topic coverage in both CI-library verifiers.
+- Require meaningful module-index descriptions and preserve explicit source refs independently of example pins.
+- Align chart publishing guidance with GitHub OCI and GitLab's empty-registry package fallback.
+- Report the resolved remote default branch, preserving branch names containing slashes, when a supplied URL omits its ref.
+
 ## [1.1.0] - 2026-09-22
 
 ### Changed

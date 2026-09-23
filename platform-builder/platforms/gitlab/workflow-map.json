@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Skill-owned judgement only: which module provides which WORKFLOW option, the job that proves an option is active, and when a module applies. Job lists, stage order and module descriptions are NOT restated here -- they live in the library's own README.md, which is re-read every run.",
+  "$schema_note": "Skill-owned judgement only: which module provides which WORKFLOW option, the job that proves an option is active, and when a module applies. Job lists, stage order and module descriptions are NOT restated here -- follow the relevant topic links from the library's README.md at the resolved ref.",
   "shared_options": {
     "build": "Satisfied by any language module (nodejs/python/golang/java), so it maps to no single provider.",
     "deploy": "Satisfied by either GitOps module; withheld until `platform ship` wires a real DEPLOY_TARGET."

@@ -15,7 +15,7 @@ minimum footprint.
 The common failure is the *opposite* of over-declaring: an include list carrying only
 `common`, the language module, `image/*` and `chart/` looks tidy and silently gives up
 SonarQube, secret scanning, licence compliance, SBOM and releases. A service repository
-starts from the library README's Quick Start set and removes only what it can justify:
+starts from the getting-started guide linked from the library README and removes only what it can justify:
 
 > [!IMPORTANT]
 > `project:` is the library's path **on the GitLab instance that runs this pipeline**, not
@@ -122,7 +122,7 @@ dependency job at all, so there is nothing to rename. Leave it alone.
 
 `.Node:24` / `.Python:12` / `.Go` set `image:` and the cache; the job template sets stage,
 rules, `needs:` and artifacts. List the **runtime anchor first and the job template second**,
-matching every consumer example in the library README. YAML `extends:` merges left to right
+matching every consumer example linked from the library README. YAML `extends:` merges left to right
 with later entries winning, so the reversed order lets the runtime anchor overwrite keys the
 job template meant to own.
 
@@ -133,7 +133,7 @@ variables:
   PROJECT_CACHE_KEY: "node"     # or "python", "go", "java"
 ```
 
-The library's default and what an empty value degrades to are in the README's Key Variables
+The library's default and what an empty value degrades to are in the README-linked configuration guide's Key Variables
 table. What that table cannot tell you is what to *call* it: **use the plain language
 name** — `node`, `python`, `go`, `java`. Not the project name, not a version: the language
 module whose cache it prefixes. A monorepo child appends its own segment (`node-admin`,
@@ -284,7 +284,7 @@ a fork by another name (§0.2 rule 6), and it outlives the fix.
 
 `language-stacks-core.md` §3 says the image build must not resolve dependencies over the
 network. On GitLab the mechanism for that is the **package-manager cache**, bind-mounted
-into the image build by BuildKit — *Pattern A, cache-only*, which the ci-templates README
+into the image build by BuildKit — *Pattern A, cache-only*, which the CI library's README-linked Docker guide
 documents in full for Python and which every stack follows.
 
 > [!IMPORTANT]

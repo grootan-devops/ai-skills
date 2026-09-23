@@ -71,7 +71,7 @@ repo grows; a denylist silently starts shipping every new directory.
 Three rules:
 
 1. **`**` then `*`, in that order, as the first two lines.** This is the form every
-   example in the CI library's README uses, and it is what the library's own Dockerfiles
+   example in the CI library's README-linked Docker guide uses, and it is what the library's own Dockerfiles
    are written against. Match it rather than reasoning about which one subsumes the other.
 2. **Anchor root-only patterns without a leading slash.** `!*.js` admits root modules and
    does not cross `/`. A leading `/` is not a reliable anchor here; that is `.helmignore`
@@ -85,7 +85,7 @@ Three rules:
 image installs offline from that cache through a BuildKit bind mount; `node_modules/` and
 `.venv/` are neither copied in nor uploaded as artifacts. Admitting `node_modules` instead
 of `.npm` is the same defect as an online `npm ci` in the Dockerfile — see
-the resolved library's own `README.md`.
+the Docker guide linked from the resolved library's `README.md`.
 
 ## 3. `.helmignore` — and the trap that costs hours
 

@@ -6,7 +6,7 @@ references/docs-contract.md. It does not replace actionlint, yamllint or
 shellcheck -- run those too.
 
 Usage:
-    python3 verify-port.py <library_dir> [--strict] [--json]
+    python3 verify-github-library.py <library_dir> [--strict] [--json]
 
 Exit codes:
     0  no P0 findings (or no findings at all with --strict)
@@ -24,6 +24,8 @@ try:
     import yaml
 except ImportError:
     sys.exit("PyYAML is required: pip install pyyaml")
+
+from documentation import check_documentation
 
 # A job may write its summary directly, delegate to a shared script, or let an
 # action publish it. All three satisfy the summary rule.
@@ -57,16 +59,6 @@ SCOPE_EVIDENCE = [
     ("pull-requests: read", re.compile(r"gh\s+pr\s+|commits/.*?/pulls")),
     ("contents: write", re.compile(r"action-gh-release|gh\s+release\s+create|gh\s+api.*?/git/refs")),
 ]
-
-REQUIRED_README_SECTIONS = [
-    "quick start",
-    "module catalog",
-    "key variables",
-    "scan exit codes",
-    "ignored cves",
-    "integration examples",
-]
-
 
 class Findings:
     def __init__(self) -> None:
@@ -347,42 +339,8 @@ def check_scripts(root: Path, f: Findings) -> None:
 
 
 def check_docs(root: Path, f: Findings) -> None:
-    for name in ("README.md", "CHANGELOG.md", "MIGRATION.md"):
-        if not (root / name).is_file():
-            f.add("P0", name, "Missing.", "Required by the documentation contract.")
-
-    readme = root / "README.md"
-    if not readme.is_file():
-        return
-    text = readme.read_text()
-    low = text.lower()
-
-    for section in REQUIRED_README_SECTIONS:
-        if section not in low:
-            f.add("P1", "README.md", f"No '{section}' section.")
-
-    # GitHub slug: lowercase, strip punctuation, spaces -> hyphens, no collapsing.
-    def slug(h: str) -> str:
-        h = re.sub(r"[^\w\s-]", "", h.strip().lower())
-        return h.replace(" ", "-")
-
-    headings = {slug(m.group(2)) for m in re.finditer(r"^(#{2,6})\s+(.+)$", text, re.M)}
-    for anchor in set(re.findall(r"\]\(#([^)]+)\)", text)):
-        if anchor not in headings:
-            f.add("P1", "README.md", f"Broken TOC anchor '#{anchor}'.")
-
-    for i, block in enumerate(re.findall(r"```yaml\n(.*?)```", text, re.S)):
-        try:
-            yaml.safe_load(block)
-        except Exception as exc:  # noqa: BLE001
-            f.add("P1", "README.md", f"YAML example {i} does not parse: {str(exc)[:80]}")
-
-    wf_dir = root / ".github" / "workflows"
-    if wf_dir.is_dir():
-        actual = {p.name for p in wf_dir.glob("*.yml")}
-        for name in sorted(actual - {"ci.yml", "cd.yml"}):
-            if name not in text:
-                f.add("P2", "README.md", f"Workflow '{name}' is undocumented.")
+    for item in check_documentation(root, github_workflows=True):
+        f.add(item["severity"], item["where"], item["message"], item["fix"])
 
 
 def main() -> int:

@@ -22,11 +22,17 @@ argued out, so the next job matches the last one — on both platforms, in the s
 
 ```bash
 # audit both libraries — writes nothing
-python3 scripts/verify-gitlab-library.py ../../ci-templates
+python3 scripts/verify-gitlab-library.py ../../gitlab-ci-library
 python3 scripts/verify-github-library.py ../../github-ci-library
 ```
 
 Then read `SKILL.md` §3 and work the eight decisions in order.
+
+Read each library's short README index, then follow only the relevant module, configuration
+and integration-example links. Resolve links relative to their containing page, at the same
+local checkout or explicit ref (`main` by default for remote sources). Local uncommitted docs
+remain visible; older monolithic READMEs are read by section. Migration notes are needed for
+upgrades and compatibility checks, not every edit.
 
 ## What the verifiers check
 
@@ -42,6 +48,18 @@ summaries, and the documentation contract.
 
 Both exit 1 on a P0, and neither replaces `yamllint`, `actionlint` or `shellcheck`.
 
+Both also validate README-linked documentation: required topic coverage, local links and
+anchors, YAML examples, and library workflow references. Run only that check with
+`python3 scripts/verify-docs.py <library_dir>`; use `--no-contract` for Helm or another
+repository that does not expose the CI topic catalog. The validator reads the docs tree for
+coverage; this is not the reading strategy used by an agent doing a focused task.
+
+Run the documentation and required-dependency regression cases with:
+
+```bash
+python3 -m unittest discover -s scripts/tests
+```
+
 ## Layout
 
 ```text
@@ -49,7 +67,8 @@ SKILL.md        the runbook
 AGENTS.md       the same skill for agents that read AGENTS.md
 references/     gitlab-job-anatomy, github-job-anatomy, construct-mapping,
                 known-pitfalls, library-conventions, docs-contract
-scripts/        verify-gitlab-library.py, verify-github-library.py
+scripts/        verify-gitlab-library.py, verify-github-library.py, verify-docs.py,
+                documentation.py, tests/
 ```
 
 ## History

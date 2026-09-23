@@ -1,6 +1,6 @@
 # Library Conventions
 
-The structural shape a ported library must have. `scripts/verify-port.py` enforces the
+The structural shape a ported library must have. `scripts/verify-github-library.py` enforces the
 mechanical parts of this document.
 
 ---
@@ -28,7 +28,7 @@ scripts/*.sh               # shared shell, shellcheck-clean
 templates/                 # report templates (e.g. trivy-junit.tpl)
 .shellcheckrc
 VERSION
-README.md CHANGELOG.md MIGRATION.md
+README.md docs/ CHANGELOG.md MIGRATION.md
 ```
 
 ## 2. Job anatomy
@@ -95,7 +95,7 @@ receives is the caller's, and GitHub will not grant a scope the caller did not h
 library declares `packages: write` but the calling workflow declares only `contents: read`,
 the push fails at runtime with a permissions error that names neither file.
 
-So the README must state, per scenario, the `permissions:` block the caller needs:
+So the README-linked integration examples must state, per scenario, the `permissions:` block the caller needs:
 
 ```yaml
 # In the consuming repository's pr.yml
@@ -204,8 +204,9 @@ caller, and the empty value fails deep inside a script — or worse, silently bu
 path, registry reference or cache key. Reserve `default: ""` for inputs where empty is a
 real, handled state, and say in the description what empty means.
 
-- One registry credential pair, named `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`,
-  used library-wide.
+- Image publishing uses `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`; chart
+  publishing uses `CHART_REGISTRY_USERNAME` / `CHART_REGISTRY_PASSWORD`. Never substitute
+  one pair for the other. Dependency-only registry overrides are separate from publishing.
 
 > **Organisation limits.** GitHub allows up to 1,000 organisation variables and 1,000
 > organisation secrets, 48 KB each; a single workflow reads at most **100 organisation

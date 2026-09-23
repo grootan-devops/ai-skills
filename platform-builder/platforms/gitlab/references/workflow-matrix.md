@@ -7,7 +7,8 @@ This reference covers only what the template library does **not** document about
 3. Open defects to report during an audit (§5).
 
 For the library's own behaviour — what each workflow runs, the two-tier release model,
-publishing and authentication — read `<ci_templates>/README.md` and `MIGRATION.md` directly (§6).
+publishing and authentication — follow the relevant topic links from `<ci_templates>/README.md` at the resolved ref (§6).
+Read migration notes for upgrades or compatibility checks.
 
 The machine-readable map lives in [`workflow-map.json`](../workflow-map.json) and is loaded at
 runtime by both scripts. There is no second copy.
@@ -39,7 +40,7 @@ Declaring `WORKFLOW` locally is therefore **mandatory** for any project that is 
 The map carries only what the library's README does **not** say: which module provides which
 `WORKFLOW` option, the job that proves an option is active, and when a module applies. Job
 lists, stage order and module descriptions are the library's to state, and are re-read from
-its `README.md` every run.
+the relevant pages linked from its `README.md` at the resolved ref.
 
 Read it directly:
 
@@ -157,14 +158,14 @@ The **two-tier release model** and the **per-workflow stage/job dispatch tables*
 duplicated here. They are not skill knowledge — they are facts about the template library,
 and the library documents them itself. Duplicating them guaranteed they would drift.
 
-**Read these at the source, every run:**
+**Follow the relevant topic links at the resolved source:**
 
 | Question | Authoritative source |
 | --- | --- |
-| What does each `WORKFLOW` value run? | `<ci_templates>/README.md` → *Available Manual Workflows* + *Comprehensive Execution Matrix* |
-| Which jobs are in which stage? | `<ci_templates>/README.md` → the per-module job tables |
+| What does each `WORKFLOW` value run? | `<ci_templates>/README.md` → pipeline lifecycle → *Available Manual Workflows* + *Comprehensive Execution Matrix* |
+| Which jobs are in which stage? | `<ci_templates>/README.md` → module catalog → relevant module's job table |
 | What changed between library versions? | `<ci_templates>/MIGRATION.md` |
-| How are charts/images published and authenticated? | `<ci_templates>/README.md` → *Helm Chart Publishing & Authentication*, *Container Image Publishing & Authentication* |
+| How are charts/images published and authenticated? | `<ci_templates>/README.md` → configuration → chart/image publishing and authentication |
 
 `core/scripts/libraries.py` resolves the library and prints these paths. `platform onboard`,
 `platform update`, and `platform audit` all read them before acting — see SKILL.md §0.

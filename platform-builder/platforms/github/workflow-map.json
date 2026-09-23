@@ -1,10 +1,10 @@
 {
-  "$schema_note": "Skill-owned judgement only: which scenario files a repository SHAPE needs. Triggers, called modules, permissions and inputs are NOT restated here -- they live in the library's own README.md, which is re-read every run.",
+  "$schema_note": "Skill-owned judgement only: which scenario files a repository SHAPE needs. Triggers, called modules, permissions and inputs are NOT restated here -- follow the relevant topic links from the library's README.md at the resolved ref.",
   "$library": {
     "repo": "github-ci-library",
     "version": "1.0.0",
     "call_form": "uses: grootan-devops/github-ci-library/.github/workflows/<module>.yml@<version>",
-    "note": "Derived from the library's own README.md (Available Scenario Workflows + Module Catalog). That README is authoritative and must be re-read every run; this file follows it."
+    "note": "Derived from the pipeline lifecycle and module catalog linked from the library's README.md. Those selected-ref guides are authoritative; this file follows them."
   },
   "scenarios": {
     "pr.yml": {

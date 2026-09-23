@@ -61,7 +61,18 @@ Then read, in the library itself and not from this file:
 
 - `common/.gitlab-ci.yml` — `stages:`, `default:`, every `.*-rules` anchor, every variable.
 - the module file the job would live in, in full.
-- the library's own `README.md` and `MIGRATION.md`.
+- the library's own `README.md` index, then the linked module, configuration and example
+  pages relevant to the change; read `MIGRATION.md` for upgrades or compatibility changes.
+
+Follow relative links from the containing Markdown file, including nested `../` links and
+fragments. Use the supplied local working copy, including uncommitted documentation, for
+every page; never substitute an upstream `main` page for a local or explicitly selected ref.
+When a caller supplies a remote source, preserve its explicit branch, tag or commit. Configured
+library defaults use `main`; an explicitly supplied URL without a ref uses the remote's default
+branch, as defined by the platform-builder resolver. Example `1.0.0` pins never override that
+selection. Keep all pages at that resolved commit. Older versions may keep
+their contract in one README: read the relevant headings instead. Report missing required
+pages, and do not recursively load the whole docs directory or unrelated modules.
 
 ## 2. Commands
 
@@ -108,6 +119,13 @@ and a `GITHUB_STEP_SUMMARY` block on every job.
 change, or the gap is stated explicitly in the report. Silent divergence between the two libraries
 is the failure this skill exists to prevent.
 
+For chart registry changes, follow the supplied libraries' README links to their chart and
+registry configuration guides. Verify backend selection across authentication, checks, push,
+remote scanning and promotion. GitHub publishes only to configured OCI; GitLab uses configured
+OCI or its own Helm Package Registry when `CHART_REGISTRY` is unset/empty. Never infer a generic
+HTTP publishing option or substitute image credentials. Dependency-only authentication must
+not change the publishing backend. Test operational errors separately from confirmed absence.
+
 ## 4. Audit — what no script can check
 
 The verifiers cover structure. These need judgement:
@@ -140,5 +158,5 @@ yamllint -c <gitlab_path>/.yamllint.yml <gitlab_path>
 actionlint && yamllint -s <github_path>/.github/workflows/ && shellcheck <github_path>/scripts/*.sh
 ```
 
-Then the documentation contract in `docs-contract.md`: README for a new module or option,
+Then the documentation contract in `docs-contract.md`: README index and linked docs for a new module or option,
 CHANGELOG always, MIGRATION when an existing pipeline must change.

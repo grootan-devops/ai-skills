@@ -185,8 +185,8 @@ Expressions work in `container.image` and `container.credentials`. But the image
 *before* the first step, so a validation step cannot catch a missing variable — the run
 fails with an unhelpful reference like `registry.contoso.com/`.
 
-Mitigation is documentation, not code: list required variables prominently in the README and
-MIGRATION guide. Do not add a default to paper over it (SKILL §1.4).
+Mitigation is documentation, not code: link required-variable configuration prominently from the README and
+include relevant changes in the MIGRATION guide. Do not add a default to paper over it (SKILL §1.4).
 
 ## 13. A static cache key silently serves stale dependencies
 
@@ -230,4 +230,4 @@ needs `contents: write`.
 
 A publish job that declares `contents: write` merely to upload an artifact is
 over-privileged, and the declaration reads as if it writes to the repository when it does
-not. `verify-port.py` flags this.
+not. `verify-github-library.py` flags this.

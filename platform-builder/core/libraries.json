@@ -15,7 +15,9 @@
     "'platforms' says which libraries a run on that platform actually reads."
   ],
   "trusted_registries": [
-    "registry-1.docker.io/grootantech"
+    "registry-1.docker.io/grootantech",
+    "grootantech",
+    "docker.io/grootantech"
   ],
   "libraries": {
     "gitlab-ci-library": {
