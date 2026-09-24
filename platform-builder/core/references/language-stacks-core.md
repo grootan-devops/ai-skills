@@ -207,17 +207,21 @@ dedicated micro image):
 | Go, or anything else | `MICRO_ROOT_BASE_IMAGE` | `grootantech/micro-root:latest` |
 
 **Always declare the approved enterprise default image with tag `:latest` on every base image `ARG`:**
+
 ```dockerfile
 ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest
 FROM ${PYTHON_312_MICRO_BASE_IMAGE}
 ```
+
 or grouped:
+
 ```dockerfile
 ARG TOOLKIT_BUILD_IMAGE=grootantech/toolkit:latest \
     MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest
 ```
 
 **Why default to enterprise `:latest`?**
+
 1. **Local Developer Ergonomics:** Developers can execute plain `docker build -t myapp .` locally out of the box without providing tedious `--build-arg` flags.
 2. **Prevent Supply Chain Drift:** Defaults prevent developers from guessing or hardcoding unapproved public Docker Hub images (e.g. `python:3.12-alpine` or `node:24-slim`).
 3. **Clean CI Overrides:** In CI pipelines (`Image:Build` / `buildah`), the pipeline passes `--build-arg <VAR>=<REGISTRY>/<IMAGE>:<EXACT_TAG>` via the Dependency Proxy or private mirror. The build argument cleanly overrides the `:latest` default with immutable pinned tags.

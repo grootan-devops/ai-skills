@@ -209,20 +209,24 @@ library when the library changes. In particular do **not** re-declare:
 ### Overriding DAG `needs:` in multi-test and polyglot pipelines (SonarQube & Image:Build)
 
 The library templates define default DAG dependencies designed for canonical single-stack repositories:
+
 - `Sonarqube` defaults to `needs: [Common:Init, Project:Build, Project:Unit:Test]`.
 - `Image:Build` defaults to `needs: [Common:Init, Project:Build, Node:Dependency:Download, Python:Dependency:Download]`.
 
 When a repository deviates from this single-job layout — such as:
+
 1. **Multiple or Split Test Jobs:** e.g., a full-stack project or monorepo with `Project:Unit:Test:Frontend` and `Project:Unit:Test:Backend` (or `Project:Unit:Test:Node` and `Project:Unit:Test:Python`).
 2. **Multiple or Custom Build Jobs:** e.g., `Project:Build:Frontend` and `Project:Build:Backend`, or a custom bundling step.
 3. **Interpreted Stacks without `Project:Build`:** e.g., Python services where no compilation step exists, or custom frontend asset builds.
 
 **The Failure Mode:**
+
 Because the library marks `Project:Unit:Test` and `Project:Build` as `optional: true`, GitLab CI's DAG scheduler does **not** wait for `Project:Unit:Test:Frontend` or `Project:Unit:Test:Backend`. It treats the missing canonical job as simply absent, and schedules `Sonarqube` or `Image:Build` **immediately** after `Common:Init`!
 - `Sonarqube` executes before unit tests finish, completely missing JUnit XML results and test coverage reports (`0% coverage`), and wasting runner compute if tests fail.
 - `Image:Build` executes before frontend build assets (`dist/`) are generated, causing Dockerfile `COPY dist/ ...` to fail with missing files.
 
 **The Solution:**
+
 Override `Sonarqube.needs` and `Image:Build.needs` at the project level in `.gitlab-ci.yml`:
 
 ```yaml
