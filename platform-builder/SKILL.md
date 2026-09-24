@@ -267,7 +267,7 @@ them is not "no tests yet", it is a pipeline that builds an artifact nobody exec
 | Present | Ask | Turns on |
 | --- | --- | --- |
 | a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
-| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `test`). Runs `helm unittest` against a mock consumer chart. |
+| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `tests`, accepts space-separated chart directories). Runs each chart's own `tests/*_test.yaml` suites. |
 
 Ask for each artifact that exists, and ask **both** where both exist — they are independent
 decisions. If the repository already ships the script or the mock chart, say so and default

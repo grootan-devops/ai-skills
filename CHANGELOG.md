@@ -7,7 +7,21 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the `gitops-app-manager` skill; use `gitops-manager` for Argo CD environment bootstrap.
+
+### Changed
+
+- Update platform-builder's mock-chart default to `tests/` and document the nested suite path.
+
 ## [1.2.0] - 2026-09-23
+
+### Added
+
+- Added the focused `gitops-manager` skill for authenticated Argo CD environment bootstrap,
+  standard consumer chart scaffolding, and root Application creation; deprecated the broad
+  `gitops-app-manager` skill for new work.
 
 ### Changed
 

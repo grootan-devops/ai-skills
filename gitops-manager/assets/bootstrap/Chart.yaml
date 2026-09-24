@@ -1,0 +1,10 @@
+apiVersion: v2
+name: __PROJECT_NAME__
+description: GitOps application catalog for __PROJECT_NAME__.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: argocd-gitops-tpl-library
+    version: __LATEST_STABLE_CHART_VERSION__
+    repository: oci://registry-1.docker.io/grootantech
