@@ -274,6 +274,93 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
             "Missing dedicated Project:Unit:Test job in stage 'test'."
         ))
 
+    # 3a. DAG Needs Override Check for Multi-Test / Multi-Build Pipelines
+    # When multiple test jobs (e.g. Project:Unit:Test:Frontend & Project:Unit:Test:Backend)
+    # or custom build jobs exist, downstream library jobs (Sonarqube, Image:Build)
+    # that default to single canonical jobs [Project:Unit:Test] or [Project:Build] MUST
+    # override needs: at the project level. Otherwise GitLab CI DAG skips waiting for them,
+    # running SonarQube without coverage or Image:Build without built assets.
+    has_sonarqube = any("sonarqube/" in f for f in included_files) or "sonarqube" in workflow_options
+    if has_sonarqube:
+        needs_sonar_override = (
+            len(test_jobs) > 1 or
+            (len(test_jobs) == 1 and "Project:Unit:Test" not in test_jobs) or
+            len(build_jobs) > 1 or
+            (len(build_jobs) == 1 and "Project:Build" not in build_jobs)
+        )
+        if needs_sonar_override:
+            sonar_job = data.get("Sonarqube")
+            is_disabled = (
+                isinstance(sonar_job, dict)
+                and isinstance(sonar_job.get("rules"), list)
+                and all(isinstance(r, dict) and r.get("when") == "never" for r in sonar_job["rules"])
+                and sonar_job["rules"]
+            )
+            if not is_disabled:
+                if not isinstance(sonar_job, dict) or "needs" not in sonar_job:
+                    findings.append(Finding(
+                        "P1", "Missing SonarQube DAG Needs Override", f"{ci_file.name}:Sonarqube",
+                        f"Pipeline defines multiple or custom test/build jobs ({', '.join(sorted(test_jobs + build_jobs))}), "
+                        "but 'Sonarqube' does not override 'needs:' at the project level. The shared library template only depends "
+                        "on 'Project:Build' and 'Project:Unit:Test'. Without overriding 'needs:', GitLab CI DAG runs SonarQube "
+                        "immediately without waiting for test completion or collecting coverage reports. "
+                        "Override 'Sonarqube.needs' at the project level to explicitly list all test and build jobs."
+                    ))
+                else:
+                    sonar_needs = sonar_job.get("needs")
+                    needed_jobs = set()
+                    if isinstance(sonar_needs, list):
+                        for entry in sonar_needs:
+                            if isinstance(entry, dict) and "job" in entry:
+                                needed_jobs.add(entry["job"])
+                            elif isinstance(entry, str):
+                                needed_jobs.add(entry)
+                    missing_tests = [tj for tj in test_jobs if tj not in needed_jobs]
+                    if missing_tests:
+                        findings.append(Finding(
+                            "P1", "Incomplete SonarQube DAG Needs", f"{ci_file.name}:Sonarqube.needs",
+                            f"SonarQube 'needs:' is missing test job(s): {', '.join(sorted(missing_tests))}. "
+                            "All test jobs must be listed in 'Sonarqube.needs' (with artifacts: true, optional: true) "
+                            "so SonarQube waits for unit tests and ingests test/coverage reports."
+                        ))
+
+    has_image = any("image/" in f for f in included_files) or "image-build-and-push" in workflow_options
+    if has_image and build_jobs:
+        needs_image_override = len(build_jobs) > 1 or (len(build_jobs) == 1 and "Project:Build" not in build_jobs)
+        if needs_image_override:
+            image_job = data.get("Image:Build")
+            is_disabled = (
+                isinstance(image_job, dict)
+                and isinstance(image_job.get("rules"), list)
+                and all(isinstance(r, dict) and r.get("when") == "never" for r in image_job["rules"])
+                and image_job["rules"]
+            )
+            if not is_disabled:
+                if not isinstance(image_job, dict) or "needs" not in image_job:
+                    findings.append(Finding(
+                        "P1", "Missing Image:Build DAG Needs Override", f"{ci_file.name}:Image:Build",
+                        f"Pipeline defines multiple or custom build jobs ({', '.join(sorted(build_jobs))}), "
+                        "but 'Image:Build' does not override 'needs:' at the project level. The shared library template only depends "
+                        "on 'Project:Build'. Without overriding 'needs:', GitLab CI DAG will run the image build without "
+                        "waiting for build artifacts. Override 'Image:Build.needs' at the project level to list all build jobs."
+                    ))
+                else:
+                    image_needs = image_job.get("needs")
+                    needed_jobs = set()
+                    if isinstance(image_needs, list):
+                        for entry in image_needs:
+                            if isinstance(entry, dict) and "job" in entry:
+                                needed_jobs.add(entry["job"])
+                            elif isinstance(entry, str):
+                                needed_jobs.add(entry)
+                    missing_builds = [bj for bj in build_jobs if bj not in needed_jobs]
+                    if missing_builds:
+                        findings.append(Finding(
+                            "P1", "Incomplete Image:Build DAG Needs", f"{ci_file.name}:Image:Build.needs",
+                            f"Image:Build 'needs:' is missing build job(s): {', '.join(sorted(missing_builds))}. "
+                            "All upstream build jobs providing artifacts for the image build must be listed in 'Image:Build.needs'."
+                        ))
+
     # Check if frontend SPA project defines placeholder build variables in Project:Build
     entrypoint_script = ci_file.parent / "docker-entrypoint.sh"
     if entrypoint_script.exists():
@@ -301,22 +388,14 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
 
     # PROJECT_CACHE_KEY: common/ defaults it to "", so an omission is silently legal.
     # An empty key collapses all caches in the project to the same identity and makes
-    # sonarqube/ build the literal "sonar-". Declare a nonempty stack key.
-    _STACK_KEYS = {"node", "python", "go", "java", "terraform"}
+    # sonarqube/ build the literal "sonar-". Declare a nonempty stack or project key.
     cache_key = str(variables.get("PROJECT_CACHE_KEY", "") or "").strip()
     if not cache_key:
         findings.append(Finding(
             "P2", "Missing PROJECT_CACHE_KEY", f"{ci_file.name}:variables",
             "PROJECT_CACHE_KEY is not declared. It defaults to an empty string, which leaves "
             "cache identities empty and makes sonarqube/'s key the literal 'sonar-'. Declare "
-            "a nonempty stack key, e.g. PROJECT_CACHE_KEY: \"node\"."
-        ))
-    elif cache_key.split("-")[0] not in _STACK_KEYS:
-        findings.append(Finding(
-            "P2", "Non-Standard PROJECT_CACHE_KEY", f"{ci_file.name}:variables",
-            f"PROJECT_CACHE_KEY is '{cache_key}'. Start with a supported stack name "
-            f"({', '.join(sorted(_STACK_KEYS))}), optionally suffixed for a monorepo child "
-            f"(e.g. 'node-admin'); do not use a project or image name as the prefix."
+            "a nonempty stack or project key, e.g. PROJECT_CACHE_KEY: \"node\" or \"chat\"."
         ))
 
     # A module whose repo-level prerequisite is absent creates a pipeline that fails in
@@ -427,7 +506,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
         if job.startswith(".") or job in CI_RESERVED_KEYS:
             continue
         if isinstance(details, dict) and "script" in details:
-            if job not in allowed_script_jobs and not job.startswith("Project:Unit:Test"):
+            if job not in allowed_script_jobs and not job.startswith("Project:Unit:Test") and job not in build_jobs:
                 findings.append(Finding(
                     "P1", "Illicit Script Override", f"{ci_file.name}:{job}",
                     f"Job '{job}' defines a custom 'script:'. Only Project:Build and Project:Unit:Test scripts may be overridden."

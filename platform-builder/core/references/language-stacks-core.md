@@ -140,7 +140,7 @@ single `RUN` doing install-and-chown — stay together with no blank line inside
 under one comment that says what the group is for.
 
 ```dockerfile
-ARG NODE_JS_24_MICRO_BASE_IMAGE
+ARG NODE_JS_24_MICRO_BASE_IMAGE=grootantech/node-js-24:latest
 FROM ${NODE_JS_24_MICRO_BASE_IMAGE}
 
 USER 0
@@ -192,22 +192,35 @@ exception is a version pin: an `ARG` carrying a `# renovate:` annotation stays o
 line, because the annotation binds to the line directly below it and grouping breaks the
 bot.
 
-### 3.2 Choosing the base image
+### 3.2 Choosing the base image and Dockerfile ARG defaults
 
 Use the runtime image matching the project's language, and fall back to
 `MICRO_ROOT_BASE_IMAGE` when no language image fits (a static binary, or a stack with no
 dedicated micro image):
 
-| Stack | Build arg |
-| --- | --- |
-| Java | `JAVA_25_MICRO_BASE_IMAGE` |
-| Python | `PYTHON_312_MICRO_BASE_IMAGE` |
-| Node.js service | `NODE_JS_24_MICRO_BASE_IMAGE` |
-| Node.js SPA behind nginx | `NGINX_MICRO_BASE_IMAGE` |
-| Go, or anything else | `MICRO_ROOT_BASE_IMAGE` |
+| Stack | Build arg | Default image (`:latest`) |
+| --- | --- | --- |
+| Java | `JAVA_25_MICRO_BASE_IMAGE` | `grootantech/java-25:latest` |
+| Python | `PYTHON_312_MICRO_BASE_IMAGE` | `grootantech/python-3-12:latest` |
+| Node.js service | `NODE_JS_24_MICRO_BASE_IMAGE` | `grootantech/node-js-24:latest` |
+| Node.js SPA behind nginx | `NGINX_MICRO_BASE_IMAGE` | `grootantech/nginx:latest` |
+| Go, or anything else | `MICRO_ROOT_BASE_IMAGE` | `grootantech/micro-root:latest` |
 
-CI injects each of these, so the Dockerfile declares the `ARG` and uses it — it pins nothing
-itself, and bumping a base image is a change to one organisation variable.
+**Always declare the approved enterprise default image with tag `:latest` on every base image `ARG`:**
+```dockerfile
+ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest
+FROM ${PYTHON_312_MICRO_BASE_IMAGE}
+```
+or grouped:
+```dockerfile
+ARG TOOLKIT_BUILD_IMAGE=grootantech/toolkit:latest \
+    MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest
+```
+
+**Why default to enterprise `:latest`?**
+1. **Local Developer Ergonomics:** Developers can execute plain `docker build -t myapp .` locally out of the box without providing tedious `--build-arg` flags.
+2. **Prevent Supply Chain Drift:** Defaults prevent developers from guessing or hardcoding unapproved public Docker Hub images (e.g. `python:3.12-alpine` or `node:24-slim`).
+3. **Clean CI Overrides:** In CI pipelines (`Image:Build` / `buildah`), the pipeline passes `--build-arg <VAR>=<REGISTRY>/<IMAGE>:<EXACT_TAG>` via the Dependency Proxy or private mirror. The build argument cleanly overrides the `:latest` default with immutable pinned tags.
 
 **A runtime stage is never built `FROM` a build image.** `TOOLKIT_BUILD_IMAGE` is the one
 build container — Go, JDK + Maven, Python, Node and buildah are all baked into it, so there
@@ -218,8 +231,8 @@ most images need no builder stage at all, because the pipeline already produced 
 artifact.
 
 ```dockerfile
-ARG TOOLKIT_BUILD_IMAGE \
-    MICRO_ROOT_BASE_IMAGE
+ARG TOOLKIT_BUILD_IMAGE=grootantech/toolkit:latest \
+    MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest
 
 FROM ${TOOLKIT_BUILD_IMAGE} AS builder
 

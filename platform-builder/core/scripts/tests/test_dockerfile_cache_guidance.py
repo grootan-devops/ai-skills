@@ -41,6 +41,23 @@ class DockerfileCacheGuidanceTests(unittest.TestCase):
         self.assertIn("same PROJECT_CACHE_KEY and cache path", packaging[0].message)
         self.assertNotIn("github-ci-library docker.yml", packaging[0].message)
 
+    def test_gitlab_dockerfile_bare_arg_emits_guidance(self):
+        findings = self.findings_for(
+            "gitlab",
+            "ARG PYTHON_312_MICRO_BASE_IMAGE\nFROM ${PYTHON_312_MICRO_BASE_IMAGE}\nCOPY . /app\nUSER 10001\n",
+        )
+        arg_findings = [f for f in findings if f.category == "Missing Default Base Image in ARG"]
+        self.assertEqual(len(arg_findings), 1)
+        self.assertIn("grootantech/python-3-12:latest", arg_findings[0].message)
+
+    def test_gitlab_dockerfile_default_enterprise_arg_passes(self):
+        findings = self.findings_for(
+            "gitlab",
+            "ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest\nFROM ${PYTHON_312_MICRO_BASE_IMAGE}\nCOPY . /app\nUSER 10001\n",
+        )
+        arg_findings = [f for f in findings if f.category == "Missing Default Base Image in ARG"]
+        self.assertEqual(len(arg_findings), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -90,7 +90,7 @@ To ensure deterministic naming across Kubernetes namespaces, ArgoCD applications
   - **Worker**: Asynchronous event consumers, cron jobs, scrubbers, batch processors, data pipelines (`pii-masker` -> `pii-worker`, `pii-scrubber` -> `pii-worker`, `pii-anonymizer` -> `pii-worker`, `notification-worker` -> `notification-worker`, `analytics-aggregator` -> `analytics-worker`).
   - **Gateway**: Ingress proxies, reverse-proxies, API gateways, BFFs (`auth-gateway` -> `auth-gateway`, `edge-proxy` -> `edge-gateway`, `api-gateway` -> `api-gateway`).
   - **Frontend**: Single-page applications, web dashboards, portals, static Nginx sites (`admin-portal` -> `admin-frontend`, `chat-ui` -> `chat-frontend`, `storefront` -> `store-frontend`).
-- **Standard Chart Name**: `{component}-{sub_component}` (e.g. `order-backend`, `chat-frontend`, `admin-backend`, `pii-worker`).
+- **Standard Chart Name**: `{product}-{component}` or `{product}-{component}-{sub_component}` (`<productname>-<componentname><-subcomponentname>`, e.g. `ibp-chat`, `myapp-order-backend`, `myapp-chat-frontend`, `myapp-admin-backend`, `myapp-pii-worker`).
 - **Kubernetes Release Name**: `{product}-{component}-{sub_component}` (e.g. `myapp-order-backend`, `myapp-chat-backend`, `myapp-pii-worker`).
 - **Release Name Length**: `.Values.global.releaseNameLength` is set to the character length of the `{product}` prefix (e.g., `5` for `myapp`), enabling `tpl.resource.siblingName` to cleanly isolate the product prefix and derive sibling DNS.
 - **Container Image Repository**: `{product}/{component}-{sub_component}` (e.g. `myapp/order-backend`), dynamically templated as `"{{ .Values.global.partOf }}/{{ .Values.component }}-{{ .Values.subComponent }}"`.
@@ -245,6 +245,11 @@ Three reasons, in the order they bite:
 opaque value rendered through `toYaml`. Its sub-keys are yours to shape — `strategy:` with
 `type: Recreate` and no `rollingUpdate:` is complete, not incomplete. Likewise
 `containers.main` is an example name: the contract applies to whatever containers you declare.
+
+**Optional entrypoint exceptions:** `persistence:` in `values.yaml` is paired with `tpl.pvc`
+in `templates/manifest.yaml`. When a chart does not invoke `tpl.pvc`, `persistence:` is
+omitted from `values.yaml` without violating parity. If `persistence:` declares active volume
+claims, `{{- include "tpl.pvc" . }}` must be invoked in `templates/manifest.yaml` below `---`.
 
 Enforced by `check_values_parity` in `core/scripts/checks_common.py`, measured against the
 `helm-tpl-library` copy the run resolved (§0.0) rather than a frozen expectation.

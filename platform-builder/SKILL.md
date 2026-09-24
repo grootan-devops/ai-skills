@@ -200,8 +200,9 @@ an unreviewable diff.
 1. **Read the existing files first.** Never write one you have not read.
 2. **Diff intent against reality.** What actually differs from the standard is your entire change set.
 3. **Preserve deliberate deviation.** A pinned SHA, an extra job, an unusual condition, a
-   `when: never` override — assume it was intentional and ask before removing it. "It differs
-   from the template" is not a reason.
+   `when: never` override, or a custom project variable (such as `PROJECT_CACHE_KEY: "chat"`) —
+   assume it was intentional and ask before removing or changing it. Respect manual user decisions;
+   "it differs from the default template or stack name" is not a reason.
 4. **Preserve formatting** — key order, comments, quoting, blank lines.
 5. **Justify each edit in one line**, tied to a rule or migration step.
 6. **Never fork a shared template or reusable workflow** to change one line.
@@ -268,6 +269,7 @@ them is not "no tests yet", it is a pipeline that builds an artifact nobody exec
 | --- | --- | --- |
 | a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
 | a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `tests`, accepts space-separated chart directories). Runs each chart's own `tests/*_test.yaml` suites. |
+| a chart | "Does the workload require persistent storage (PVC)?" | Adds `persistence:` in `values.yaml` and `{{- include "tpl.pvc" . }}` below `---` in `templates/manifest.yaml`. Default is **no**; stateless workloads omit both. Never add `persistence:` if persistent storage is not needed, and never re-add it if deleted. |
 
 Ask for each artifact that exists, and ask **both** where both exist — they are independent
 decisions. If the repository already ships the script or the mock chart, say so and default

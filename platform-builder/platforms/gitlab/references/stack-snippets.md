@@ -137,11 +137,13 @@ variables:
   PROJECT_CACHE_KEY: "node"  # optionally add a monorepo scope, e.g. node-admin
 ```
 
-Set a nonempty stack key (`node`, `python`, `go`, `java`, or `terraform`). For monorepos,
-append a service scope when independent caches are needed, such as `node-admin`. Use the exact
-same value on the dependency-download job and every cache reader, including `Image:Build`. The
-key is stable across lockfile changes; the package manager follows the committed lockfile when
-warming the cache. Do not use `cache:key:files` for this GitLab cache handoff.
+Set a nonempty stack key (`node`, `python`, `go`, `java`, or `terraform`) or a project/service
+identifier (such as `chat`). For monorepos, append a service scope when independent caches are
+needed, such as `node-admin`. Use the exact same value on the dependency-download job and every
+cache reader, including `Image:Build`. The key is stable across lockfile changes; the package
+manager follows the committed lockfile when warming the cache. Do not use `cache:key:files` for
+this GitLab cache handoff. Never revert or overwrite a custom `PROJECT_CACHE_KEY` configured by
+the project team.
 
 ### Never override `image:` in a consumer job
 
@@ -203,6 +205,61 @@ library when the library changes. In particular do **not** re-declare:
 > the artifact is genuinely required. Omitting it defaults to `false`, which fails pipeline
 > creation with *"job needs a job that is not in the pipeline"* the moment that upstream is
 > gated out — the exact failure the Go and Python lint anchors used to produce on a `lint` run.
+
+### Overriding DAG `needs:` in multi-test and polyglot pipelines (SonarQube & Image:Build)
+
+The library templates define default DAG dependencies designed for canonical single-stack repositories:
+- `Sonarqube` defaults to `needs: [Common:Init, Project:Build, Project:Unit:Test]`.
+- `Image:Build` defaults to `needs: [Common:Init, Project:Build, Node:Dependency:Download, Python:Dependency:Download]`.
+
+When a repository deviates from this single-job layout — such as:
+1. **Multiple or Split Test Jobs:** e.g., a full-stack project or monorepo with `Project:Unit:Test:Frontend` and `Project:Unit:Test:Backend` (or `Project:Unit:Test:Node` and `Project:Unit:Test:Python`).
+2. **Multiple or Custom Build Jobs:** e.g., `Project:Build:Frontend` and `Project:Build:Backend`, or a custom bundling step.
+3. **Interpreted Stacks without `Project:Build`:** e.g., Python services where no compilation step exists, or custom frontend asset builds.
+
+**The Failure Mode:**
+Because the library marks `Project:Unit:Test` and `Project:Build` as `optional: true`, GitLab CI's DAG scheduler does **not** wait for `Project:Unit:Test:Frontend` or `Project:Unit:Test:Backend`. It treats the missing canonical job as simply absent, and schedules `Sonarqube` or `Image:Build` **immediately** after `Common:Init`!
+- `Sonarqube` executes before unit tests finish, completely missing JUnit XML results and test coverage reports (`0% coverage`), and wasting runner compute if tests fail.
+- `Image:Build` executes before frontend build assets (`dist/`) are generated, causing Dockerfile `COPY dist/ ...` to fail with missing files.
+
+**The Solution:**
+Override `Sonarqube.needs` and `Image:Build.needs` at the project level in `.gitlab-ci.yml`:
+
+```yaml
+# When multiple test jobs exist, Sonarqube MUST depend on all of them
+Sonarqube:
+  needs:
+    - job: Common:Init
+      artifacts: true
+      optional: true
+    - job: Project:Build:Frontend
+      artifacts: true
+      optional: true
+    - job: Project:Unit:Test:Frontend
+      artifacts: true
+      optional: true
+    - job: Project:Unit:Test:Backend
+      artifacts: true
+      optional: true
+
+# When custom build jobs exist, Image:Build MUST depend on the jobs providing its assets
+Image:Build:
+  needs:
+    - job: Common:Init
+      artifacts: true
+      optional: true
+    - job: Project:Build:Frontend
+      artifacts: true
+      optional: false  # genuinely required if dist/ is copied into the Docker image
+    - job: Python:Dependency:Download
+      artifacts: false # dependencies are shared through runner cache, not artifacts
+      optional: true
+```
+
+> [!IMPORTANT]
+> - Always specify `artifacts: true` on jobs that produce reports or compiled bundles (`junit.xml`, coverage reports, `dist/`).
+> - Keep `artifacts: false` on dependency download jobs (which share caches, not artifacts).
+> - Set `optional: true` on upstream jobs that may be excluded when triggering isolated workflows (e.g. `WORKFLOW: "sonarqube"`).
 
 ## `USE_DOCKER_BUILDX` — not a default, and rarely the answer
 
@@ -339,7 +396,7 @@ The Python form uses `Python:Dependency:Download`, an `Image:Build` cache with t
 `PROJECT_CACHE_KEY` and `.uv` path, and:
 
 ```dockerfile
-ARG PYTHON_312_MICRO_BASE_IMAGE
+ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest
 FROM ${PYTHON_312_MICRO_BASE_IMAGE}
 
 USER 0

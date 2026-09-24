@@ -131,6 +131,6 @@
     ]
   },
   "required_variables": {
-    "PROJECT_CACHE_KEY": "Always declared, even though common/ defaults it to \"\". Start with a stack name -- node, python, go, java, or terraform -- optionally suffixed for a monorepo child (e.g. node-admin). Use the same stable key for the dependency warmer and all readers, including Image:Build; do not append a lockfile hash. Sonarqube/ builds sonar-${PROJECT_CACHE_KEY}."
+    "PROJECT_CACHE_KEY": "Always declared, even though common/ defaults it to \"\". Start with a stack name (node, python, go, java, or terraform) or a project/service identifier (e.g. chat), optionally suffixed for a monorepo child (e.g. node-admin). Use the same stable key for the dependency warmer and all readers, including Image:Build; do not append a lockfile hash. Sonarqube/ builds sonar-${PROJECT_CACHE_KEY}."
   }
 }
