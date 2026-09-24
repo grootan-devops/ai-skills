@@ -222,6 +222,7 @@ When a repository deviates from this single-job layout — such as:
 **The Failure Mode:**
 
 Because the library marks `Project:Unit:Test` and `Project:Build` as `optional: true`, GitLab CI's DAG scheduler does **not** wait for `Project:Unit:Test:Frontend` or `Project:Unit:Test:Backend`. It treats the missing canonical job as simply absent, and schedules `Sonarqube` or `Image:Build` **immediately** after `Common:Init`!
+
 - `Sonarqube` executes before unit tests finish, completely missing JUnit XML results and test coverage reports (`0% coverage`), and wasting runner compute if tests fail.
 - `Image:Build` executes before frontend build assets (`dist/`) are generated, causing Dockerfile `COPY dist/ ...` to fail with missing files.
 
@@ -261,6 +262,7 @@ Image:Build:
 ```
 
 > [!IMPORTANT]
+
 > - Always specify `artifacts: true` on jobs that produce reports or compiled bundles (`junit.xml`, coverage reports, `dist/`).
 > - Keep `artifacts: false` on dependency download jobs (which share caches, not artifacts).
 > - Set `optional: true` on upstream jobs that may be excluded when triggering isolated workflows (e.g. `WORKFLOW: "sonarqube"`).
