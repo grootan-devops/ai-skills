@@ -262,10 +262,11 @@ Image:Build:
 ```
 
 > [!IMPORTANT]
-
-> - Always specify `artifacts: true` on jobs that produce reports or compiled bundles (`junit.xml`, coverage reports, `dist/`).
-> - Keep `artifacts: false` on dependency download jobs (which share caches, not artifacts).
-> - Set `optional: true` on upstream jobs that may be excluded when triggering isolated workflows (e.g. `WORKFLOW: "sonarqube"`).
+> Specify `artifacts: true` on jobs that produce reports or compiled bundles
+> (`junit.xml`, coverage reports, `dist/`). Keep `artifacts: false` on dependency
+> download jobs (which share caches, not artifacts). Set `optional: true` on upstream
+> jobs that may be excluded when triggering isolated workflows (e.g.,
+> `WORKFLOW: "sonarqube"`).
 
 ## `USE_DOCKER_BUILDX` — not a default, and rarely the answer
 
