@@ -15,7 +15,7 @@ minimum footprint.
 The common failure is the *opposite* of over-declaring: an include list carrying only
 `common`, the language module, `image/*` and `chart/` looks tidy and silently gives up
 SonarQube, secret scanning, licence compliance, SBOM and releases. A service repository
-starts from the library README's Quick Start set and removes only what it can justify:
+starts from the getting-started guide linked from the library README and removes only what it can justify:
 
 > [!IMPORTANT]
 > `project:` is the library's path **on the GitLab instance that runs this pipeline**, not
@@ -78,7 +78,7 @@ at pipeline creation, so the engine cannot catch it and you must:
 Project:Version:Init:
   extends: .Node:Project:Version:Init   # version from package.json, not a hardcoded literal
 
-Dependency:Download:
+Node:Dependency:Download:
   extends:
     - .Node:24                  # runtime anchor FIRST -- see below
     - .Node:Dependency:Download
@@ -91,9 +91,9 @@ Project:Build:
     - job: Common:Init
       artifacts: true
       optional: true            # gated out of scan-only workflows
-    - job: Dependency:Download
-      artifacts: true
-      optional: false           # the cache is genuinely required
+    - job: Node:Dependency:Download
+      artifacts: false          # dependencies are shared through Runner Cache, not artifacts
+      optional: false           # the cache warmer is genuinely required
 
 Project:Unit:Test:
   extends:
@@ -105,45 +105,51 @@ Project:Unit:Test:
       optional: false
 ```
 
-### Job names carry no language segment
+Use the same consumer-wrapper pattern for Python and Java:
 
-`Dependency:Download`, not `Node:Dependency:Download` / `Java:Dependency:Download` /
-`Python:Dependency:Download`. A concrete job is named for what it does; the language lives
-only in the hidden template it extends. That is what makes one
-`needs: - job: Dependency:Download` edge correct for every stack, and it means a service
-that changes runtime does not rename its jobs.
+```yaml
+Python:Dependency:Download:
+  extends:
+    - .Python:12
+    - .Python:Dependency:Download
 
-Go is the exception, deliberately: `golang/.gitlab-ci.yml` ships
-`Go:Dependency:Download` as a *concrete* job — it needs no project-level customisation, and
-`.Go` and `.go-lint-common` declare `needs:` on it by name. A Go project declares no
-dependency job at all, so there is nothing to rename. Leave it alone.
+Java:Dependency:Download:
+  extends:
+    - .Java:25
+    - .Java:Dependency:Download
+```
+
+Go is different: `Go:Dependency:Download` is already a concrete library job, so consumers do
+not define another wrapper for it.
 
 ### Extends order: runtime anchor first
 
 `.Node:24` / `.Python:12` / `.Go` set `image:` and the cache; the job template sets stage,
 rules, `needs:` and artifacts. List the **runtime anchor first and the job template second**,
-matching every consumer example in the library README. YAML `extends:` merges left to right
+matching every consumer example linked from the library README. YAML `extends:` merges left to right
 with later entries winning, so the reversed order lets the runtime anchor overwrite keys the
 job template meant to own.
 
-### `PROJECT_CACHE_KEY` is always set, and names the language
+### `PROJECT_CACHE_KEY` is shared by the project/stack cache consumers
 
 ```yaml
 variables:
-  PROJECT_CACHE_KEY: "node"     # or "python", "go", "java"
+  PROJECT_CACHE_KEY: "node"  # optionally add a monorepo scope, e.g. node-admin
 ```
 
-The library's default and what an empty value degrades to are in the README's Key Variables
-table. What that table cannot tell you is what to *call* it: **use the plain language
-name** — `node`, `python`, `go`, `java`. Not the project name, not a version: the language
-module whose cache it prefixes. A monorepo child appends its own segment (`node-admin`,
-`go-collector`).
+Set a nonempty stack key (`node`, `python`, `go`, `java`, or `terraform`) or a project/service
+identifier (such as `chat`). For monorepos, append a service scope when independent caches are
+needed, such as `node-admin`. Use the exact same value on the dependency-download job and every
+cache reader, including `Image:Build`. The key is stable across lockfile changes; the package
+manager follows the committed lockfile when warming the cache. Do not use `cache:key:files` for
+this GitLab cache handoff. Never revert or overwrite a custom `PROJECT_CACHE_KEY` configured by
+the project team.
 
 ### Never override `image:` in a consumer job
 
 ```yaml
 # WRONG -- a library defect copied into every consumer
-Dependency:Download:
+Node:Dependency:Download:
   extends:
     - .Node:24
     - .Node:Dependency:Download
@@ -154,7 +160,7 @@ Dependency:Download:
 
 ```yaml
 # RIGHT -- the runtime anchor owns the image
-Dependency:Download:
+Node:Dependency:Download:
   extends:
     - .Node:24
     - .Node:Dependency:Download
@@ -179,7 +185,7 @@ ERROR: Job failed: exit code 126
 ```
 
 The fix is one line in the anchor — declare `image:` in the map form with
-`entrypoint: [""]`, which is what `.Python:12` has always done. Consumers then need
+`entrypoint: [""]`, which `.Python:12` currently does. Consumers then need
 nothing. If you meet `exit code 126` with no script output, check whether the anchor for
 that stack uses the string form, and fix it there.
 
@@ -199,6 +205,68 @@ library when the library changes. In particular do **not** re-declare:
 > the artifact is genuinely required. Omitting it defaults to `false`, which fails pipeline
 > creation with *"job needs a job that is not in the pipeline"* the moment that upstream is
 > gated out — the exact failure the Go and Python lint anchors used to produce on a `lint` run.
+
+### Overriding DAG `needs:` in multi-test and polyglot pipelines (SonarQube & Image:Build)
+
+The library templates define default DAG dependencies designed for canonical single-stack repositories:
+
+- `Sonarqube` defaults to `needs: [Common:Init, Project:Build, Project:Unit:Test]`.
+- `Image:Build` defaults to `needs: [Common:Init, Project:Build, Node:Dependency:Download, Python:Dependency:Download]`.
+
+When a repository deviates from this single-job layout — such as:
+
+1. **Multiple or Split Test Jobs:** e.g., a full-stack project or monorepo with `Project:Unit:Test:Frontend` and `Project:Unit:Test:Backend` (or `Project:Unit:Test:Node` and `Project:Unit:Test:Python`).
+2. **Multiple or Custom Build Jobs:** e.g., `Project:Build:Frontend` and `Project:Build:Backend`, or a custom bundling step.
+3. **Interpreted Stacks without `Project:Build`:** e.g., Python services where no compilation step exists, or custom frontend asset builds.
+
+**The Failure Mode:**
+
+Because the library marks `Project:Unit:Test` and `Project:Build` as `optional: true`, GitLab CI's DAG scheduler does **not** wait for `Project:Unit:Test:Frontend` or `Project:Unit:Test:Backend`. It treats the missing canonical job as simply absent, and schedules `Sonarqube` or `Image:Build` **immediately** after `Common:Init`!
+
+- `Sonarqube` executes before unit tests finish, completely missing JUnit XML results and test coverage reports (`0% coverage`), and wasting runner compute if tests fail.
+- `Image:Build` executes before frontend build assets (`dist/`) are generated, causing Dockerfile `COPY dist/ ...` to fail with missing files.
+
+**The Solution:**
+
+Override `Sonarqube.needs` and `Image:Build.needs` at the project level in `.gitlab-ci.yml`:
+
+```yaml
+# When multiple test jobs exist, Sonarqube MUST depend on all of them
+Sonarqube:
+  needs:
+    - job: Common:Init
+      artifacts: true
+      optional: true
+    - job: Project:Build:Frontend
+      artifacts: true
+      optional: true
+    - job: Project:Unit:Test:Frontend
+      artifacts: true
+      optional: true
+    - job: Project:Unit:Test:Backend
+      artifacts: true
+      optional: true
+
+# When custom build jobs exist, Image:Build MUST depend on the jobs providing its assets
+Image:Build:
+  needs:
+    - job: Common:Init
+      artifacts: true
+      optional: true
+    - job: Project:Build:Frontend
+      artifacts: true
+      optional: false  # genuinely required if dist/ is copied into the Docker image
+    - job: Python:Dependency:Download
+      artifacts: false # dependencies are shared through runner cache, not artifacts
+      optional: true
+```
+
+> [!IMPORTANT]
+> Specify `artifacts: true` on jobs that produce reports or compiled bundles
+> (`junit.xml`, coverage reports, `dist/`). Keep `artifacts: false` on dependency
+> download jobs (which share caches, not artifacts). Set `optional: true` on upstream
+> jobs that may be excluded when triggering isolated workflows (e.g.,
+> `WORKFLOW: "sonarqube"`).
 
 ## `USE_DOCKER_BUILDX` — not a default, and rarely the answer
 
@@ -250,7 +318,7 @@ build in a way the error does not explain:
 | --- | --- |
 | The Dockerfile genuinely needs the `docker-container` driver | otherwise `DOCKER_BUILDKIT: 1` was already enough |
 | `.dockerignore` **admits** every path a `--mount=type=bind` reads (e.g. `!.npm`, `!.npm/**`) | the mount source comes from the build context; denied means an empty mount, not an error |
-| `Image:Build` restores whatever cache the mount expects | `Image:Build` is not a `.Node:24` job, so it carries no language cache of its own — it needs its own `cache:` block keyed on the lockfile |
+| `Image:Build` restores whatever cache the mount expects | `Image:Build` is not a `.Node:24` job, so it carries no language cache of its own — give it a `cache:` block with the same `${PROJECT_CACHE_KEY}` and cache path as the dependency job |
 | The registry credentials allow **push** from the build job | `cache-to` writes, and a failure there can fail the build after a successful image |
 
 Comment the flag with the specific thing that requires it, not "for BuildKit" — the next
@@ -284,7 +352,7 @@ a fork by another name (§0.2 rule 6), and it outlives the fix.
 
 `language-stacks-core.md` §3 says the image build must not resolve dependencies over the
 network. On GitLab the mechanism for that is the **package-manager cache**, bind-mounted
-into the image build by BuildKit — *Pattern A, cache-only*, which the ci-templates README
+into the image build by BuildKit — *Pattern A, cache-only*, which the CI library's README-linked Docker guide
 documents in full for Python and which every stack follows.
 
 > [!IMPORTANT]
@@ -299,16 +367,14 @@ Two pieces are required. Both are about the **image build** — neither is a sep
 install job:
 
 **1. `Image:Build` restores the cache into its workspace.** It is not a `.Node:24` job, so
-it inherits no cache of its own, and the bind mount in the Dockerfile reads from the job
-workspace:
+it inherits no cache of its own. Give it the same key as `Node:Dependency:Download` and
+the path the Dockerfile bind-mounts:
 
 ```yaml
 Image:Build:
   cache:
-    key:
-      files:
-        - package-lock.json
-      prefix: ${PROJECT_CACHE_KEY}
+    key: ${PROJECT_CACHE_KEY}
+    when: always
     policy: pull
     paths:
       - .npm/
@@ -333,17 +399,47 @@ zero layer bytes. `.dockerignore` must admit `.npm`, not `node_modules` —
 `DOCKER_BUILDKIT: 1`. It does **not** need `USE_DOCKER_BUILDX` — see that section below
 before setting it.
 
-The Python form is identical with `.uv` and
-`uv sync --frozen --no-dev --offline --cache-dir /tmp/.uv`.
+The Python form uses `Python:Dependency:Download`, an `Image:Build` cache with the same
+`PROJECT_CACHE_KEY` and `.uv` path, and:
+
+```dockerfile
+ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest
+FROM ${PYTHON_312_MICRO_BASE_IMAGE}
+
+USER 0
+
+WORKDIR /app
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=bind,source=.uv,target=/tmp/.uv,rw \
+    uv sync --frozen --no-dev --no-install-project --no-install-workspace --offline --cache-dir /tmp/.uv && \
+    chown -R 10001:10001 /app
+
+COPY --chown=10001:10001 app/ /app/app/
+COPY --chown=10001:10001 main.py config.py /app/
+
+USER 10001:10001
+
+EXPOSE 3000
+
+CMD ["python", "main.py"]
+```
+
+For this layout, the `.dockerignore` allowlist must admit `pyproject.toml`, `uv.lock`,
+`.uv/**`, `app/**`, `main.py`, and `config.py`; adjust the application paths for the actual
+repository. The cache mount must remain read-write (`rw`).
 
 ### There is no install job — `Project:Build` is optional
 
-**`.Node:Install` and `.Python:Install` were removed from the library.** They re-ran the
-production-only offline install that the packaging Dockerfile already performs from the
-same cache, so they asserted nothing new. Both sat in stage `build` with `Image:Build`
-declaring `needs:` on them, so they did not even fail earlier — they ran the install twice
-and serialised the pipeline to do it. If you find a `Project:Install` job in a repo,
-delete it; there is no replacement.
+**Do not confuse the removed `Project:Install` with dependency warming.** The
+stack-scoped `Node:Dependency:Download`, `Python:Dependency:Download`, and
+`Java:Dependency:Download` consumer jobs warm the cache and remain in these pipelines.
+The old `.Node:Install` and `.Python:Install` templates redundantly repeated the production
+install already done by the Dockerfile. Do not add a separate `Project:Install` job; use the
+language-scoped dependency download job for cache preparation.
 
 **`Project:Build`** (`.Node:Build`, `.Python:Build`, …) is a skeleton with **no** script —
 stage, rules, cache and `needs` only — for a repo with a genuine compile or bundle step.
@@ -364,13 +460,15 @@ Project:Build:
 
 Declare it only when something is actually built. A plain-JavaScript service with no
 `build` script in `package.json` has no build step to skeleton, so it declares neither
-job: `Dependency:Download` warms the cache and `Image:Build` consumes it. The engine
+`Project:Build` nor a unit-test job. `Node:Dependency:Download` still warms the cache, and
+`Image:Build` consumes it. The engine
 now applies that same test — it asks for `Project:Build` only where a build script exists.
 
 ## Per-stack overrides
 
 Only `Project:Build` and `Project:Unit:Test` may override `script:`. Shared library jobs
-(`Dependency:Download`, `Chart:*`, `Release:*`, scanners) must not be overridden.
+(`Node:Dependency:Download`, `Python:Dependency:Download`, `Java:Dependency:Download`,
+`Chart:*`, `Release:*`, scanners) must not be overridden.
 
 ```yaml
 # Python: no Project:Build at all for a containerised service

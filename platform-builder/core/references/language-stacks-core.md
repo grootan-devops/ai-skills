@@ -1,20 +1,21 @@
 # Language Stack Standards — Core
 
-**Platform-independent facts.** What each stack must do, and why. The YAML that expresses it
-differs per platform and lives in:
+**Shared stack requirements.** What each stack must do, and why. Platform wiring and cache
+handoffs differ and live in:
 
 - `platforms/gitlab/references/stack-snippets.md`
-- the resolved library's own `README.md` (GitHub has no snippets file; the library README is the contract)
+- the module and integration-example links in the resolved library's `README.md` (GitHub has no snippets file; those linked pages are the contract)
 
-Nothing on this page mentions a CI platform. If you find yourself adding a `stage:` or an
-`on:` here, it belongs in a snippets file instead.
+If you find yourself adding a `stage:` or an `on:` here, it belongs in a platform reference
+instead.
 
 ---
 
 ## 1. Three-job separation
 
-Every application pipeline splits into three jobs. The point is not ceremony: each has a
-different cache key, a different failure meaning, and a different reason to re-run.
+Every application pipeline separates dependency preparation, build, and test responsibilities.
+Their cache policies differ, but jobs that exchange a dependency cache must use the same
+stack/project cache identity and path; see the selected platform's wiring guide.
 
 | Job | Responsibility | Must not |
 | --- | --- | --- |
@@ -35,7 +36,9 @@ of a lint-only run, a hard dependency makes pipeline creation fail outright.
 
 - **`npm ci`, never `npm install`** in CI — `install` can mutate the lockfile, so the tree you
   test is not the tree you committed.
-- Cache keyed on `package-lock.json` (or `pnpm-lock.yaml`), never on a mutable value.
+- Use a stable cache identity shared by dependency preparation and consumers of that cache.
+  GitHub Actions derives its key from the lockfile; for GitLab's shared dependency-to-image
+  cache, follow `PROJECT_CACHE_KEY` in the GitLab stack snippets instead of `cache:key:files`.
 - **Frontend SPA build-time variables are public.** `VITE_*` / `NEXT_PUBLIC_*` are baked into the
   bundle and readable by anyone who loads the page. Never pass a secret as a build argument; use
   a placeholder substituted at container start (see `../../assets/nginx-default.conf`).
@@ -53,14 +56,16 @@ of a lint-only run, a hard dependency makes pipeline creation fail outright.
 ### Go
 
 - **`-race` in CI.** It catches what local runs do not, and the cost is acceptable for unit tests.
-- Cache keyed on `go.sum`.
+- Cache the Go module directory under the same project/stack cache identity wherever it is
+  warmed and restored. GitLab's `PROJECT_CACHE_KEY` behavior is defined in its stack snippets.
 - Cross-compilation belongs in the image build, not the CI build job.
 
 ### Java
 
 - **Batch mode** (`mvn -B`) or the log fills with download progress bars.
 - Split `package -DskipTests` from `test` so a test failure does not re-run the build.
-- Cache the local repository (`~/.m2`, or Gradle's own cache).
+- Cache the local repository (`~/.m2`, or Gradle's own cache) under a stable project/stack
+  key shared by its warmer and readers.
 
 ### Chart-only repositories
 
@@ -82,12 +87,24 @@ step, `RUN npm ci` / `RUN pip install` in the Dockerfile looks like packaging. W
 defect is the **network**: resolving online at image-build time re-resolves dependencies the
 pipeline already pinned and scanned, so the image cannot be reproduced from what CI tested.
 
-The fix is not to copy the installed tree in. It is to install **offline from the CI package
-cache**, bind-mounted into the build. The cache is the handoff:
+Do not assume that a dependency cache is available to the image build just because a language
+workflow warmed it. A cache handoff is platform- and library-specific: only prescribe an
+offline BuildKit mount after verifying that the selected image workflow restores or receives
+the matching cache directory inside its build context. If it does not, report the missing
+handoff instead of generating a Dockerfile that depends on an absent directory.
 
-- Warm the cache in a CI job, and verify the production-only offline install there.
-- Restore that cache onto the image-build job.
-- `RUN --mount=type=bind,source=<cache>,... <install> --offline` in the Dockerfile.
+When the handoff is explicitly supported, mount the cache read-write if the package manager
+may update cache metadata, and run the install in offline mode. Do not copy installed
+environment directories such as `node_modules/`, `.venv/` or `vendor/` into the image.
+
+For GitLab, the dependency job and `Image:Build` use the same `PROJECT_CACHE_KEY` and cache
+path; the image job restores (`policy: pull`) the runner cache into the Docker build context.
+Do not add a lockfile digest to only one side of this handoff.
+
+For GitHub Actions, consult [`platforms/github/references/workflow-matrix.md`](../../platforms/github/references/workflow-matrix.md)
+before adding offline dependency installation to a Dockerfile. The current GitHub `docker.yml`
+does not transfer the `.npm` or `.uv-cache` directories from the separate language workflow;
+its BuildKit registry cache contains image layers, not those host-side package caches.
 
 **A dependency directory is never an artifact.** `node_modules/`, `.venv/` and `vendor/` are
 cache contents, not build output: artifacting them uploads tens of thousands of files per run
@@ -123,7 +140,7 @@ single `RUN` doing install-and-chown — stay together with no blank line inside
 under one comment that says what the group is for.
 
 ```dockerfile
-ARG NODE_JS_24_MICRO_BASE_IMAGE
+ARG NODE_JS_24_MICRO_BASE_IMAGE=grootantech/node-js-24:latest
 FROM ${NODE_JS_24_MICRO_BASE_IMAGE}
 
 USER 0
@@ -175,22 +192,39 @@ exception is a version pin: an `ARG` carrying a `# renovate:` annotation stays o
 line, because the annotation binds to the line directly below it and grouping breaks the
 bot.
 
-### 3.2 Choosing the base image
+### 3.2 Choosing the base image and Dockerfile ARG defaults
 
 Use the runtime image matching the project's language, and fall back to
 `MICRO_ROOT_BASE_IMAGE` when no language image fits (a static binary, or a stack with no
 dedicated micro image):
 
-| Stack | Build arg |
-| --- | --- |
-| Java | `JAVA_25_MICRO_BASE_IMAGE` |
-| Python | `PYTHON_312_MICRO_BASE_IMAGE` |
-| Node.js service | `NODE_JS_24_MICRO_BASE_IMAGE` |
-| Node.js SPA behind nginx | `NGINX_MICRO_BASE_IMAGE` |
-| Go, or anything else | `MICRO_ROOT_BASE_IMAGE` |
+| Stack | Build arg | Default image (`:latest`) |
+| --- | --- | --- |
+| Java | `JAVA_25_MICRO_BASE_IMAGE` | `grootantech/java-25:latest` |
+| Python | `PYTHON_312_MICRO_BASE_IMAGE` | `grootantech/python-3-12:latest` |
+| Node.js service | `NODE_JS_24_MICRO_BASE_IMAGE` | `grootantech/node-js-24:latest` |
+| Node.js SPA behind nginx | `NGINX_MICRO_BASE_IMAGE` | `grootantech/nginx:latest` |
+| Go, or anything else | `MICRO_ROOT_BASE_IMAGE` | `grootantech/micro-root:latest` |
 
-CI injects each of these, so the Dockerfile declares the `ARG` and uses it — it pins nothing
-itself, and bumping a base image is a change to one organisation variable.
+**Always declare the approved enterprise default image with tag `:latest` on every base image `ARG`:**
+
+```dockerfile
+ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest
+FROM ${PYTHON_312_MICRO_BASE_IMAGE}
+```
+
+or grouped:
+
+```dockerfile
+ARG TOOLKIT_BUILD_IMAGE=grootantech/toolkit:latest \
+    MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest
+```
+
+**Why default to enterprise `:latest`?**
+
+1. **Local Developer Ergonomics:** Developers can execute plain `docker build -t myapp .` locally out of the box without providing tedious `--build-arg` flags.
+2. **Prevent Supply Chain Drift:** Defaults prevent developers from guessing or hardcoding unapproved public Docker Hub images (e.g. `python:3.12-alpine` or `node:24-slim`).
+3. **Clean CI Overrides:** In CI pipelines (`Image:Build` / `buildah`), the pipeline passes `--build-arg <VAR>=<REGISTRY>/<IMAGE>:<EXACT_TAG>` via the Dependency Proxy or private mirror. The build argument cleanly overrides the `:latest` default with immutable pinned tags.
 
 **A runtime stage is never built `FROM` a build image.** `TOOLKIT_BUILD_IMAGE` is the one
 build container — Go, JDK + Maven, Python, Node and buildah are all baked into it, so there
@@ -201,8 +235,8 @@ most images need no builder stage at all, because the pipeline already produced 
 artifact.
 
 ```dockerfile
-ARG TOOLKIT_BUILD_IMAGE \
-    MICRO_ROOT_BASE_IMAGE
+ARG TOOLKIT_BUILD_IMAGE=grootantech/toolkit:latest \
+    MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest
 
 FROM ${TOOLKIT_BUILD_IMAGE} AS builder
 

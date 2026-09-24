@@ -301,10 +301,27 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
     if self_starting and "run-name" not in wf:
         out.append(Finding(
             "P2", "No run name", f"{rel}:run-name",
-            "No `run-name`. Every row in the runs list will read the same. Add one carrying "
-            "what triggered the run and which commit it built, e.g. "
-            "`run-name: \"CI · ${{ github.event_name }} · ${{ github.sha }}\"` -- actor and "
-            "branch are already columns, the commit is not."))
+            "No `run-name`. Every row in the runs list will read the same. Add a dynamic "
+            "`run-name` (e.g. for PRs: `run-name: ${{ github.event_name == 'pull_request' "
+            "&& format('PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha) "
+            "|| format('Verify · {0}', github.ref_name) }}`; for standard workflows: "
+            "`run-name: \"<Label> · ${{ github.event_name }} · ${{ github.sha }}\"`). "
+            "Do not include emojis."))
+    elif "run-name" in wf and isinstance(wf["run-name"], str):
+        if any(ord(char) > 0x1F000 for char in wf["run-name"]):
+            out.append(Finding(
+                "P2", "Emoji in run-name", f"{rel}:run-name",
+                f"Workflow '{rel}' includes emoji in `run-name`. Keep run-names clean and emoji-free."
+            ))
+        elif "pull_request" in self_starting and "pull_request" not in wf["run-name"]:
+            out.append(Finding(
+                "P2", "Non-directional PR run-name", f"{rel}:run-name",
+                f"Workflow '{rel}' triggers on pull_request but does not use the directional format. "
+                "The GitHub Actions runs list hides the target branch for PRs. Update to: "
+                "`run-name: >- ${{ github.event_name == 'pull_request' && "
+                "format('PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha) "
+                "|| format('Verify · {0}', github.ref_name) }}`."
+            ))
 
     if callable_too:
         # Exempt whether or not it also starts itself: the group cannot be made safe, because

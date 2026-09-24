@@ -1,0 +1,40 @@
+# Global Argo CD Application settings
+enabled: true
+cluster: __CLUSTER_NAME__
+environment: __ENVIRONMENT__
+project: developer
+server: __ARGOCD_CLUSTER_NAME__
+repoURL: __GITOPS_REPOSITORY_URL__
+branch: ""
+preserveResourcesOnDeletion: false
+renderExtrasManifests: false
+namespace: ""
+
+sync:
+  options:
+    - Validate=true
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    - RespectIgnoreDifferences=true
+    - ApplyOutOfSyncOnly=true
+  retry:
+    limit: 5
+    backoff:
+      duration: 5s
+      factor: 2
+      maxDuration: 3m
+  ignoreDifferences: []
+
+notification: {}
+
+extras:
+  enabled: true
+  sync:
+    automated:
+      prune: true
+      selfHeal: true
+    options: []
+    retry: {}
+
+apps: {}

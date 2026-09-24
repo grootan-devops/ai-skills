@@ -34,7 +34,7 @@ platforms' references; they will contradict each other by design.
 | `core/references/ignore-files-standard.md` *(shared)* | Write or audit `.gitignore`, `.dockerignore`, or `.helmignore`. The three have different semantics; `.helmignore` is read by the chart loader, so a wrong entry breaks the build rather than bloating it. |
 | `core/references/migration-standard.md` *(shared)* | Run an update or apply a version migration. |
 | `platforms/<platform>/references/security-addendum.md` | Anything security-related, after the core. |
-| the resolved library's own `README.md` (§0.0) | **Write the actual CI YAML.** Its module catalog, inputs and worked examples are the contract. The skill keeps no copy of them. |
+| the resolved library's `README.md` index and relevant linked pages (§0.0) | **Write the actual CI YAML.** Read the selected module contracts and matching integration example, not every module. The skill keeps no copy. |
 | `platforms/gitlab/references/stack-snippets.md` *(GitLab only)* | GitLab wiring the README does not cover: `extends:` order, `PROJECT_CACHE_KEY`, never overriding `image:`. |
 | `platforms/<platform>/references/workflow-matrix.md` | Decide which workflows/options a repo declares. |
 | `platforms/<platform>/workflow-map.json` | The machine-readable map. Loaded by the engine; never transcribed. |
@@ -45,8 +45,9 @@ else, so a symlink pointing outside it would install as a broken link.
 
 ### 0.0 Reference Libraries
 
-The skill carries **no copy** of what these do. Read each library's own `README.md` and
-`MIGRATION.md` at the resolved version, **every onboard, update, and audit**.
+The skill carries **no copy** of what these do. Start with each applicable library's own
+`README.md` at the resolved version, then follow only the topic links needed for this task.
+Read `MIGRATION.md` for upgrades and compatibility checks, not automatically on every run.
 
 | Library | Provides |
 | --- | --- |
@@ -56,6 +57,32 @@ The skill carries **no copy** of what these do. Read each library's own `README.
 
 If you are about to write a fact that already lives above, **write a pointer instead**. A second
 copy is a second thing to forget, and copies drift silently.
+
+#### Follow documentation links selectively
+
+The README is an index, not the complete contract. Use its task descriptions to select pages:
+
+| Task | Follow from the resolved README |
+| --- | --- |
+| Onboard or change CI | Getting started, configuration, pipeline lifecycle, then the relevant modules and one matching integration example |
+| Package an image | Dockerfile standards, the image module, and registry configuration |
+| Author a chart | Chart standards, templates and naming, then configuration or specific values needed for the change |
+| Add chart tests | Testing guide and its consumer-versus-library scope boundary |
+| Audit | Only the topic contracts involved in the audit; broaden for an explicitly comprehensive audit |
+| Upgrade a dependency | Migration sections for the upgrade path, then the linked contracts affected by them |
+
+Resolve relative links against the **containing document**, including nested `../` paths and
+fragments. For a local source, open those files in place so uncommitted edits are visible.
+For a remote source, read from the resolver's checkout, keeping all pages at the same resolved
+commit. If using a browser, resolve relative URLs against that page and preserve its ref;
+never switch a linked page to `main` when the user selected another ref.
+
+The configured library defaults are `main`; explicit source/ref inputs take precedence.
+Use the links actually present at that version rather than assuming a fixed docs layout.
+For an older monolithic README, use its headings to read the relevant sections instead.
+If a needed page is missing or a link is broken, report it; do not silently substitute another
+version. Follow additional links only when needed to understand the selected contract.
+Do not concatenate `docs/`, preload every module, or crawl unrelated references.
 
 #### Resolving which copy to read
 
@@ -154,10 +181,10 @@ by copying.
 | Module/workflow → option mapping | `platforms/<platform>/workflow-map.json` |
 | Helm chart structure, values contract, schema | `core/references/helm-chart-standard.md` |
 | Stack requirements (what and why) | `core/references/language-stacks-core.md` |
-| Stack YAML (how) | the resolved library's `README.md`; GitLab-only wiring in `platforms/gitlab/references/stack-snippets.md` |
+| Stack YAML (how) | the relevant example linked from the resolved library's `README.md`; GitLab-only wiring in `platforms/gitlab/references/stack-snippets.md` |
 | Security principles | `core/references/security-core.md` |
 | Platform security mechanics | `platforms/<platform>/references/security-addendum.md` |
-| What a shared CI/Helm library does, and its migration steps | that library's own `README.md` and `MIGRATION.md`, **re-read every run** |
+| What a shared CI/Helm library does, and its migration steps | that library's README-linked topic contracts at the resolved ref; `MIGRATION.md` for upgrades and compatibility checks |
 | How a file mount is declared and classified | `core/references/file-mounts-standard.md` |
 | What each ignore file must and must not contain | `core/references/ignore-files-standard.md` |
 | Which copy of a library a run reads | the precedence chain in §0.0, resolved by `core/scripts/libraries.py` |
@@ -173,8 +200,9 @@ an unreviewable diff.
 1. **Read the existing files first.** Never write one you have not read.
 2. **Diff intent against reality.** What actually differs from the standard is your entire change set.
 3. **Preserve deliberate deviation.** A pinned SHA, an extra job, an unusual condition, a
-   `when: never` override — assume it was intentional and ask before removing it. "It differs
-   from the template" is not a reason.
+   `when: never` override, or a custom project variable (such as `PROJECT_CACHE_KEY: "chat"`) —
+   assume it was intentional and ask before removing or changing it. Respect manual user decisions;
+   "it differs from the default template or stack name" is not a reason.
 4. **Preserve formatting** — key order, comments, quoting, blank lines.
 5. **Justify each edit in one line**, tied to a rule or migration step.
 6. **Never fork a shared template or reusable workflow** to change one line.
@@ -223,10 +251,10 @@ Every command accepts library sources on the same syntax as §0.0, e.g.
 
 ### 2.1 Interactive Protocol — Never Scaffold Silently
 
-**Phase 1 — Context.** Detect the platform. Then resolve the library sources (§0.0) and read
-each library's `README.md` and `MIGRATION.md` **fresh every run** from the resolved path — they
-change between runs, and stale assumptions produce wrong pipelines. Never answer from memory,
-and never read a library the resolver did not hand you a path for.
+**Phase 1 — Context.** Detect the platform. Resolve the library sources (§0.0), read the
+applicable README indexes, and follow the relevant topic links from those resolved paths.
+For upgrades, also read the migration chain. Refresh the selected documents for this run;
+never answer from memory or mix in a library version the resolver did not select.
 
 **Phase 2 — Classify and confirm.** Run the engine to get the detected shape, then present:
 platform (with confidence and signals), shape, what will be created, and anything present that
@@ -240,7 +268,8 @@ them is not "no tests yet", it is a pipeline that builds an artifact nobody exec
 | Present | Ask | Turns on |
 | --- | --- | --- |
 | a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
-| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `test`). Runs `helm unittest` against a mock consumer chart. |
+| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `tests`, accepts space-separated chart directories). Runs each chart's own `tests/*_test.yaml` suites. |
+| a chart | "Does the workload require persistent storage (PVC)?" | Adds `persistence:` in `values.yaml` and `{{- include "tpl.pvc" . }}` below `---` in `templates/manifest.yaml`. Default is **no**; stateless workloads omit both. Never add `persistence:` if persistent storage is not needed, and never re-add it if deleted. |
 
 Ask for each artifact that exists, and ask **both** where both exist — they are independent
 decisions. If the repository already ships the script or the mock chart, say so and default
@@ -251,7 +280,7 @@ If the answer is yes and the fixture does not exist yet, scaffold it:
 - **Image** — a `ci_image_test.sh` that asserts what the image promises: the binary is on
   `PATH` and reports the expected version, the declared `EXPOSE` port is listening, the
   process runs as `10001`. Assert the contract, not the base image's contents.
-- **Chart** — see the scope rule in **helm-tpl-library's own README**. `tpl-library` already
+- **Chart** — follow the **Testing** link in helm-tpl-library's resolved README. `tpl-library` already
   tests the Kubernetes-level rendering it owns, and duplicating that in a consumer chart
   buys nothing and breaks on every library upgrade. A consumer's tests cover what only that
   chart knows.
@@ -355,12 +384,19 @@ see the addendum.
 Identical on both platforms — `core/references/language-stacks-core.md` §3 and
 `core/references/helm-chart-standard.md`.
 
+Publishing defaults differ: follow the selected library's chart and registry configuration
+guides. GitHub requires `CHART_REGISTRY` for OCI publishing. GitLab uses OCI when that variable
+is nonempty, otherwise its current project's Helm Package Registry. Do not fill an absent
+GitLab chart registry with `CI_REGISTRY` or an image registry. Keep dependency-only registry
+authentication separate, use chart-specific credentials, and generate no HTTP backend selector.
+Check these contracts at the resolved ref before using newer settings with an older library.
+
 Two rules that are broken often enough to name here:
 
 - **Dependencies are cached, never artifacted.** No `node_modules/`, `.venv/` or `vendor/`
   in an `artifacts:` block, ever. The image installs *offline* from the package cache,
   bind-mounted by BuildKit. Compiled output (`dist/`, `*.jar`, a binary) is the artifact.
-  Wiring: the library's own README, plus `platforms/gitlab/references/stack-snippets.md`.
+  Wiring: the Docker guide linked from the library's README, plus `platforms/gitlab/references/stack-snippets.md`.
 - **A consumer `values.yaml` is a replica of the library's**, not a subset — every key
   kept, empty ones included, with their examples. Consumer-only keys live under one
   `Application Configuration` banner. `helm-chart-standard.md` §3.0.
@@ -396,7 +432,8 @@ create it. `tpl-library` ships `tpl.pvc` for exactly that, but it is an opt-in e
 `tpl.deployment` does not call it, so a chart whose `manifest.yaml` omits it, or whose
 `persistence:` section is empty, leaves the pod `Pending` while `helm template` and
 `helm install` both succeed. Ask "does something create this?" of every reference the values
-introduce. The entrypoints and the claim-name pairing are in helm-tpl-library's README.
+introduce. Follow the templates and configuration/storage links from helm-tpl-library's README
+for entrypoints and claim-name pairing.
 
 Full schema, examples, and anti-patterns: `core/references/file-mounts-standard.md`.
 `assets/nginx-default.conf` is a placeholder showing the *shape* of a config — not the delivery
@@ -407,7 +444,8 @@ mechanism.
 ## 4. Audit
 
 **Step 1 — Refresh context.** Detect platform; resolve library sources (§0.0); read each
-library's `README.md` and `MIGRATION.md` at the resolved path.
+applicable README index and only the linked contracts involved in the audit. Read migration
+sections when comparing versions.
 
 **Step 2 — Run the engine.**
 

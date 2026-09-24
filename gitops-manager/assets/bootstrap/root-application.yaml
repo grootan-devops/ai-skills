@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: __ROOT_APPLICATION_NAME__
+  namespace: argo-cd
+spec:
+  project: cluster-admin
+  source:
+    repoURL: __GITOPS_REPOSITORY_URL__
+    path: .
+    targetRevision: __TARGET_BRANCH__
+  destination:
+    name: __ARGOCD_CLUSTER_NAME__
+    namespace: argo-cd
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - Validate=true
+      - CreateNamespace=false
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m0s

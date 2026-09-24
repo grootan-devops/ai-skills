@@ -98,9 +98,9 @@ Use `stringData` for plain text; `data` requires values already base64-encoded.
 
 ## 4. Schema
 
-The block shape is the library's, and the library documents it — see **File Mounts
-(`mounts:`)** under *Chart standards to follow* in `helm-tpl-library/README.md`, read at the
-ref this run resolved. Do not restate it here; a copy drifts silently.
+The block shape is the library's: follow the configuration/storage and generated values
+reference links in `helm-tpl-library/README.md`, then locate `mounts` and `persistence`.
+Read those pages at the ref this run resolved. Do not restate it here; a copy drifts silently.
 
 One thing to carry into every mount you author, because getting it wrong is invisible:
 

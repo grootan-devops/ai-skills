@@ -2,8 +2,8 @@
 """Resolve the shared CI/Helm libraries a run reads its facts from.
 
 The skill carries no copy of what `ci-templates`, `github-ci-library` and `tpl-library`
-do -- it reads each library's own README.md and MIGRATION.md, fresh, every run. That
-only works if the run knows WHICH copy of each library to read. This module answers
+do -- it starts from each library's README index, follows task-specific topic links,
+and reads MIGRATION.md when comparing versions. It must know WHICH copy to read. This module answers
 that, and nothing else: it does not interpret the libraries, it locates them.
 
 A source is written as ONE string, `<location>[@<ref>]`:
@@ -59,9 +59,9 @@ DEFAULTS_FILE = _ROOT / "core" / "libraries.json"
 REPO_CONFIG_NAME = ".platform-builder.json"
 ENV_PREFIX = "PLATFORM_BUILDER_LIB_"
 
-#: Docs the skill re-reads every run. README.md is the library's contract and its
-#: absence means the source is not the library; MIGRATION.md only exists once a library
-#: has had a breaking change, so its absence is worth saying and not worth failing on.
+#: Documentation entrypoints, not a list of files to preload. Follow README links only
+#: for the task at hand, within the same resolved checkout; legacy READMEs may be monolithic.
+#: MIGRATION.md is optional and is read for upgrades or compatibility checks.
 REQUIRED_DOCS = ("README.md",)
 OPTIONAL_DOCS = ("MIGRATION.md",)
 
@@ -337,7 +337,7 @@ def _clone(src: Source, dest: Path, refresh: bool) -> None:
 def _default_branch(path: Path) -> str:
     out = _git(["-C", str(path), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
     if out.returncode == 0:
-        return out.stdout.strip().split("/")[-1]
+        return out.stdout.strip().removeprefix("origin/")
     return "main"
 
 
@@ -378,6 +378,8 @@ def resolve_one(name: str, spec: str, origin: str, *,
         head = _git(["-C", str(dest), "rev-parse", "HEAD"])
         if head.returncode == 0:
             res.commit = head.stdout.strip()
+        if not src.ref:
+            res.ref = _default_branch(dest)
 
     for doc in REQUIRED_DOCS + OPTIONAL_DOCS:
         p = Path(res.path) / doc
@@ -556,7 +558,10 @@ def render(results: List[Resolved]) -> str:
         if r.dirty:
             lines.append("  WARNING  : working copy has uncommitted changes -- this run reads "
                          "them, a pipeline using the published library will not")
-        lines.append(f"  read     : {', '.join(r.docs.values())}")
+        lines.append(f"  index    : {r.docs['README.md']}")
+        lines.append("  follow   : task-specific README links, relative to each page at this same ref")
+        if "MIGRATION.md" in r.docs:
+            lines.append(f"  migration: {r.docs['MIGRATION.md']} (upgrades/compatibility only)")
         for n in r.notes:
             lines.append(f"  note     : {n}")
     bad = [r for r in results if not r.ok]

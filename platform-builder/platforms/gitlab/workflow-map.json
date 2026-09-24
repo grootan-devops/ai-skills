@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Skill-owned judgement only: which module provides which WORKFLOW option, the job that proves an option is active, and when a module applies. Job lists, stage order and module descriptions are NOT restated here -- they live in the library's own README.md, which is re-read every run.",
+  "$schema_note": "Skill-owned judgement only: which module provides which WORKFLOW option, the job that proves an option is active, and when a module applies. Job lists, stage order and module descriptions are NOT restated here -- follow the relevant topic links from the library's README.md at the resolved ref.",
   "shared_options": {
     "build": "Satisfied by any language module (nodejs/python/golang/java), so it maps to no single provider.",
     "deploy": "Satisfied by either GitOps module; withheld until `platform ship` wires a real DEPLOY_TARGET."
@@ -131,6 +131,6 @@
     ]
   },
   "required_variables": {
-    "PROJECT_CACHE_KEY": "Always declared, even though common/ defaults it to \"\". Value is the plain language name -- node, python, go, java -- not the project name or a version. It prefixes every cache key in the repo and sonarqube/ builds sonar-${PROJECT_CACHE_KEY}."
+    "PROJECT_CACHE_KEY": "Always declared, even though common/ defaults it to \"\". Start with a stack name (node, python, go, java, or terraform) or a project/service identifier (e.g. chat), optionally suffixed for a monorepo child (e.g. node-admin). Use the same stable key for the dependency warmer and all readers, including Image:Build; do not append a lockfile hash. Sonarqube/ builds sonar-${PROJECT_CACHE_KEY}."
   }
 }

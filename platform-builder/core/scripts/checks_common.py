@@ -412,6 +412,8 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
 
     # `containers.<name>` is a free map -- "main" is the library's example, not a fixed
     # name -- so the container contract is compared against each container the consumer
+    # `containers.<name>` is a free map -- "main" is the library's example, not a fixed
+    # name -- so the container contract is compared against each container the consumer
     # actually declares.
     container_contract = {p for p in lib_paths if p.startswith("containers.main.")}
     lib_paths -= container_contract
@@ -427,6 +429,35 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
             "values.yaml declares no containers. tpl-library renders the workload from "
             "`containers.<name>`; without one the chart produces a pod with no container."
         ))
+
+    # Persistence is optional and rendered only by the tpl.pvc entrypoint.
+    # If templates/manifest.yaml (or templates/*.yaml) does not call tpl.pvc,
+    # persistence is not expected or required in consumer values.yaml.
+    templates_dir = chart_dir / "templates"
+    manifest_files = [chart_dir / "templates" / "manifest.yaml"] if (chart_dir / "templates" / "manifest.yaml").exists() else (
+        list(templates_dir.glob("*.yaml")) + list(templates_dir.glob("*.tpl")) if templates_dir.is_dir() else []
+    )
+    has_tpl_pvc = any(
+        'include "tpl.pvc"' in mf.read_text(encoding="utf-8") or "include 'tpl.pvc'" in mf.read_text(encoding="utf-8")
+        for mf in manifest_files if mf.is_file()
+    )
+
+    if not has_tpl_pvc:
+        lib_paths = {p for p in lib_paths if p != "persistence" and not p.startswith("persistence.")}
+
+    consumer_persistence = consumer.get("persistence")
+    if isinstance(consumer_persistence, dict):
+        has_active_pvc = any(
+            isinstance(v, dict) and v.get("enabled", True) and not v.get("existingClaim")
+            for v in consumer_persistence.values()
+        )
+        if has_active_pvc and not has_tpl_pvc:
+            findings.append(Finding(
+                "P1", "Missing tpl.pvc in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "`persistence` defines active PersistentVolumeClaim entries in values.yaml, "
+                "but `tpl.pvc` is not invoked in templates/manifest.yaml. The claims will not be created. "
+                "Add `{{- include \"tpl.pvc\" . }}` below `---` in manifest.yaml."
+            ))
 
     missing = sorted(p for p in lib_paths - consumer_paths if p not in _VALUES_PARITY_IGNORE)
     if missing:
@@ -466,20 +497,14 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
     ]
 
     # Dependency resolution is packaging's twin failure, and the one interpreted stacks
-    # hit. It is a defect only when it can reach the NETWORK: an install that resolves
-    # online at image-build time re-resolves what the pipeline already pinned and
-    # scanned, so the image cannot be reproduced from what CI tested.
-    #
-    # Installing OFFLINE from the CI cache, bind-mounted by BuildKit, is the library's
-    # own sanctioned pattern (Pattern A -- see the Python example in the CI library's
-    # README). The cache is the handoff. A dependency directory is NEVER an artifact:
-    # every `needs:` in the language modules uses `artifacts: false`, and the cache
-    # blocks carry `cache: policy: pull`. The cache is warmed by the dependency-download
-    # job; there is no separate install job to point at.
+    # hit. It is a defect when it can reach the network: an install that resolves online
+    # at image-build time re-resolves what the pipeline already pinned and scanned.
+    # Cache locations and, critically, handoff mechanics depend on the selected platform.
     dependency_installs = [
-        (r"\b(npm\s+(ci|install|i)\b|yarn\s+install|pnpm\s+(install|i)\b)", ".npm", "Dependency:Download"),
-        (r"\b(pip\s+install|uv\s+sync|uv\s+pip\s+install|poetry\s+install)\b", ".uv", "Dependency:Download"),
-        (r"\b(go\s+mod\s+download|mvn\s+dependency:go-offline)\b", ".m2", "the dependency-download job"),
+        (r"\b(npm\s+(ci|install|i)\b|yarn\s+install|pnpm\s+(install|i)\b)", ".npm", ".npm", "Node:Dependency:Download"),
+        (r"\b(pip\s+install|uv\s+sync|uv\s+pip\s+install|poetry\s+install)\b", ".uv", ".uv-cache", "Python:Dependency:Download"),
+        (r"\bgo\s+mod\s+download\b", ".cache", ".go-cache", "Go:Dependency:Download"),
+        (r"\bmvn\s+dependency:go-offline\b", ".m2", ".m2", "Java:Dependency:Download"),
     ]
 
     known_stages = set()
@@ -495,6 +520,7 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
 
     has_copy = False
     proxy_reported: Set[int] = set()
+    declared_arg_defaults: Set[str] = set()
 
     for line_no, line in enumerate(lines, start=1):
         stripped = line.strip()
@@ -519,18 +545,46 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
 
         if _PLATFORM == "gitlab" and stripped.upper().startswith("ARG "):
             arg_def = stripped[4:].strip()
-            if "=" in arg_def:
-                var_name, var_val = arg_def.split("=", 1)
-                # `ARG YQ_VERSION=4.53.6` is a version pin, not an image. Without this a
-                # multi-stage toolkit image reports one "unproxied image" per tool it pins.
-                if re.search(r"_(VERSION|TAG)$", var_name.strip(), re.I):
-                    continue
-                unproxied, suggested = classify_unproxied_public_image(var_val.strip(), known_stages)
-                if unproxied:
-                    findings.append(Finding(
-                        "P1", "Unproxied External Image", f"{df_file.name}:{line_no}",
-                        f"ARG '{var_name.strip()}' default image '{var_val.strip()}' pulls from an external registry without cache. " + _image_remedy(suggested)
-                    ))
+            # Support single or multiple ARG declarations on the same logical line (e.g. ARG VAR1=val1 VAR2=val2)
+            arg_tokens = arg_def.split()
+            for token in arg_tokens:
+                if "=" in token:
+                    var_name, var_val = token.split("=", 1)
+                    declared_arg_defaults.add(var_name.strip())
+                    # `ARG YQ_VERSION=4.53.6` is a version pin, not an image.
+                    if re.search(r"_(VERSION|TAG)$", var_name.strip(), re.I):
+                        continue
+                    unproxied, suggested = classify_unproxied_public_image(var_val.strip(), known_stages)
+                    if unproxied:
+                        findings.append(Finding(
+                            "P1", "Unproxied External Image", f"{df_file.name}:{line_no}",
+                            f"ARG '{var_name.strip()}' default image '{var_val.strip()}' pulls from an external registry without cache. " + _image_remedy(suggested)
+                        ))
+                else:
+                    var_name = token.strip()
+                    if var_name not in declared_arg_defaults and (
+                        var_name.endswith("_IMAGE") or "_BASE_IMAGE" in var_name or "_BUILD_IMAGE" in var_name
+                    ):
+                        suggested_default = ""
+                        for known_arg, default_img in [
+                            ("PYTHON_312_MICRO_BASE_IMAGE", "grootantech/python-3-12:latest"),
+                            ("NODE_JS_24_MICRO_BASE_IMAGE", "grootantech/node-js-24:latest"),
+                            ("JAVA_25_MICRO_BASE_IMAGE", "grootantech/java-25:latest"),
+                            ("NGINX_MICRO_BASE_IMAGE", "grootantech/nginx:latest"),
+                            ("MICRO_ROOT_BASE_IMAGE", "grootantech/micro-root:latest"),
+                            ("TOOLKIT_BUILD_IMAGE", "grootantech/toolkit:latest"),
+                        ]:
+                            if var_name == known_arg:
+                                suggested_default = default_img
+                                break
+                        remedy = f" (e.g. '{var_name}={suggested_default}')" if suggested_default else f" (e.g. '{var_name}=grootantech/<image>:latest')"
+                        findings.append(Finding(
+                            "P2", "Missing Default Base Image in ARG", f"{df_file.name}:{line_no}",
+                            f"ARG '{var_name}' declares no default enterprise image{remedy}. "
+                            "Providing a ':latest' enterprise default enables local developer 'docker build' "
+                            "without manual build-args, avoids unapproved public base images, and allows CI "
+                            "to override with exact versioned tags."
+                        ))
 
         if stripped.startswith("COPY "):
             has_copy = True
@@ -546,9 +600,10 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
     # Dockerfile is tooling for the image itself, not project dependencies the pipeline
     # already resolved. The packaging rule has nothing to say about it.
     for start_line, instruction in (() if shape == "image-only" else _logical_instructions(lines)):
-        for pat, cache_dir, install_tpl in dependency_installs:
+        for pat, gitlab_cache_dir, github_cache_dir, install_tpl in dependency_installs:
             if not re.search(pat, instruction):
                 continue
+            cache_dir = github_cache_dir if _PLATFORM == "github" else gitlab_cache_dir
             mounts_cache = re.search(
                 r"--mount=type=(bind|cache)[^\s]*source=" + re.escape(cache_dir) + r"\b", instruction
             ) or re.search(r"--mount=type=cache[^\s]*target=[^\s]*" + re.escape(cache_dir) + r"\b", instruction)
@@ -563,12 +618,30 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                     "never scanned. Add --offline."
                 ))
                 continue
+            if _PLATFORM == "github":
+                remedy = (
+                    " The current github-ci-library docker.yml does not restore the language "
+                    "workflow's Actions cache into the Docker build context. Do not copy the "
+                    "GitLab PROJECT_CACHE_KEY/cache: policy: pull recipe; an explicit cache or "
+                    "artifact handoff in the image workflow is required before using an offline "
+                    "BuildKit mount."
+                )
+            elif _PLATFORM == "gitlab":
+                remedy = (
+                    f" Warm the cache in {install_tpl}, restore it onto Image:Build with the "
+                    "same PROJECT_CACHE_KEY and cache path (`cache: policy: pull`), then install "
+                    "offline from a read-write BuildKit bind mount."
+                )
+            else:
+                remedy = (
+                    " Provide an explicit cache handoff from the selected CI platform into the "
+                    "Docker build context, then install offline from a read-write BuildKit mount."
+                )
             findings.append(Finding(
                 "P1", "Dockerfile Packaging Violation", f"{df_file.name}:{start_line}",
                 f"Dockerfile resolves dependencies at image-build time with no {cache_dir} cache mount, so "
                 "it reaches the network and re-resolves what the pipeline already pinned and scanned. "
-                f"Warm the cache in a CI job (extends {install_tpl}), restore it onto Image:Build with "
-                f"`cache: policy: pull`, and install offline from a BuildKit bind mount: "
+                f"{remedy} Suggested Dockerfile mount: "
                 f"`RUN --mount=type=bind,source={cache_dir},target=/tmp/{cache_dir},rw ... --offline`. "
                 f"Do NOT publish the dependency directory as an artifact -- it is cached, not artifacted."
             ))
@@ -994,13 +1067,14 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
 
     # Verify Chart.yaml name does not use generic -service
     name_match = re.search(r"^name:\s*(.+)$", chart_content, re.MULTILINE)
+    c_name = ""
     if name_match:
-        c_name = name_match.group(1).strip()
+        c_name = name_match.group(1).strip().strip("'\"")
         if c_name.endswith("-service") or c_name == "service":
             findings.append(Finding(
                 "P1", "Chart Name Suffix Violation", str(chart_yaml_file),
                 f"Chart name '{c_name}' uses the forbidden generic suffix '-service'. "
-                f"Sub-component must reflect actual functional role: '{{component}}-backend', '{{component}}-frontend', '{{component}}-worker', or '{{component}}-gateway'."
+                "Sub-component must reflect actual functional role: 'backend', 'frontend', 'worker', or 'gateway'."
             ))
 
     # Verify manifest.yaml includes tpl.deployment
@@ -1035,30 +1109,31 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
     else:
         val_content = values_yaml_file.read_text(encoding="utf-8")
 
-        # Check subComponent standard
-        sub_match = re.search(r"^subComponent:\s*[\"']?([^\"'\n]+)[\"']?", val_content, re.MULTILINE)
+        # Check subComponent standard (standalone single-component charts can have an empty/null subComponent)
+        sub_match = re.search(r"^subComponent:\s*[\"']?([^\"'\n#]*)[\"']?", val_content, re.MULTILINE)
         if sub_match:
             sub_val = sub_match.group(1).strip()
-            if sub_val == "service" or "service" in sub_val:
-                findings.append(Finding(
-                    "P1", "Sub-Component Role Violation", f"{values_yaml_file.name}:subComponent",
-                    f"subComponent cannot be generic 'service' (found '{sub_val}'). "
-                    "Must strictly be one of: 'backend', 'frontend', 'worker', or 'gateway'. "
-                    "Industry naming guidance: use 'backend' for APIs/REST services (e.g. pii-service -> pii-backend), "
-                    "'worker' for background consumers/scrubbers/batch jobs (e.g. pii-masker/pii-scrubber -> pii-worker), "
-                    "'gateway' for edge proxies/BFFs (e.g. auth-gateway -> auth-gateway), and 'frontend' for SPAs/UIs (e.g. admin-portal -> admin-frontend)."
-                ))
-            elif sub_val not in ["backend", "frontend", "worker", "gateway"]:
-                findings.append(Finding(
-                    "P1", "Sub-Component Standard", f"{values_yaml_file.name}:subComponent",
-                    f"subComponent '{sub_val}' is invalid. Must strictly be one of: backend, frontend, worker, gateway. "
-                    "Guidance: use 'backend' for APIs/REST services, 'worker' for async consumers/scrubbers, "
-                    "'gateway' for edge proxies/BFFs, and 'frontend' for SPAs/UIs."
-                ))
+            if sub_val and sub_val not in ["null", "~", '""', "''"]:
+                if sub_val == "service" or "service" in sub_val:
+                    findings.append(Finding(
+                        "P1", "Sub-Component Role Violation", f"{values_yaml_file.name}:subComponent",
+                        f"subComponent cannot be generic 'service' (found '{sub_val}'). "
+                        "Must strictly be one of: 'backend', 'frontend', 'worker', or 'gateway'. "
+                        "Industry naming guidance: use 'backend' for APIs/REST services (e.g. pii-service -> pii-backend), "
+                        "'worker' for background consumers/scrubbers/batch jobs (e.g. pii-masker/pii-scrubber -> pii-worker), "
+                        "'gateway' for edge proxies/BFFs (e.g. auth-gateway -> auth-gateway), and 'frontend' for SPAs/UIs (e.g. admin-portal -> admin-frontend)."
+                    ))
+                elif sub_val not in ["backend", "frontend", "worker", "gateway"]:
+                    findings.append(Finding(
+                        "P1", "Sub-Component Standard", f"{values_yaml_file.name}:subComponent",
+                        f"subComponent '{sub_val}' is invalid. Must strictly be one of: backend, frontend, worker, gateway (or empty for standalone charts). "
+                        "Guidance: use 'backend' for APIs/REST services, 'worker' for async consumers/scrubbers, "
+                        "'gateway' for edge proxies/BFFs, and 'frontend' for SPAs/UIs."
+                    ))
         else:
             findings.append(Finding(
                 "P1", "Missing subComponent", str(values_yaml_file),
-                "Missing 'subComponent' in values.yaml. Must strictly be 'backend', 'frontend', 'worker', or 'gateway'."
+                "Missing 'subComponent' in values.yaml. Must strictly be 'backend', 'frontend', 'worker', or 'gateway' (or empty for standalone charts)."
             ))
 
         # Check global.partOf (Product Name) and releaseNameLength
@@ -1078,6 +1153,21 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                     findings.append(Finding(
                         "P1", "Release Name Length Mismatch", f"{values_yaml_file.name}:global.releaseNameLength",
                         f"global.releaseNameLength ({rel_len}) does not match character length of global.partOf '{part_of_val}' ({len(part_of_val)})."
+                    ))
+
+        # Check component standard and Chart.yaml naming convention: <productname>-<componentname><-subcomponentname>
+        comp_match = re.search(r"^component:\s*[\"']?([^\"'\n#]+)[\"']?", val_content, re.MULTILINE)
+        comp_val = comp_match.group(1).strip() if comp_match else None
+
+        if name_match and part_of_match and comp_val:
+            part_of_val = part_of_match.group(1).strip()
+            if part_of_val and part_of_val not in ["myorg", "myproduct", "[PRODUCT_NAME]"]:
+                has_sub = sub_match and sub_val and sub_val not in ["null", "~", '""', "''"]
+                expected_chart_name = f"{part_of_val}-{comp_val}-{sub_val}" if has_sub else f"{part_of_val}-{comp_val}"
+                if c_name != expected_chart_name:
+                    findings.append(Finding(
+                        "P1", "Chart Name Standard Violation", str(chart_yaml_file),
+                        f"Chart name '{c_name}' does not match standard '<productname>-<componentname><-subcomponentname>' (expected '{expected_chart_name}')."
                     ))
 
         # Check image repository formatting

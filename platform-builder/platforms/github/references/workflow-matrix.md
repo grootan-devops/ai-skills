@@ -4,10 +4,10 @@ Covers what is specific to GitHub. The machine-readable map is
 [`../workflow-map.json`](../workflow-map.json) — the only copy, loaded at runtime by
 `ci_checks.py`.
 
-> **The library documents its own behaviour.** Read `github-ci-library/README.md` and
-> `MIGRATION.md` **every run**: the module catalog, per-module inputs and outputs, the execution
-> matrix, and the two-tier release model live there and are authoritative. This page carries
-> only what the library does not state about itself.
+> **The library documents its own behaviour.** Start at the resolved `github-ci-library/README.md`
+> index, then follow its pipeline lifecycle, relevant module and matching example links.
+> Keep the same ref for all pages; read migration notes when comparing versions. This page
+> carries only what the library does not state about itself.
 
 ---
 
@@ -66,6 +66,19 @@ Secret scanning still applies because it inspects Git history rather than langua
 
 When a pull-request workflow uses `paths:`, include `.github/**` so changes to workflows,
 actions, and repository automation always run the PR checks that validate them.
+
+### Dependency-cache scope for Docker builds
+
+The Python and Node reusable workflows restore/save `.uv-cache` and `.npm` using lockfile-based
+GitHub Actions cache keys. A job can restore a matching cache entry, but a directory restored
+in one job is not present on another job's filesystem automatically. In the current library,
+`docker.yml` does not restore or download either directory; its BuildKit registry cache is for
+image layers only. Therefore, do not claim that
+`python-build.yml` or `node-build.yml` warms the Docker build context, and do not generate an
+offline `RUN --mount` that assumes this cache handoff exists. If an application requires that
+pattern, report that the current image workflow needs an explicit cache/artifact handoff. Keep
+GitLab's `PROJECT_CACHE_KEY` convention out of GitHub Actions; these are different cache
+mechanisms and workflows.
 
 ## 3. Release promotes, it does not rebuild
 
@@ -137,7 +150,7 @@ job calling a reusable workflow takes a `permissions:` block like any other. Put
 at the top hands `packages: write` to the lint job and the secret scan, which push nothing and
 are the jobs most likely to run third-party code.
 
-The library's README carries the per-workflow requirement: which scope each called workflow
+The module and example guides linked from the library's README carry the per-workflow requirement: which scope each called workflow
 needs, so a caller can grant exactly that. Under-grant and the call fails at **startup**, not
 midway — a reusable workflow cannot request a scope its caller did not have.
 
@@ -275,15 +288,30 @@ the same target at once.
 workflow's `name` on every row, identical for each run, and the only way to tell two apart
 is to open them.
 
+### PR verification workflows (`pr.yml`)
+
+On pull requests, the Actions list only displays the head/source branch, never the destination branch.
+Use the directional run-name format to clearly show the PR number, head branch, target branch, and commit SHA:
+
+```yaml
+name: CI · PR Verification
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha)
+      || format('Verify · {0}', github.ref_name) }}
+```
+
+### Standard and dispatch workflows
+
+For release, check, lint, scan, and deploy workflows, use the `<Label> · ${{ github.event_name }} · ${{ github.sha }}` convention:
+
 ```yaml
 name: CD · Production Release
 run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 ```
 
 The label is the first segment of `name:` — `CI`, `CD`, `Lint`, `Check`, `Scan`, `Audit`.
-Then the two facts a row cannot otherwise carry: **what triggered it** and **exactly which
-commit ran**. Actor and branch are already columns in the UI, so repeating them spends the
-row's width on what is visible anyway; `github.sha` is not shown anywhere on the list.
+Then what triggered it and exactly which commit ran.
 
 A reusable workflow — `on: workflow_call` — declares none. It has no run of its own; the
 caller's `run-name` titles the whole run, and a `run-name` here would be dead text.

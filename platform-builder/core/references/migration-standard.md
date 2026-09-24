@@ -35,7 +35,8 @@ When upgrading a repository:
      it. That is "nothing to do", and it is stated, not inferred from silence.
 
 3. **Apply each step against the library's own documentation.** The `MIGRATION.md` section is
-   prose; the `README.md` and the library's canonical `values.yaml` are the source of truth
+   prose; the task-specific pages linked from `README.md` and the library's canonical
+   `values.yaml` are the source of truth
    for what the result should look like. Change the consumer's `.gitlab-ci.yml`,
    `.github/workflows/*.yml`, `chart/values.yaml` and `chart/templates/manifest.yaml` to
    match — ref bumps, renamed variables, boolean inversions, route migrations, schema updates.
@@ -61,8 +62,9 @@ When upgrading a repository:
 >
 > When executing `platform update` or upgrading a consumer project:
 >
-> 1. **Fetch & Read**: Ingest `MIGRATION.md` and `README.md` from the paths
->    `core/scripts/libraries.py` resolved for this run. Never a path you guessed.
+> 1. **Fetch & Read**: Read `MIGRATION.md` and the `README.md` index from the paths
+>    `core/scripts/libraries.py` resolved for this run. Follow only the affected topic links,
+>    relative to their containing page and at that same ref. Never a path you guessed.
 > 2. **Sequential Multi-Version Processing**: `core/scripts/audit.py` compares the consumer's
 >    pinned ref against the resolved target and returns every intermediate version section,
 >    in order, under `migrations[]`. Read them in that order.
