@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.3.1
     secrets: inherit
     with:
       lint-md-files: "**/*.md"
