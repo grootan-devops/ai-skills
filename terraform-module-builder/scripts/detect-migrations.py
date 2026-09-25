@@ -201,8 +201,10 @@ def main():
             print(f"  - {m}")
         print("\nRecommended SemVer: MINOR (e.g. bump to next 0.X.0)\n")
     else:
-        print("[CLEAN - PATCH / NO API CHANGES DETECTED]")
-        print("Recommended SemVer: PATCH (e.g. bump to next 0.0.X)\n")
+        print("[NO PUBLIC API OR RESOURCE ADDRESS CHANGES DETECTED]")
+        print("PATCH is only a candidate: this textual scan does not assess changed defaults, "
+              "count/for_each instance keys, provider behavior, or lifecycle settings. "
+              "Review the diff and a representative consumer plan before classifying the change.\n")
     for change in patch_changes:
         print(f"  - {change}")
 

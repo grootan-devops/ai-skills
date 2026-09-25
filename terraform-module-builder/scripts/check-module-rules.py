@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""
-check-module-rules.py
+"""Textual and Registry-backed checks for selected Terraform module risks.
 
-Industrial-grade AST & schema-aware linter for Terraform modules.
-Validates:
-1. Version Gate Compatibility (e.g. write-only args requiring TF >= 1.11.0).
-2. Dead & Unwired Module Variables (declared variables never referenced in .tf code).
-3. Unused Context Data Sources (queries in data.tf never referenced in module logic).
-4. Secret & Credential Safety (bans default passwords/tokens; flags cleartext password handling).
-5. Capability-Aware Security Controls (encryption at rest, deletion protection, public boundaries).
-6. Tag Governance & Precedence (verifies reserved tags are not clobbered by var.tags).
-7. Resource Naming Limits (e.g. ALB 32-char limits, S3 character constraints).
-8. Project & Brand Neutrality (bans hardcoded brand names like Plainr, takween).
+This is not an HCL parser, provider-schema validator, or substitute for a
+consumer plan. Findings need review against the selected module contract.
 """
 
 import os
@@ -143,31 +134,25 @@ def check_dead_variables(module_dir, findings):
             })
 
 def check_unused_context_data_sources(module_dir, findings):
-    """Detects data sources declared in data.tf that are never referenced elsewhere."""
-    data_file = Path(module_dir) / "data.tf"
-    if not data_file.exists():
-        return
-
-    data_content = scan_file_content(data_file)
-    # Find all data "type" "name" blocks
-    declared_datas = re.findall(r'data\s+"([a-zA-Z0-9_-]+)"\s+"([a-zA-Z0-9_-]+)"', data_content)
-
-    other_tf_content = ""
-    for root, _, files in os.walk(module_dir):
-        if ".terraform" in root:
-            continue
-        for file in files:
-            if file.endswith(".tf") and file != "data.tf":
-                other_tf_content += "\n" + scan_file_content(Path(root) / file)
-
-    for d_type, d_name in declared_datas:
-        pattern = rf'\bdata\.{re.escape(d_type)}\.{re.escape(d_name)}\b'
-        if not re.search(pattern, other_tf_content):
+    """Detects unreferenced data sources in any root-level Terraform file."""
+    contents = {
+        path: scan_file_content(path)
+        for path in sorted(Path(module_dir).glob("*.tf"))
+    }
+    all_content = "\n".join(contents.values())
+    for path, content in contents.items():
+        for match in re.finditer(
+            r'(?m)^[ \t]*data[ \t]+"([^"]+)"[ \t]+"([^"]+)"[ \t]*\{', content
+        ):
+            d_type, d_name = match.groups()
+            pattern = rf'\bdata\.{re.escape(d_type)}\.{re.escape(d_name)}\b'
+            if re.search(pattern, all_content):
+                continue
             findings.append({
                 "severity": "P2",
                 "category": "Unused Context Query",
-                "file": str(data_file),
-                "line": 1,
+                "file": str(path),
+                "line": content[:match.start()].count("\n") + 1,
                 "message": f"Data source 'data.{d_type}.{d_name}' is queried but never consumed in module logic."
             })
 
@@ -178,9 +163,21 @@ def check_tag_governance(module_dir, findings):
         return
 
     content = scan_file_content(locals_file)
-    # Check for merge({ ... Application = ... }, var.tags) where var.tags comes second
-    clobber_pattern = re.search(r'merge\s*\(\s*\{[^}]*Application[^}]*\}\s*,\s*var\.tags\s*\)', content, re.DOTALL)
-    if clobber_pattern:
+    # Governance tags may be assembled from several conditional merge arguments.
+    # The final occurrence wins, so var.tags after any reserved tag is unsafe.
+    clobbers = False
+    for match in re.finditer(r'\btags\s*=\s*merge\s*\(', content):
+        end = matching_delimiter(content, match.end() - 1, "(", ")")
+        if end is None:
+            continue
+        arguments = content[match.end():end]
+        governance = max(arguments.rfind(name) for name in
+                         ("Application", "Environment", "Name", "ManagedBy",
+                          "local.governance_tags"))
+        if governance >= 0 and arguments.rfind("var.tags") > governance:
+            clobbers = True
+            break
+    if clobbers:
         findings.append({
             "severity": "P2",
             "category": "Tag Governance",
@@ -210,6 +207,50 @@ def check_secret_defaults(module_dir, findings):
                 "message": "Found hardcoded default password/credential in variables.tf. Default credentials must never be generated."
             })
 
+def matching_delimiter(source, opening_index, opening, closing):
+    """Find a matching HCL delimiter, ignoring strings and common comment forms."""
+    depth = 0
+    quoted = False
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = opening_index
+    while index < len(source):
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+        if line_comment:
+            if char == "\n":
+                line_comment = False
+        elif block_comment:
+            if char == "*" and next_char == "/":
+                block_comment = False
+                index += 1
+        elif quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == "#" or (char == "/" and next_char == "/"):
+            line_comment = True
+            if char == "/":
+                index += 1
+        elif char == "/" and next_char == "*":
+            block_comment = True
+            index += 1
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
 def check_output_sensitive_hygiene(module_dir, findings):
     """Ensures sensitive outputs are properly marked."""
     outputs_file = Path(module_dir) / "outputs.tf"
@@ -218,12 +259,15 @@ def check_output_sensitive_hygiene(module_dir, findings):
 
     content = scan_file_content(outputs_file)
     # Check if any password/token/key output lacks sensitive = true
-    output_blocks = re.finditer(r'output\s+"([^"]+)"\s*\{([^}]+)\}', content, re.DOTALL)
+    output_blocks = re.finditer(r'(?m)^[ \t]*output[ \t]+"([^"]+)"[ \t]*\{', content)
     for ob in output_blocks:
         name = ob.group(1)
-        body = ob.group(2)
+        end = matching_delimiter(content, ob.end() - 1, "{", "}")
+        if end is None:
+            continue
+        body = content[ob.end():end]
         if any(term in name.lower() for term in ["password", "secret", "private_key", "token"]):
-            if "sensitive" not in body or "sensitive = true" not in body.replace(" ", ""):
+            if not re.search(r'(?m)^[ \t]*sensitive[ \t]*=[ \t]*true(?:[ \t]*(?:(?:#|//).*)?)?$', body):
                 findings.append({
                     "severity": "P0",
                     "category": "Output Security",
@@ -384,20 +428,24 @@ def check_constraint_against_latest(constraint_str: str, latest_str: str):
                 upper = (parts[0] + 1, 0, 0)
             if latest >= upper:
                 locks_out_latest = True
-        elif not any(clause.startswith(op) for op in ['>=', '>', '!=']):
+        elif clause.startswith('>='):
+            if latest < parse_semver(clause[2:]):
+                locks_out_latest = True
+        elif clause.startswith('>'):
+            if latest <= parse_semver(clause[1:]):
+                locks_out_latest = True
+        elif clause.startswith('!='):
+            if latest == parse_semver(clause[2:]):
+                locks_out_latest = True
+        else:
             v = parse_semver(clause)
             if latest != v:
                 locks_out_latest = True
 
     if locks_out_latest:
-        findings.append(('P1', f"Constraint '{constraint_str}' excludes latest release '{latest_str}'. Update constraint to allow and target '>= {latest_str}'."))
+        findings.append(('P1', f"Constraint '{constraint_str}' excludes latest release '{latest_str}'. Review the provider upgrade and schema before changing this constraint."))
     else:
-        m = re.search(r'>=\s*([0-9.]+)', constraint_str)
-        if m:
-            min_v = parse_semver(m.group(1))
-            if min_v < latest:
-                findings.append(('P2', f"Version constraint '{constraint_str}' is behind latest release '{latest_str}'. Reusable modules should target '>= {latest_str}' per rule 2.1."))
-        if '<' in constraint_str:
+        if '<' in constraint_str or '~>' in constraint_str:
             findings.append(('P2', f"Artificial upper constraint found in '{constraint_str}'. Omit upper bounds in reusable modules to preserve caller upgrade flexibility."))
 
     return findings

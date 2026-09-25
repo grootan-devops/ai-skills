@@ -9,7 +9,7 @@ local edits and validation only; infrastructure mutation needs an explicit reque
 ### Quick
 
 ```text
-Run terraform-module add <provider> <resource_type> <module_name> in <repository>, using terraform-modules source <source-or-default>. Resolve the latest stable provider, inspect its schema and official resource documentation, compare existing modules and naming rules, then create the smallest complete module, docs, outputs, and meaningful tests. Run the module rules, docs check, and available native validation. Report its public API, provider pin, checks, and limitations. Do not apply, commit, or push.
+Run terraform-module add <provider> <resource_type> <module_name> in <repository>, using terraform-modules source <source-or-default>. Resolve the latest stable provider, inspect its schema and official resource documentation, compare existing modules and naming rules, then create the smallest complete module, docs, outputs, and meaningful tests. Run the module rules, docs check, and available native validation. Report its public API, provider pin, checks, and limitations. Stop before apply; an apply needs my separate request and confirmation of its exact saved plan. Do not commit or push.
 ```
 
 ### Full
@@ -35,7 +35,9 @@ Reference terraform-modules source/ref: <source-or-default>.
    scripts/generate-module-docs.py <module_path> --check, focused tests, and
    the reference repository's make verify when prerequisites are available.
    Report exact results, API decisions, provider version, and missing gates.
-   Leave all changes local; do not run apply, commit, or push.
+   Leave all changes local. Apply only if I separately request it and confirm
+   the exact saved plan, target account, workspace, and environment. Do not
+   commit or push.
 ```
 
 ## `terraform-module update`
@@ -43,7 +45,7 @@ Reference terraform-modules source/ref: <source-or-default>.
 ### Quick
 
 ```text
-Run terraform-module update <module_path> against terraform-modules source <source-or-default>. Resolve the latest stable provider and inspect its upgrade notes and schema even for a narrow edit. Read the reference MIGRATION.md, compare the existing API and Git diff, use detect-migrations.py for candidate resource-address changes, and inspect a representative consumer plan before any change that might replace or destroy resources. Apply a surgical local edit, preserve intentional behavior, document risks and moved blocks only for verified mappings, and run rules/docs/tests/make verify where available. Do not apply, commit, or push.
+Run terraform-module update <module_path> against terraform-modules source <source-or-default>. Resolve the latest stable provider and inspect its upgrade notes and schema even for a narrow edit. Read the reference MIGRATION.md, compare the existing API and Git diff, use detect-migrations.py for candidate resource-address changes, and inspect a representative consumer plan before any change that might replace or destroy resources. Apply a surgical local edit, preserve intentional behavior, document risks and moved blocks only for verified mappings, and run rules/docs/tests/make verify where available. Stop before apply; an apply needs my separate request and confirmation of its exact saved plan. Do not commit or push.
 ```
 
 ### Full
@@ -65,9 +67,10 @@ Reference terraform-modules source/ref: <source-or-default>.
    results as candidates only. For every changed address, key, default,
    provider behavior, or lifecycle setting that might replace or destroy a
    resource, review a realistic consumer state and plan or representative
-   fixture before making the change. Add moved blocks only for verified
-   one-to-one address mappings. Show any unresolved destructive risk and ask
-   before changing ambiguous consumer behavior.
+   fixture before making the change. Inspect plan JSON actions and
+   replace_paths. Add moved blocks only for verified address mappings; they
+   do not repair argument-driven replacement. Show unresolved destructive
+   risk and ask before changing ambiguous consumer behavior.
 4. Make only the required in-place edits. Preserve public API, custom
    defaults, tags, resource settings, and formatting unless a verified
    migration or defect requires a change. Document consumer migration steps
@@ -76,8 +79,10 @@ Reference terraform-modules source/ref: <source-or-default>.
 5. Run strict module rules, migration detection, docs check, focused tests,
    and make verify when its dependencies exist. Review the final diff and
    report exact commands, results, provider version, and plan limitations.
-   Do not run apply, destroy, state mutation, commit, push, or release unless
-   explicitly requested.
+   Stop before apply. If I separately request it, confirm the exact saved
+   plan and target account/workspace/environment before applying that file.
+   Destroy and direct state changes require their own request and review.
+   Do not commit, push, or release unless requested.
 ```
 
 ## `terraform-module audit`

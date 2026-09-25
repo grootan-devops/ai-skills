@@ -9,13 +9,14 @@ copyable requests.
 
 | Command | Result |
 | --- | --- |
-| terraform-module add <provider> <resource_type> <module_name> | Create a module with an inspected provider schema, documentation, and useful tests. |
-| terraform-module update <module_path> | Target the latest stable provider and make a reviewed, surgical module change. |
-| terraform-module audit <module_path_or_repo> | Report findings without editing. |
+| `terraform-module add <provider> <resource_type> <module_name>` | Create a module with an inspected provider schema, documentation, and useful tests. |
+| `terraform-module update <module_path>` | Target the latest stable provider and make a reviewed, surgical module change. |
+| `terraform-module audit <module_path_or_repo>` | Report findings without editing. |
 
 The reference repository's README defines its module API, naming, security,
-documentation, release, and test standards. Its MIGRATION.md defines the
-consumer migration procedure. Read both at the selected ref, then inspect
+documentation, release, and test standards. Its MIGRATION.md records
+release-specific consumer actions; the Skill's state-migration guide explains
+how to assess a proposed change. Read both at the selected ref, then inspect
 actual modules and tests before treating examples as shipped behavior. The
 current reference repository is AWS-focused; other providers require their
 own schema and contract evidence.
@@ -27,15 +28,17 @@ own schema and contract evidence.
   resource declarations with a Git ref and reports candidate migrations.
   It cannot prove plan safety or detect every Terraform instance-key change.
 - scripts/generate-module-docs.py renders or checks Requirements, Inputs, and
-  Outputs tables; review the rest of a module README manually.
+  Outputs tables in an existing reviewed README. It refuses to invent a new
+  module's architecture, security claims, or public Git example.
 
 Use make verify from terraform-modules for its contract, format, validation,
 and available native-test gate. Inspect a representative consumer plan before
 claiming that a refactor avoids replacement or destruction. A moved block only
-covers a verified resource-address mapping. No workflow applies infrastructure
-or commits and pushes work without an explicit request.
+covers a verified resource-address mapping. An apply requires a separate request
+and confirmation of the exact saved plan and target; local module work does not
+authorize it. No workflow commits or pushes work without an explicit request.
 
-For Skill maintainers, the migration detector's Git-baseline regressions live
+For Skill maintainers, the checker and migration detector regressions live
 in `scripts/tests/`. From the `ai-skills` repository root, run
 `python3 -m unittest discover -s terraform-module-builder/scripts/tests -v`.
 The separate `terraform-modules/tests/verify_modules.py` remains that library's

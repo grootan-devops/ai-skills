@@ -3,9 +3,9 @@
 `terraform-modules` holds the ground-truth modules and the standards they are built to. The
 skill does not carry its own copy of those standards: the contract, the naming and tagging
 rules, the security baselines, the documentation standard, the release levels, and the test
-gate all live in that repository's `README.md`, and the upgrade contract lives in its
-`MIGRATION.md`. Resolve the repository first, then read from it — a rule quoted from memory
-is a rule that has already drifted.
+gate all live in that repository's `README.md`. Its `MIGRATION.md` records release-specific
+consumer actions, not a general state-migration procedure. Resolve the repository first,
+then read from it — a rule quoted from memory is a rule that has already drifted.
 
 ## Locating it
 
@@ -27,7 +27,7 @@ Never guess, and never carry on without it.
 | choose a security control | `README.md` §6 *Security Baselines*, then `docs/AWS.md` |
 | write or refresh a module README | `README.md` §7 *Module Documentation Standard* |
 | classify a change or cut a release | `README.md` §8 *Versioning & Release Contract* |
-| change a resource address | `MIGRATION.md` |
+| change a resource address | This Skill's `state-migration-guide.md`; record consumer actions in the library's `MIGRATION.md` when releasing |
 | claim a module is verified | `README.md` §9, and run `make verify` |
 
 The module catalog is `modules/`, partitioned by provider and domain; `docs/AWS.md` carries

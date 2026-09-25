@@ -29,14 +29,36 @@ class DetectMigrationsTests(unittest.TestCase):
         return subprocess.run(["git", "-C", str(self.root), *args], check=True,
                               capture_output=True, text=True)
 
-    def detect(self, *args):
-        return subprocess.run([sys.executable, str(SCRIPT), str(self.module), *args],
+    def detect(self, *args, path=None):
+        return subprocess.run([sys.executable, str(SCRIPT), str(path or self.module), *args],
                               cwd=self.root.parent, capture_output=True, text=True)
 
-    def test_unchanged_module_is_patch_from_another_directory(self):
+    def test_unchanged_module_reports_limits_from_another_directory(self):
         result = self.detect()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("PATCH / NO API CHANGES", result.stdout)
+        self.assertIn("NO PUBLIC API OR RESOURCE ADDRESS CHANGES", result.stdout)
+        self.assertIn("PATCH is only a candidate", result.stdout)
+
+    def test_linked_worktree_uses_its_own_git_baseline(self):
+        linked = self.root.parent / f"{self.root.name}-worktree"
+        self.git("worktree", "add", "-q", "-b", "test-worktree", str(linked))
+        self.addCleanup(lambda: self.git("worktree", "remove", "--force", str(linked)))
+        result = self.detect(path=linked / "modules/sample")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("NO PUBLIC API OR RESOURCE ADDRESS CHANGES", result.stdout)
+
+    def test_module_inside_submodule_uses_submodule_baseline(self):
+        parent_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(parent_temp.cleanup)
+        parent = Path(parent_temp.name)
+        subprocess.run(["git", "init", "-q", str(parent)], check=True,
+                       capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(parent), "-c", "protocol.file.allow=always",
+                        "submodule", "add", "-q", str(self.root), "deps/library"],
+                       check=True, capture_output=True, text=True)
+        result = self.detect(path=parent / "deps/library/modules/sample")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("NO PUBLIC API OR RESOURCE ADDRESS CHANGES", result.stdout)
 
     def test_removed_resource_address_requires_migration_review(self):
         (self.module / "main.tf").write_text("")
@@ -59,6 +81,29 @@ class DetectMigrationsTests(unittest.TestCase):
         result = self.detect("--compare-ref", "missing-ref")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot read Git baseline", result.stderr)
+
+    def test_default_change_needs_plan_review_even_without_api_change(self):
+        (self.module / "main.tf").write_text(
+            'resource "terraform_data" "old" {\n  triggers_replace = var.name\n}\n')
+        (self.module / "variables.tf").write_text(
+            'variable "name" {\n  type = string\n  default = "old"\n}\n')
+        self.git("add", ".")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "optional baseline")
+        (self.module / "variables.tf").write_text(
+            'variable "name" {\n  type = string\n  default = "new"\n}\n')
+        result = self.detect()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("does not assess changed defaults", result.stdout)
+        self.assertNotIn("[CLEAN", result.stdout)
+
+    def test_instance_key_change_needs_plan_review_even_when_label_is_stable(self):
+        (self.module / "main.tf").write_text(
+            'resource "test_item" "old" {\n  for_each = var.name\n}\n')
+        result = self.detect()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("count/for_each instance keys", result.stdout)
+        self.assertNotIn("[CLEAN", result.stdout)
 
 
 if __name__ == "__main__":
