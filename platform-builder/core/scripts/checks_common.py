@@ -1232,7 +1232,7 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             findings.append(Finding(
                 "P1", "Generic Image Repository", str(values_yaml_file),
                 "Image repository contains generic placeholder ('myorg/' or '[PRODUCT_NAME]'). "
-                "Must be dynamically templated as '{{ .Values.global.partOf }}/{{ .Values.component }}/{{ .Values.subComponent }}' (or omitted to auto-compute)."
+                "Leave the main image repository empty for library auto-resolution, or set a real explicit image path."
             ))
 
         # Check cross-service sibling URL override pattern

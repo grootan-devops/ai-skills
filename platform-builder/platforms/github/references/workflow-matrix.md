@@ -94,6 +94,12 @@ A manual dispatch on `master` is safe by construction too: `init.yml` forces a
 `-<run_number>.r<run_attempt>` candidate suffix and routes pushes to the **dev** repositories, so
 it can never overwrite a published artifact.
 
+Keep a consumer release workflow on its actual default branch. Ignore `.github/**` on its
+default-branch push trigger so a workflow-only change does not cut a release. If the consumer
+also exposes `workflow_dispatch`, guard the publishing path against a dispatch from any other
+ref. Image scans read the pushed image by digest from the registry; do not shuttle an image
+tar between jobs to rescan it.
+
 ## 4. There is no `optional:` on `needs:`
 
 GitLab's `needs: [{job, optional: true}]` has no GitHub equivalent — a skipped dependency skips
@@ -110,28 +116,20 @@ Cleanup and teardown jobs need `if: always()`, or they are skipped exactly when 
 
 ## 5. Pinning
 
-A reference is a **release tag or a commit SHA**. Nothing else, and the owner does not
-change the answer.
-
-| Reference | Verdict |
-| --- | --- |
-| `@1.0.0`, `@v7`, `@v2.1.0-rc.1` | fine — a release tag |
-| `@a1b2c3…` (40 hex) | fine — an exact tree |
-| `@dev`, `@latest`, any other alias | **P1** — pin to a SHA |
-| `@main`, `@master`, `@HEAD` | **P0** — a branch runs whatever is on it when the job starts |
-
-Publishing a release tag is a deliberate act, and moving one afterwards is visible in the
-repository. A branch or a floating alias states no version at all: it resolves at run time,
-to code the author can change, running with your `GITHUB_TOKEN`. Where an action publishes
-no tags, a SHA with the version in a trailing comment is the only option.
+Distinguish a **job-level reusable-workflow call to this library** from a step-level
+third-party action. The checked-out library's `check.yml` runs
+`scripts/checks/library-pin-check.sh` on job-level calls and accepts only stable numeric
+release tags (`1`, `1.2`, `1.2.3`, optionally `v`-prefixed). It rejects branches, commit
+SHAs, and pre-release tags. A SHA is immutable, but it still fails this library's policy;
+do not generate one into a normal consumer and claim the check will pass. Step-level
+action pinning is a separate check and may accept a full SHA or published release tag.
 
 ### 5a. CI enforces this, not just the audit
 
-`check.yml` runs a `Library Pinning` guard for every consumer: a job-level
-`uses: …/.github/workflows/x.yml@<ref>` must pin a published tag. A branch, a commit SHA and
-a pre-release tag all fail it. So a scaffold that emits `@dev` produces a repository whose
-own pipeline refuses it — resolve a real tag, and only fall back to a branch when the
-library has published none.
+`check.yml` runs the `Library Pinning` guard for every consumer: a job-level
+`uses: …/.github/workflows/x.yml@<ref>` must pin a stable published tag. If the selected
+library checkout has no such tag, report that a normal caller is not yet publishable;
+do not silently fall back to a branch.
 
 There is one escape hatch and it is not a default: `allow-unstable-library-refs: true` on
 the `check.yml` caller — **testing only**, for a pull request tracking a library branch

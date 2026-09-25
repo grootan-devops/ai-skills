@@ -93,7 +93,7 @@ To ensure deterministic naming across Kubernetes namespaces, ArgoCD applications
 - **Standard Chart Name**: `{product}-{component}` or `{product}-{component}-{sub_component}` (`<productname>-<componentname><-subcomponentname>`, e.g. `ibp-chat`, `myapp-order-backend`, `myapp-chat-frontend`, `myapp-admin-backend`, `myapp-pii-worker`).
 - **Kubernetes Release Name**: `{product}-{component}-{sub_component}` (e.g. `myapp-order-backend`, `myapp-chat-backend`, `myapp-pii-worker`).
 - **Release Name Length**: `.Values.global.releaseNameLength` is set to the character length of the `{product}` prefix (e.g., `5` for `myapp`), enabling `tpl.resource.siblingName` to cleanly isolate the product prefix and derive sibling DNS.
-- **Container Image Repository**: `{product}/{component}/{sub_component}` (e.g. `myapp/order/backend`, or `myapp/order` if no sub-component), auto-computed by `tpl-library` when `repository:` is omitted or empty. Alternatively explicitly templated as `"{{ .Values.global.partOf }}/{{ .Values.component }}/{{ .Values.subComponent }}"`.
+- **Container Image Repository**: For the main workload, leave `repository:` empty or omit it. The checked-out `tpl-library` computes `{product}/{component}/{sub_component}` from `partOf` (root or global), `component`, and `subComponent` (also accepts `subcomponent`); missing segments are omitted. Keep an explicit repository for a different image path, such as a sidecar or migrator. The helper evaluates explicit values as templates.
 - **Labeling (`app.kubernetes.io/part-of`)**: `.Values.global.partOf: "{product}"`.
 
 ---
@@ -122,7 +122,7 @@ Query `{container="order-backend-main"}` and you have the service; a fleet-wide
 containers:
   main:                     # the application itself — the only `main` in this file
     image:
-      repository: "{{ .Values.global.partOf }}/{{ .Values.component }}/{{ .Values.subComponent }}"
+      repository: ""         # derived by tpl.container.image.repository
   log-collector:            # -> order-backend-log-collector
     image:
       repository: "grafana/alloy"
@@ -255,7 +255,7 @@ opaque value rendered through `toYaml`. Its sub-keys are yours to shape — `str
 When a chart does not invoke these optional entrypoints, their respective blocks (`persistence:`, `cronjobs:`, `jobs:`, `metrics:`) are **omitted from consumer `values.yaml` by default** without violating parity. By default, stateless microservices omit all four. Never add these sections to `values.yaml` unless required by the workload and confirmed. If any of these blocks are configured and active in `values.yaml`, their corresponding `tpl.*` helper must be included in `templates/manifest.yaml`.
 
 Enforced by `check_values_parity` in `core/scripts/checks_common.py`, measured against the
-`helm-tpl-library` copy the run resolved (§0.0) rather than a frozen expectation.
+`helm-tpl-library` checkout the resolver selected rather than a frozen expectation.
 
 ### 3.0c. Credentials sit under an `auth:` sub-map
 

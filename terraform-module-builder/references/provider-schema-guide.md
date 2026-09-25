@@ -1,6 +1,6 @@
 # Provider Schema Introspection Guide
 
-This document explains how the `terraform-module-builder` skill extracts and interprets machine-readable provider schemas via `terraform providers schema -json` to guarantee technical accuracy when generating or updating modules.
+This document explains how the `terraform-module-builder` skill extracts and interprets machine-readable provider schemas via `terraform providers schema -json`. The schema verifies available arguments and types; it does not prove runtime behavior or migration safety.
 
 ---
 

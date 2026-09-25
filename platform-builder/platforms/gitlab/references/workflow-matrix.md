@@ -168,7 +168,7 @@ and the library documents them itself. Duplicating them guaranteed they would dr
 | How are charts/images published and authenticated? | `<ci_templates>/README.md` → configuration → chart/image publishing and authentication |
 
 `core/scripts/libraries.py` resolves the library and prints these paths. `platform onboard`,
-`platform update`, and `platform audit` all read them before acting — see SKILL.md §0.
+`platform update`, and `platform audit` read only the relevant contracts before acting — see SKILL.md.
 
 What stays in *this* file is only what the library does not state: the adaptive declaration
 law (§1), the machine-readable map (§2), the shape profiles (§3), the grouping contract (§4),

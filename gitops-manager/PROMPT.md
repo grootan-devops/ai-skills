@@ -1,164 +1,106 @@
-# GitOps Manager: Standard Engineer Prompts
+# GitOps Manager: Copyable Engineer Prompts
 
-This guide provides battle-tested, copy-pasteable prompts for engineers using the `gitops-manager` skill. Use these prompts to automate Argo CD GitOps environment bootstrap, multi-environment catalog updates, and cluster application syncs while strictly adhering to `argocd-gitops-tpl-library` standards.
+Replace placeholders before pasting. These prompts use the workflows in
+[SKILL.md](./SKILL.md) and the precise preflight and file contract in
+[the environment guide](./references/argocd-environment.md). `add` and `update`
+prepare and validate locally. Include a remote action in your request if needed.
 
----
+## `argocd env add`
 
-## Table of Commands & Workflows
-
-| Command / Workflow | Purpose | When to Use |
-| :--- | :--- | :--- |
-| **`argocd env add`** | Bootstrap new Argo CD GitOps environment | Creating a new project/environment branch and root Application. |
-| **`argocd env update`** | Library bump & schema migration | Upgrading `argocd-gitops-tpl-library` version or updating sync configs. |
-| **`argocd env audit`** | Read-only preflight & health check | Verifying cluster connection, GitOps branch health, and app sync state. |
-
----
-
-## Core Engineering Directives (Embedded in All Prompts)
-
-1. **Mandatory Input Preflight & Stop Conditions**:
-   - Collect both **GitOps repository URL** and **Argo CD URL** before performing any operations. If either is missing, pause and prompt for them.
-   - Collect the target project/application name and environment (`dev`, `qa`, `test`, `uat`, `pre-prod`, `prod`, or empty).
-   - Abort if CLI authentication is missing (`argocd`, `git`, `helm`, `glab`/`gh`). Never prompt users to paste tokens or credentials into chat.
-2. **Cluster Metadata Discovery**:
-   - Inspect `master/README.md` in the GitOps repository. It must declare the explicit cluster name and Argo CD cluster name (e.g., `# Midgard (cluster name)` and `ArgoCD server name: in-cluster`).
-   - Stop if `master/README.md` or cluster metadata is missing. Never guess cluster destination names.
-3. **Strict Library Consumption (`argocd-gitops-tpl-library`)**:
-   - Use starter files in `assets/bootstrap/` (`Chart.yaml`, `values.yaml`, `root-application.yaml`, `extras/`).
-   - Pin the highest published non-prerelease SemVer release from `oci://registry-1.docker.io/grootantech/argocd-gitops-tpl-library`. Verify using `helm show chart`.
-4. **Zero-Drift & Non-Destructive Operations**:
-   - Check if target branch or root Application already exists. Never overwrite an existing branch or use `argocd app create --upsert` unless explicitly directed to perform an update.
-   - Do not expose credentials or tokens in generated manifests or command outputs.
-
----
-
-## 1. `argocd env add` (Environment Bootstrap)
-
-Use when creating a new GitOps environment branch and deploying its Argo CD root Application.
-
-### Quick Copy-Paste Prompt (Terse)
+### Quick
 
 ```text
-Run `argocd env add` for project `<project>` in environment `<env>`. GitOps repo: `<gitops-repo-url>`, Argo CD URL: `<argocd-url>`. Check CLI authentication and read cluster metadata from `master/README.md`. Scaffolding from assets/bootstrap/ with argocd-gitops-tpl-library pinned to the latest stable OCI release. Validate with helm lint and helm template, push the branch `<project>/<env>`, create the root Application `<cluster>-<project>-<env>-root`, and verify Argo CD sync health.
+Run argocd env add for <project>/<environment>. GitOps repository: <gitops-repo-url>; Argo CD URL: <argocd-url>; library source: <source-or-default>. Read the default-branch README for the cluster and Argo CD destination, check branch collision, verify a published stable OCI chart version, scaffold the root and extras charts and root Application from assets/bootstrap, and validate both charts locally. Show the files, exact pin, checks, and any unverified remote prerequisites. Do not commit, push, create an Application, or sync unless I explicitly request those actions.
 ```
 
-### Comprehensive Engineer Prompt (Full Guardrails)
-
-```markdown
-You are acting as a GitOps & Platform Engineer using the `gitops-manager` skill.
-Bootstrap a new Argo CD environment for:
-- **Project**: `<project>`
-- **Environment**: `<env>` (e.g. `dev`, `qa`, `staging`, `prod`, or empty for single-env)
-- **GitOps Repository URL**: `<gitops-repo-url>`
-- **Argo CD URL**: `<argocd-url>`
-
-Execute according to the strict preflight and bootstrap protocol:
-
-### Phase 1: Preflight & Validation
-1. Verify required CLIs are installed and authenticated: `argocd`, `git`, `helm`, and `glab`/`gh`.
-   - Run `argocd version --server <argocd-url>` and `argocd account get-user-info --server <argocd-url>`.
-   - Verify read access to `<gitops-repo-url>` using `git ls-remote`.
-2. Inspect `README.md` on branch `master` of the GitOps repository:
-   - Extract the cluster name and Argo CD cluster name (e.g. `# Midgard (cluster name)` and `ArgoCD server name: in-cluster`).
-   - Verify the cluster exists in Argo CD using `argocd cluster list --server <argocd-url>`.
-   - If `master/README.md` or cluster metadata is missing, STOP and report the requirement.
-3. Check for collision:
-   - Target branch: `<project>/<env>` (or `<project>` if environment is empty).
-   - Root application name: `<cluster>-<project>-<env>-root`.
-   - Ensure neither the branch nor the root Application already exists.
-4. Pin Library Dependency:
-   - Query the highest published stable release of `oci://registry-1.docker.io/grootantech/argocd-gitops-tpl-library` using `helm show chart`.
-   - Pin that exact verified version.
-
-### Phase 2: Branch & Manifest Scaffolding
-1. Create a new branch `<project>/<env>` branched off `origin/master`.
-2. Copy and populate starter files from `assets/bootstrap/`:
-   - `Chart.yaml`: name `__PROJECT_NAME__` and pinned `argocd-gitops-tpl-library` dependency.
-   - `values.yaml` and `values/`: project configuration, target revision, and environment values.
-   - `root-application.yaml`: target namespace `argo-cd`, project `cluster-admin`, destination cluster name from metadata.
-   - `extras/`: supplementary charts if required.
-3. Do not include passwords, plaintext secrets, or tokens.
-
-### Phase 3: Verification & Activation
-1. Run Helm validation:
-   - `helm dependency build .`
-   - `helm lint .`
-   - `helm template test-root .`
-2. Push branch:
-   - Commit files and push branch `<project>/<env>` to `<gitops-repo-url>`.
-3. Create Root Application:
-   - Apply `root-application.yaml` or run `argocd app create -f root-application.yaml --server <argocd-url>`.
-4. Verification:
-   - Check application status: `argocd app get <cluster>-<project>-<env>-root --server <argocd-url>`.
-   - Confirm health status is `Healthy` or progressing normally without out-of-sync schema errors.
-```
-
----
-
-## 2. `argocd env update` (Environment Update & Sync)
-
-Use when upgrading `argocd-gitops-tpl-library` version in consumer GitOps branches, applying breaking changes from `MIGRATION.md`, or updating environment sync configurations.
-
-### Quick Copy-Paste Prompt (Terse)
+### Full
 
 ```text
-Run `argocd env update` on branch `<project>/<env>` in GitOps repo `<gitops-repo-url>`. Inspect MIGRATION.md of argocd-gitops-tpl-library for breaking changes. Bump library dependency version in Chart.yaml, update values structure to match the new schema, run helm lint and helm template to confirm zero regressions, commit changes, and trigger argocd app sync for root Application `<cluster>-<project>-<env>-root`.
+Act as a GitOps engineer using the gitops-manager skill. Prepare a new
+environment for project <project> and environment <environment> (explicitly
+empty if this project has no environment suffix).
+GitOps repository: <gitops-repo-url>
+Argo CD URL: <argocd-url>
+argocd-gitops-tpl-library source/ref: <source-or-default>
+Target branch override: <branch-or-none>
+
+1. Preflight: check local git and Helm. Read the GitOps repository's actual
+   default-branch README and extract the cluster label and Argo CD cluster
+   name; never infer either from URLs. Check the target branch for collision.
+   Record which Argo CD authentication, repository registration, and cluster
+   checks remain for activation. Do not ask me to paste credentials.
+2. Resolve the selected library source/ref. Read its README and linked
+   bootstrap guides at that same ref. Find the highest published stable OCI
+   chart version and verify it with helm show chart --version; do not pin an
+   unreleased branch's Chart.yaml value or a README example.
+3. Create the local branch and populate assets/bootstrap: Chart.yaml,
+   values.yaml, values/, templates/apps.yaml, root-application.yaml, and
+   extras/ as required. Use the documented project, namespace, destination,
+   naming, and branch rules. Keep credentials out of manifests. Do not
+   overwrite an existing branch or Application.
+4. Build dependencies, lint, and render both root and extras charts. Inspect
+   rendered Application names, destinations, and target revisions. Report
+   exact files, version, validation results, and remote prerequisites.
+5. Stop at local preparation. Commit, push, Application creation, and sync
+   each require my explicit request; preflight and verify any requested action.
 ```
 
-### Comprehensive Engineer Prompt (Full Guardrails)
+## `argocd env update`
 
-```markdown
-You are acting as a GitOps & Platform Engineer using the `gitops-manager` skill.
-Update and modernize the existing GitOps branch: `<project>/<env>` in `<gitops-repo-url>`.
-
-Follow these surgical update steps:
-1. **Target Identification & Checkout**:
-   - Check out the existing environment branch: `<project>/<env>`.
-   - Read current dependency version from `Chart.yaml`.
-2. **Library Resolution & Migration Review**:
-   - Identify target release version for `argocd-gitops-tpl-library`.
-   - Review `MIGRATION.md` for `argocd-gitops-tpl-library` between current and target versions.
-   - Note any deprecated fields, renamed values keys, or required sync policy changes.
-3. **Surgical Update**:
-   - Update `version` under `dependencies` in `Chart.yaml`.
-   - Update `values.yaml` and subcharts to comply with migration guidelines.
-   - Preserve all existing environment application definitions, custom parameters, and repository URLs.
-4. **Validation & Sync**:
-   - Run `helm dependency update .`
-   - Run `helm lint .` and `helm template .` to ensure error-free rendering.
-   - Push updates to the branch.
-   - Run `argocd app sync <cluster>-<project>-<env>-root --server <argocd-url>` and verify synchronization.
-```
-
----
-
-## 3. `argocd env audit` (Read-Only Health Check)
-
-Use when auditing an existing GitOps environment branch, root Application status, and cluster synchronization health.
-
-### Quick Copy-Paste Prompt (Terse)
+### Quick
 
 ```text
-Run `argocd env audit` for `<project>/<env>` on Argo CD `<argocd-url>`. Check root application sync status, health status, git branch alignment, and verify that no plaintext secrets or unregistered repositories exist. Output findings with P1/P2/P3 severity without changing any remote state.
+Run argocd env update for <project>/<environment> in <gitops-repo-url>, using Argo CD <argocd-url> and library <source-or-target-version>. Inspect the current chart pin and MIGRATION.md between current and target versions. Preserve existing values, applications, and custom resources; make only necessary local edits. Validate root and extras chart rendering, show the diff and activation prerequisites, and do not commit, push, create an Application, or sync unless explicitly requested.
 ```
 
-### Comprehensive Engineer Prompt (Full Guardrails)
+### Full
 
-```markdown
-You are acting as a GitOps Reliability Auditor using the `gitops-manager` skill.
-Audit the health and compliance of environment `<project>/<env>` in `<gitops-repo-url>` on Argo CD `<argocd-url>`.
+```text
+Act as a GitOps engineer using the gitops-manager skill. Update the existing
+<project>/<environment> branch in <gitops-repo-url>.
+Argo CD URL: <argocd-url>
+Target argocd-gitops-tpl-library source/version: <source-or-version>
 
-Perform the following non-destructive checks:
-1. **Application Health & Drift**:
-   - Check root Application status: `argocd app get <cluster>-<project>-<env>-root --server <argocd-url>`.
-   - Check sync status (Synced vs. OutOfSync) and health status (Healthy, Progressing, Degraded).
-   - Identify unmanaged resource drift or persistent sync errors.
-2. **Configuration Compliance**:
-   - Inspect `Chart.yaml`: ensure `argocd-gitops-tpl-library` is pinned to a valid, supported SemVer release.
-   - Run `helm lint .` on the environment branch.
-   - Ensure `.gitignore` and `.helmignore` prevent leaking local artifacts or secrets.
-3. **Security Check**:
-   - Verify that repository access uses registered Argo CD repository credentials and contains zero hardcoded tokens.
-4. **Report**:
-   - Summarize findings grouped by severity (P1 blockers, P2 drift/warnings, P3 recommendations).
+1. Inspect the current branch, Chart.yaml dependency pin, root and extras
+   chart files, values, templates, Application manifests, and local changes.
+   Read the repository default-branch README for cluster metadata. Do not
+   overwrite an unrelated branch or existing custom resource.
+2. Resolve and verify the published target OCI chart version. Read the
+   selected-ref README and every applicable MIGRATION.md section between the
+   current and target versions. List mandatory schema, values, and sync-policy
+   changes with file evidence; report missing migration information.
+3. Plan and apply a surgical local diff. Preserve existing application
+   definitions, values, repository URLs, custom parameters, and intentional
+   sync behavior. Change only the dependency pin and required migration
+   fields. If a mandatory change conflicts with customization, show the
+   proposed diff and ask before changing that behavior.
+4. Build dependencies, lint, and render root and extras charts. Inspect
+   rendered Applications and report the diff, checks, risks, and any remote
+   authentication or cluster prerequisites.
+5. Leave the result local. Commit, push, Application creation, and sync each
+   require an explicit request and the reference's remote preflight.
+```
+
+## `argocd env audit`
+
+### Quick
+
+```text
+Run argocd env audit for <project>/<environment> in <gitops-repo-url> with Argo CD <argocd-url>. Inspect the selected library pin, chart files, rendered Applications, and available read-only remote health information. Report findings with file evidence and any unavailable authentication or cluster check. Make no changes.
+```
+
+### Full
+
+```text
+Act as a GitOps auditor using the gitops-manager skill. Audit
+<project>/<environment> in <gitops-repo-url>; Argo CD URL <argocd-url>.
+Read the repository's default-branch cluster metadata and the environment
+branch. Resolve the exact library source and chart dependency version; read
+the relevant guides at that ref. Inspect root and extras charts, values,
+rendered Applications, branch targets, destinations, and plaintext secret
+exposure. Run read-only Helm validation. If authenticated Argo CD access is
+available, inspect repository registration, cluster identity, root Application
+health and sync status without creating or syncing anything. Separate verified
+findings from checks that could not run; include severity, file/command
+evidence, and exact library provenance. Do not modify local or remote state.
 ```

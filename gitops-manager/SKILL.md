@@ -8,9 +8,9 @@ description: >-
 
 # GitOps Manager
 
-This skill handles Argo CD environment bootstrap and root-Application setup. For a new
-environment, collect the required GitOps repository URL and Argo CD URL before any
-repository or endpoint work. If either is missing, ask for both and stop until supplied.
+This skill prepares, audits, and, when explicitly requested, activates Argo CD environments.
+For local preparation, collect the GitOps repository URL, Argo CD URL, project, and environment.
+An authenticated Argo CD identity is needed before reading cluster state or activating an app.
 
 For the complete preflight, repository layout, chart scaffolds, validation, and activation
 sequence, read [the Argo CD environment guide](./references/argocd-environment.md). Use its
@@ -32,9 +32,8 @@ When consuming `argocd-gitops-tpl-library`:
    actually published to the OCI registry; do not derive a dependency version from a sample
    workflow pin or an unreleased source branch.
 
-Do not create or modify an environment until the preflight passes. Stop on missing CLI
-authentication, inaccessible repository, invalid endpoints, or missing cluster metadata;
-never guess the cluster name or Argo CD cluster destination. After successful validation,
-generate the files, run Helm checks, push the environment branch, create the root Application,
-and verify its Argo CD status as described in the reference guide. Do not expose credentials
-in generated files, command output, or the README.
+Do not guess cluster identity or destination. Stop before any step whose required repository,
+registry, or Argo CD access is unavailable. Prepare files and run Helm validation locally;
+`argocd env add` or `update` alone does not authorize a commit, push, Application creation,
+or sync. Perform each remote action only when the user's request explicitly includes it, then
+verify its result as described in the reference. Never expose credentials in files or output.
