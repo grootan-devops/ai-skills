@@ -3,6 +3,10 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
+## 1.3.0
+
+No breaking migration is required. Prompt scaffolds now feature Dual-Format options (Quick for streamlined pasting and Full for complete governance). Reusable workflows are pinned to `@1.3.1`.
+
 ## 1.2.0
 
 ### Skill Removals

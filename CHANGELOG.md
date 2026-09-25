@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-25
+
+### Added
+
+- Added Dual-Format (Quick and Full) `PROMPT.md` guides across `platform-builder`, `gitops-manager`, and `terraform-module-builder`.
+- Added unit test suite in `terraform-module-builder/scripts/tests/test_detect_migrations.py` covering dynamic Git root discovery.
+
+### Changed
+
+- Aligned platform builder checks with `tpl.container.image.repository` auto-derivation in `helm-tpl-library`.
+- Implemented Clean Architecture Split: decoupled central skills and test suites from CI library templates.
+- Pinned repository CI reusable workflow callers to `github-ci-library` `@1.3.1`.
+
 ## [1.2.0] - 2026-09-23
 
 ### Added
