@@ -270,6 +270,7 @@ them is not "no tests yet", it is a pipeline that builds an artifact nobody exec
 | a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
 | a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `tests`, accepts space-separated chart directories). Runs each chart's own `tests/*_test.yaml` suites. |
 | a chart | "Does the workload require persistent storage (PVC)?" | Adds `persistence:` in `values.yaml` and `{{- include "tpl.pvc" . }}` below `---` in `templates/manifest.yaml`. Default is **no**; stateless workloads omit both. Never add `persistence:` if persistent storage is not needed, and never re-add it if deleted. |
+| a chart | "Does the workload require batch jobs, recurring cronjobs, or Prometheus metrics scraping?" | Omit `jobs:`, `cronjobs:`, and `metrics:` by default. Only add them if detected in docker-compose/env or requested by the user. If added, the corresponding `tpl.` invocation MUST be included in `templates/manifest.yaml`. |
 
 Ask for each artifact that exists, and ask **both** where both exist — they are independent
 decisions. If the repository already ships the script or the mock chart, say so and default
@@ -300,6 +301,31 @@ python3 core/scripts/audit.py [repo] --strict [--lib NAME=SOURCE ...]
 
 Pass the same `--lib` sources you scaffolded against, so the validation measures the repo
 against the library it was built for.
+
+### 2.2 Update Protocol (`platform update`) — Diff & Confirm, Surgical Migration
+
+`platform update` is **NOT** `platform onboard`. It must **never** perform a ground-zero re-scaffold or rewrite existing files from scratch templates.
+
+**Core Rules for `platform update`:**
+
+1. **Never Re-Scaffold or Reset to Ground Zero**:
+   - Never overwrite or regenerate `values.yaml`, `.gitlab-ci.yml`, `.github/workflows/*.yml`, or `Dockerfile` from initial onboarding templates.
+   - Updates must be in-place, minimal, and surgical.
+
+2. **Preserve Intentional User Customizations**:
+   - **Custom CI Variables**: Never overwrite or reset user-defined variables such as `PROJECT_CACHE_KEY: "access"` or `"chat"` back to a generic default like `"java"` or `"node"`.
+   - **Application Values**: Never wipe or reset `configmapEnvs`, `secretEnvs`, application-specific sections, custom replicas, resources, probes, volumes, mounts, or custom annotations in `values.yaml`.
+   - **Pipeline Structure**: Preserve user-added CI jobs, custom stages, and deliberately tailored workflow rules.
+
+3. **Apply Only What is Required**:
+   - Bump library reference pins (`include: ref:`, GitHub Action `uses: ...@ref`, `Chart.yaml` dependency version) to the resolved target ref.
+   - Read the intermediate `MIGRATION.md` sections in order and execute the exact breaking changes or deprecations specified by the library.
+   - Synchronize schema requirements (`values.schema.json`) and CI include/workflow structure changes introduced in the target version.
+   - Fix genuine compliance defects surfaced by `audit.py`.
+
+4. **Diff-and-Confirm Law**:
+   - Use AI intelligence to inspect user modifications. If an existing configuration deviation makes sense and does not violate hard standards or security requirements, keep it without altering it.
+   - If an existing user deviation is ambiguous or conflicts with a mandatory migration requirement, present a clear diff and ask the user before modifying it.
 
 ---
 

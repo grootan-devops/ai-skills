@@ -70,6 +70,21 @@ When upgrading a repository:
 >    in order, under `migrations[]`. Read them in that order.
 > 3. **Dynamic AST / YAML Transformation**: Apply the actual renames, boolean inversions, stage reclassifications, and schema adjustments specified in `MIGRATION.md`.
 
+### 2.1. Diff-and-Confirm Law: Surgical Migration vs Ground-Zero Re-scaffold
+
+> [!CAUTION]
+> **`platform update` is never `platform onboard`**:
+> An update MUST NOT rewrite files from scratch templates, re-scaffold configurations, or reset custom application values back to baseline defaults.
+>
+> 1. **Preserve deliberate customizations**:
+>    - Never revert custom variables such as `PROJECT_CACHE_KEY: "access"` or `"chat"` back to generic stack defaults (e.g. `"java"` or `"node"`).
+>    - Never wipe, reset, or overwrite `configmapEnvs`, `secretEnvs`, custom replicas, resource requests/limits, probes, or volume mounts in `values.yaml`.
+>    - Preserve custom CI pipeline jobs, scripts, and overrides.
+> 2. **Apply only migration and schema diffs**:
+>    - Apply strictly the ref bumps, renamed keys, inverted booleans, and schema changes mandated by `MIGRATION.md`.
+>    - Use AI intelligence to differentiate between standard drift and intentional user customizations. If a user customization makes sense and complies with platform contracts, preserve it.
+>    - If a user deviation appears to conflict with a required migration step, present a diff and ask the user rather than blindly overwriting.
+
 ---
 
 ## 3. Helm Template Library Architecture Migration: Unified Routes (`routes`)
