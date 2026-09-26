@@ -9,16 +9,18 @@ libraries define their own executable contracts.
 
 | Agent request | Purpose |
 | --- | --- |
-| platform onboard [repo] | Add only applicable CI, image, and chart wiring. |
-| platform update [repo] | Apply a surgical library migration. |
-| platform ship [repo] <env> | Prepare local deployment wiring. |
-| platform audit [repo] | Read-only compliance and security review. |
+| `platform onboard [repo]` | Add only applicable CI, image, and chart wiring. |
+| `platform update [repo]` | Apply a surgical library migration. |
+| `platform ship [repo] <env>` | Prepare local deployment wiring. |
+| `platform audit [repo]` | Read-only compliance and security review. |
 
 The local inspection tools are:
 
-    python3 core/scripts/platform.py /path/to/repo
-    python3 core/scripts/libraries.py /path/to/repo --platform github
-    python3 core/scripts/audit.py /path/to/repo --strict
+```bash
+python3 core/scripts/platform.py /path/to/repo
+python3 core/scripts/libraries.py /path/to/repo --platform github
+python3 core/scripts/audit.py /path/to/repo --strict
+```
 
 The resolver and audit accept --github-ci-library, --gitlab-ci-library,
 --helm-tpl-library, or repeatable --lib NAME=SOURCE overrides. Use local

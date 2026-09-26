@@ -13,10 +13,10 @@ description: >-
 
 | Request | Action |
 | --- | --- |
-| platform onboard [repo] | Inspect the repository and add only the CI, image, and chart capabilities it needs. |
-| platform update [repo] | Apply a surgical migration against selected library versions. |
-| platform ship [repo] <env> | Prepare environment deployment wiring locally. |
-| platform audit [repo] | Report findings without modifying the target. |
+| `platform onboard [repo]` | Inspect the repository and add only the CI, image, and chart capabilities it needs. |
+| `platform update [repo]` | Apply a surgical migration against selected library versions. |
+| `platform ship [repo] <env>` | Prepare environment deployment wiring locally. |
+| `platform audit [repo]` | Report findings without modifying the target. |
 
 Run core/scripts/platform.py for platform signals and core/scripts/libraries.py for the
 applicable library sources. An explicit platform or library source wins; when a repository
@@ -58,7 +58,7 @@ Never copy a version from a README example.
 
 | Decision | Reference |
 | --- | --- |
-| CI scenarios, job selection, and platform pinning | platforms/<github or gitlab>/references/workflow-matrix.md and its workflow-map.json |
+| CI scenarios, job selection, and platform pinning | `platforms/<github or gitlab>/references/workflow-matrix.md` and its `workflow-map.json` |
 | Platform credential and permission mechanics | core/references/security-core.md, then the selected platform's security-addendum.md |
 | Language build, cache, and packaging | core/references/language-stacks-core.md and the selected library's module guide |
 | Helm values, helpers, schema, and naming | core/references/helm-chart-standard.md and the selected Helm library guides |

@@ -247,6 +247,7 @@ opaque value rendered through `toYaml`. Its sub-keys are yours to shape — `str
 `containers.main` is an example name: the contract applies to whatever containers you declare.
 
 **Optional entrypoint exceptions:** `persistence:`, `cronjobs:`, `jobs:`, and `metrics:` are optional capabilities rendered only by their specialized entrypoints:
+
 - `persistence:` is paired with `tpl.pvc` in `templates/manifest.yaml`.
 - `cronjobs:` is paired with `tpl.cronjob` in `templates/manifest.yaml`.
 - `jobs:` is paired with `tpl.job` in `templates/manifest.yaml`.
