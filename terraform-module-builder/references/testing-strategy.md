@@ -10,8 +10,9 @@ This file holds the templates the skill emits.
 
 ## 1. Native Test — `tests/unit.tftest.hcl`
 
-`mock_provider` needs no credentials and no network, so this runs in seconds and is the
-level to add with every new module. `make verify` discovers it automatically: the library's
+`mock_provider` needs no cloud credentials or live API calls; provider installation may still
+need network access. Add this level with every new module. `make verify` discovers it
+automatically: the library's
 runner executes `terraform test` in any module directory containing a `*.tftest.hcl`.
 
 Shipping one raises that module's `required_version` to `>= 1.6.0`.

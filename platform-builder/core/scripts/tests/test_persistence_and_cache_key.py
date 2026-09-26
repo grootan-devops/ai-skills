@@ -161,6 +161,316 @@ persistence:
             pvc_findings = [f for f in findings if f.category == "Missing tpl.pvc in manifest.yaml"]
             self.assertEqual(len(pvc_findings), 1)
 
+    def test_values_parity_omits_cronjobs_jobs_metrics_when_helpers_absent(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+cronjobs: {}
+jobs: {}
+metrics:
+  jobLabel: "app"
+  endpoints: []
+""", encoding="utf-8")
+
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            self.assertEqual(len(findings), 0)
+
+    def test_active_cronjobs_without_tpl_cronjob_flags_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+cronjobs: {}
+""", encoding="utf-8")
+
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+cronjobs:
+  nightly:
+    schedule: "0 2 * * *"
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            cron_findings = [f for f in findings if f.category == "Missing tpl.cronjob in manifest.yaml"]
+            self.assertEqual(len(cron_findings), 1)
+
+    def test_active_jobs_without_tpl_job_flags_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+jobs: {}
+""", encoding="utf-8")
+
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+jobs:
+  migrate:
+    enabled: true
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
+            self.assertEqual(len(job_findings), 1)
+
+    def test_active_metrics_without_tpl_monitor_flags_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+global:
+  metrics:
+    enabled: false
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+metrics:
+  jobLabel: "app"
+  endpoints: []
+""", encoding="utf-8")
+
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+global:
+  metrics:
+    enabled: true
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+metrics:
+  jobLabel: "app"
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            metrics_findings = [f for f in findings if f.category == "Missing tpl.servicemonitor in manifest.yaml"]
+            self.assertEqual(len(metrics_findings), 1)
+
+    def test_disabled_metrics_with_endpoints_does_not_flag_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+global:
+  metrics:
+    enabled: false
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+metrics:
+  jobLabel: "app"
+  endpoints: []
+""", encoding="utf-8")
+
+            # Metrics endpoints exist, but global.metrics.enabled is omitted (defaults to false)
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+metrics:
+  jobLabel: "app"
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            metrics_findings = [f for f in findings if f.category == "Missing tpl.servicemonitor in manifest.yaml"]
+            self.assertEqual(len(metrics_findings), 0)
+
+    def test_disabled_persistence_does_not_flag_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+persistence: {}
+""", encoding="utf-8")
+
+            # persistence entry present but enabled is not true
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+persistence:
+  data:
+    size: 10Gi
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            pvc_findings = [f for f in findings if f.category == "Missing tpl.pvc in manifest.yaml"]
+            self.assertEqual(len(pvc_findings), 0)
+
+    def test_disabled_job_does_not_flag_p1(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+jobs: {}
+""", encoding="utf-8")
+
+            # job entry present without enabled: true
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+jobs:
+  migrate:
+    containers: {}
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
+            self.assertEqual(len(job_findings), 0)
+
+    def test_partial_helper_name_tpl_job_spec_does_not_satisfy_tpl_job(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chart_dir = root / "chart"
+            templates_dir = chart_dir / "templates"
+            templates_dir.mkdir(parents=True)
+
+            # Manifest includes tpl.job.spec, NOT tpl.job
+            manifest = templates_dir / "manifest.yaml"
+            manifest.write_text('{{- include "tpl.deployment" . }}\n---\n{{- include "tpl.job.spec" . }}\n', encoding="utf-8")
+
+            lib_values_file = root / "lib_values.yaml"
+            lib_values_file.write_text("""
+containers:
+  main:
+    image:
+      repository: ""
+      tag: ""
+jobs: {}
+""", encoding="utf-8")
+
+            consumer_values = chart_dir / "values.yaml"
+            consumer_values.write_text("""
+containers:
+  main:
+    image:
+      repository: "app"
+      tag: "v1.0.0"
+jobs:
+  migrate:
+    enabled: true
+""", encoding="utf-8")
+
+            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
+            self.assertEqual(len(job_findings), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

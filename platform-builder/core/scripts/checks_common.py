@@ -430,25 +430,28 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
             "`containers.<name>`; without one the chart produces a pod with no container."
         ))
 
-    # Persistence is optional and rendered only by the tpl.pvc entrypoint.
-    # If templates/manifest.yaml (or templates/*.yaml) does not call tpl.pvc,
-    # persistence is not expected or required in consumer values.yaml.
+    # Optional entrypoints rendered by specialized template helpers:
+    # persistence (tpl.pvc), cronjobs (tpl.cronjob), jobs (tpl.job), metrics (tpl.servicemonitor / tpl.podmonitor).
+    # If templates do not call the helper, the corresponding section is omitted from consumer values.yaml.
+    # If the section is configured and active in values.yaml, the template must include the helper.
     templates_dir = chart_dir / "templates"
     manifest_files = [chart_dir / "templates" / "manifest.yaml"] if (chart_dir / "templates" / "manifest.yaml").exists() else (
         list(templates_dir.glob("*.yaml")) + list(templates_dir.glob("*.tpl")) if templates_dir.is_dir() else []
     )
-    has_tpl_pvc = any(
-        'include "tpl.pvc"' in mf.read_text(encoding="utf-8") or "include 'tpl.pvc'" in mf.read_text(encoding="utf-8")
-        for mf in manifest_files if mf.is_file()
-    )
+    manifest_texts = [mf.read_text(encoding="utf-8") for mf in manifest_files if mf.is_file()]
 
+    def _has_include(name: str) -> bool:
+        pattern = re.compile(rf'include\s+["\']{re.escape(name)}["\']')
+        return any(pattern.search(txt) for txt in manifest_texts)
+
+    has_tpl_pvc = _has_include("tpl.pvc")
     if not has_tpl_pvc:
         lib_paths = {p for p in lib_paths if p != "persistence" and not p.startswith("persistence.")}
 
     consumer_persistence = consumer.get("persistence")
     if isinstance(consumer_persistence, dict):
         has_active_pvc = any(
-            isinstance(v, dict) and v.get("enabled", True) and not v.get("existingClaim")
+            isinstance(v, dict) and v.get("enabled") is True and not v.get("existingClaim")
             for v in consumer_persistence.values()
         )
         if has_active_pvc and not has_tpl_pvc:
@@ -456,7 +459,61 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
                 "P1", "Missing tpl.pvc in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
                 "`persistence` defines active PersistentVolumeClaim entries in values.yaml, "
                 "but `tpl.pvc` is not invoked in templates/manifest.yaml. The claims will not be created. "
-                "Add `{{- include \"tpl.pvc\" . }}` below `---` in manifest.yaml."
+                "Add `{{ include \"tpl.pvc\" . }}` in manifest.yaml."
+            ))
+
+    has_tpl_cronjob = _has_include("tpl.cronjob")
+    if not has_tpl_cronjob:
+        lib_paths = {p for p in lib_paths if p != "cronjobs" and not p.startswith("cronjobs.") and p != "cronjob" and not p.startswith("cronjob.")}
+
+    consumer_cronjobs = consumer.get("cronjobs") or consumer.get("cronjob")
+    if isinstance(consumer_cronjobs, dict):
+        has_active_cronjob = any(
+            isinstance(v, dict) and bool(v.get("schedule")) and not v.get("suspend", False)
+            for v in consumer_cronjobs.values()
+        )
+        if has_active_cronjob and not has_tpl_cronjob:
+            findings.append(Finding(
+                "P1", "Missing tpl.cronjob in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "`cronjobs` defines active CronJob entries in values.yaml, "
+                "but `tpl.cronjob` is not invoked in templates/manifest.yaml. The CronJobs will not be created. "
+                "Add `{{- include \"tpl.cronjob\" ... }}` in manifest.yaml."
+            ))
+
+    has_tpl_job = _has_include("tpl.job")
+    if not has_tpl_job:
+        lib_paths = {p for p in lib_paths if p != "jobs" and not p.startswith("jobs.") and p != "job" and not p.startswith("job.")}
+
+    consumer_jobs = consumer.get("jobs") or consumer.get("job")
+    if isinstance(consumer_jobs, dict):
+        has_active_job = any(
+            isinstance(v, dict) and v.get("enabled") is True
+            for v in consumer_jobs.values()
+        )
+        if has_active_job and not has_tpl_job:
+            findings.append(Finding(
+                "P1", "Missing tpl.job in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "`jobs` defines active Job entries in values.yaml, "
+                "but `tpl.job` is not invoked in templates/manifest.yaml. The Jobs will not be created. "
+                "Add `{{- include \"tpl.job\" ... }}` in manifest.yaml."
+            ))
+
+    has_tpl_metrics = _has_include("tpl.servicemonitor") or _has_include("tpl.podmonitor")
+    if not has_tpl_metrics:
+        lib_paths = {p for p in lib_paths if p != "metrics" and not p.startswith("metrics.")}
+
+    consumer_global = consumer.get("global") or {}
+    consumer_metrics_global = consumer_global.get("metrics") or {}
+    is_metrics_enabled = consumer_metrics_global.get("enabled") is True
+    consumer_metrics = consumer.get("metrics")
+    if isinstance(consumer_metrics, dict):
+        endpoints = consumer_metrics.get("endpoints")
+        if is_metrics_enabled and isinstance(endpoints, list) and len(endpoints) > 0 and not has_tpl_metrics:
+            findings.append(Finding(
+                "P1", "Missing tpl.servicemonitor in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "`metrics.endpoints` defines scrape endpoints in values.yaml and global.metrics.enabled is true, "
+                "but neither `tpl.servicemonitor` nor `tpl.podmonitor` is invoked in templates/manifest.yaml. "
+                "Add `{{ include \"tpl.servicemonitor\" . }}` in manifest.yaml."
             ))
 
     missing = sorted(p for p in lib_paths - consumer_paths if p not in _VALUES_PARITY_IGNORE)
@@ -1175,7 +1232,7 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             findings.append(Finding(
                 "P1", "Generic Image Repository", str(values_yaml_file),
                 "Image repository contains generic placeholder ('myorg/' or '[PRODUCT_NAME]'). "
-                "Must be dynamically templated as '{{ .Values.global.partOf }}/{{ .Values.component }}-{{ .Values.subComponent }}'."
+                "Leave the main image repository empty for library auto-resolution, or set a real explicit image path."
             ))
 
         # Check cross-service sibling URL override pattern

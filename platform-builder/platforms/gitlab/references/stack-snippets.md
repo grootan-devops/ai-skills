@@ -171,7 +171,7 @@ re-declares it has taken ownership of a decision the library exists to make, and
 pins an image the library can no longer move — which is the whole point of the anchor.
 
 **When a job fails because of the image, fix the library or the base image. Never the
-consumer.** A consumer-side workaround is a fork by another name (§0.2 rule 6): it works,
+consumer.** A consumer-side workaround is a fork by another name: it works,
 so nobody reports the defect, and every new repo copies it from the last one. The override
 outlives the fix by years.
 
@@ -342,11 +342,11 @@ at its pinned ref before editing a project file:
 | Symptom | Cause | Consumer action |
 | --- | --- | --- |
 | `sh: line 1: <path>: Is a directory` / `exit code 126`, no script output | the stack's runtime anchor declares `image:` in string form, leaving the micro image's `ENTRYPOINT` in place | **fix the anchor** — map form with `entrypoint: [""]`, as `.Python:12` does. Never override `image:` in the consumer |
-| `betterleaks: command not found` | the tool is absent from the `bt-container` tag the library pins | none — drop `secret-scanning/` or get the image fixed |
+| `betterleaks: command not found` | the tool is absent from the `bt-container` tag the library pins | fix the image/library pin and keep secret scanning enabled; report the blocked check |
 
 The shape is the same in both: **the job fails before any project-specific logic runs.** When a failure happens that early, suspect the library or its build image, and
 reproduce locally before changing the repo. A consumer workaround for a library defect is
-a fork by another name (§0.2 rule 6), and it outlives the fix.
+a fork by another name, and it outlives the fix.
 
 ## Packaging handoff: the cache is the handoff, never an artifact
 

@@ -21,26 +21,60 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.3.1
     secrets: inherit
     with:
       ignore-docker: "true"
       ignore-chart: "true"
 
   lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.3.1
     secrets: inherit
     with:
       lint-md-files: "**/*.md"
 
   check:
     needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.3.1
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
   secret-scan:
-    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.3.1
     secrets: inherit
     with:
       full-history: false
+
+  platform-skill-tests:
+    name: Platform Skill Regression Tests
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test Platform Builder Tools
+        run: python3 -m unittest discover -s platform-builder/core/scripts/tests -v
+
+  terraform-skill-tests:
+    name: Terraform Skill Regression Tests
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test Terraform Skill Tools
+        run: python3 -m unittest discover -s terraform-module-builder/scripts/tests -v

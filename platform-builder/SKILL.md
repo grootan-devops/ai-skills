@@ -1,469 +1,128 @@
 ---
 name: platform-builder
 description: >-
-  Unified platform engineering skill for CI/CD, packaging-only Dockerfiles, and Helm charts
-  across GitLab CI and GitHub Actions. Detects which platform a repository targets, then
-  scaffolds, migrates, and audits pipelines with least-privilege tokens, adaptive workflow
-  selection, and a shared Docker/Helm contract. Use for onboarding a repo to CI, migrating
-  library versions, or auditing pipeline, Dockerfile, and chart compliance.
+  Create, update, and audit GitHub Actions or GitLab CI pipelines, packaging
+  Dockerfiles, and Helm consumer charts against the selected CI and Helm
+  libraries. Use for repository onboarding, library migrations, deployment
+  wiring, and platform compliance reviews.
 ---
 
-# Platform Builder — GitLab CI & GitHub Actions
+# Platform Builder
 
-Generates, standardises, and audits **CI pipelines**, **packaging-only Dockerfiles**, and
-**Helm charts** on either platform.
+## Route and discover
 
-**The Docker and Helm contracts are identical on both platforms; only the CI layer differs.**
-That is why this is one skill rather than two: roughly 62% of the rule engine and 98% of project
-detection are platform-independent, and keeping them in one place is what stops them drifting
-apart.
-
----
-
-## 0. Reference Index — Load Before Acting
-
-Load the core reference, then the addendum for the **detected** platform. Never load both
-platforms' references; they will contradict each other by design.
-
-| Load | Before you… |
+| Request | Action |
 | --- | --- |
-| `core/references/security-core.md` | Write or audit a chart, Dockerfile, or credential handling. **Required for every onboard and audit.** |
-| `core/references/language-stacks-core.md` | Scaffold build/test jobs for any stack. |
-| `core/references/helm-chart-standard.md` *(shared)* | Create or modify a chart, `values.yaml`, or `values.schema.json`. §2.1 is required before naming any container, sidecar, init container or job container. |
-| `core/references/file-mounts-standard.md` | The app needs a config file at runtime (nginx.conf, `application.properties`, certs). **Check this on every chart.** |
-| `core/references/ignore-files-standard.md` *(shared)* | Write or audit `.gitignore`, `.dockerignore`, or `.helmignore`. The three have different semantics; `.helmignore` is read by the chart loader, so a wrong entry breaks the build rather than bloating it. |
-| `core/references/migration-standard.md` *(shared)* | Run an update or apply a version migration. |
-| `platforms/<platform>/references/security-addendum.md` | Anything security-related, after the core. |
-| the resolved library's `README.md` index and relevant linked pages (§0.0) | **Write the actual CI YAML.** Read the selected module contracts and matching integration example, not every module. The skill keeps no copy. |
-| `platforms/gitlab/references/stack-snippets.md` *(GitLab only)* | GitLab wiring the README does not cover: `extends:` order, `PROJECT_CACHE_KEY`, never overriding `image:`. |
-| `platforms/<platform>/references/workflow-matrix.md` | Decide which workflows/options a repo declares. |
-| `platforms/<platform>/workflow-map.json` | The machine-readable map. Loaded by the engine; never transcribed. |
+| `platform onboard [repo]` | Inspect the repository and add only the CI, image, and chart capabilities it needs. |
+| `platform update [repo]` | Apply a surgical migration against selected library versions. |
+| `platform ship [repo] <env>` | Prepare environment deployment wiring locally. |
+| `platform audit [repo]` | Report findings without modifying the target. |
 
-Every reference above except the library README is a real file inside this skill. The skill is
-self-contained by design: `npx skills add <repo> --skill platform-builder` copies this directory and nothing
-else, so a symlink pointing outside it would install as a broken link.
+Run core/scripts/platform.py for platform signals and core/scripts/libraries.py for the
+applicable library sources. An explicit platform or library source wins; when a repository
+has both CI systems or neither and the target is unclear, ask. Read local library paths in
+place, including uncommitted work. The resolver reports its source/ref and refuses a ref
+on a local path. Stop if a required source cannot be read.
+For another CI system, such as Azure DevOps, report that this Skill has no adapter rather
+than generating GitHub or GitLab syntax for it.
 
-### 0.0 Reference Libraries
+Read each selected library's README index and only the linked topic guides needed for
+the task, all from the same checkout/ref. Use its MIGRATION.md for upgrades. Executable
+templates, schemas, and tests establish shipped behavior; the selected-ref docs explain
+intended contracts. Record disagreements instead of silently substituting another ref.
+Resolve with `python3 core/scripts/libraries.py <repo> --platform gitlab|github`.
+The resolver and `audit.py` accept `--lib NAME=SOURCE` and the named flags
+`--gitlab-ci-library SOURCE`, `--github-ci-library SOURCE`, and
+`--helm-tpl-library SOURCE`. Resolve each library independently, highest first:
 
-The skill carries **no copy** of what these do. Start with each applicable library's own
-`README.md` at the resolved version, then follow only the topic links needed for this task.
-Read `MIGRATION.md` for upgrades and compatibility checks, not automatically on every run.
-
-| Library | Provides |
+| Priority | Source |
 | --- | --- |
-| `gitlab-ci-library` | GitLab CI template modules — `WORKFLOW` options, job/stage tables, publishing & auth |
-| `github-ci-library` | GitHub reusable workflows — module catalog, scenario files, execution matrix |
-| `helm-tpl-library` | the `tpl-library` Helm library chart — values contract, `mounts:` schema, template helpers |
+| 1 | Named flag or `--lib NAME=SOURCE` for this invocation |
+| 2 | `$PLATFORM_BUILDER_LIB_<NAME>` (uppercase, `-` becomes `_`) |
+| 3 | `<repo>/.platform-builder.json` under `libraries` |
+| 4 | `core/libraries.json` default |
 
-If you are about to write a fact that already lives above, **write a pointer instead**. A second
-copy is a second thing to forget, and copies drift silently.
+`SOURCE` may be a local path or `file://` URL (read in place), a Git URL with an
+optional `@ref` or `#ref`, or a GitHub/GitLab `/tree/<ref>` URL. A ref may be a
+branch, tag, or commit. Named flags take precedence over a generic `--lib` for
+the same name; the resolver is the authority for parsing and errors.
 
-#### Follow documentation links selectively
+A local library checkout is evidence for this run, not a publishable consumer pin. Before
+writing a GitHub reusable-workflow caller, check the selected library's pinning guard:
+the current GitHub library requires a published stable release tag in normal consumers.
+Branch and SHA refs need its explicit testing escape hatch and are not release-ready.
+GitLab include refs and Helm chart versions follow their own selected-library contracts.
+Never copy a version from a README example.
 
-The README is an index, not the complete contract. Use its task descriptions to select pages:
+## Load the relevant reference
 
-| Task | Follow from the resolved README |
+| Decision | Reference |
 | --- | --- |
-| Onboard or change CI | Getting started, configuration, pipeline lifecycle, then the relevant modules and one matching integration example |
-| Package an image | Dockerfile standards, the image module, and registry configuration |
-| Author a chart | Chart standards, templates and naming, then configuration or specific values needed for the change |
-| Add chart tests | Testing guide and its consumer-versus-library scope boundary |
-| Audit | Only the topic contracts involved in the audit; broaden for an explicitly comprehensive audit |
-| Upgrade a dependency | Migration sections for the upgrade path, then the linked contracts affected by them |
+| CI scenarios, job selection, and platform pinning | `platforms/<github or gitlab>/references/workflow-matrix.md` and its `workflow-map.json` |
+| Platform credential and permission mechanics | core/references/security-core.md, then the selected platform's security-addendum.md |
+| Language build, cache, and packaging | core/references/language-stacks-core.md and the selected library's module guide |
+| Helm values, helpers, schema, and naming | core/references/helm-chart-standard.md and the selected Helm library guides |
+| Runtime files and storage | core/references/file-mounts-standard.md |
+| Ignore files | core/references/ignore-files-standard.md |
+| Version changes | core/references/migration-standard.md |
+| GitLab-specific stack wiring | platforms/gitlab/references/stack-snippets.md |
 
-Resolve relative links against the **containing document**, including nested `../` paths and
-fragments. For a local source, open those files in place so uncommitted edits are visible.
-For a remote source, read from the resolver's checkout, keeping all pages at the same resolved
-commit. If using a browser, resolve relative URLs against that page and preserve its ref;
-never switch a linked page to `main` when the user selected another ref.
+Do not load both platform adapters for an ordinary single-platform task. The selected
+library's implementation remains authoritative for its supported inputs and outputs;
+workflow-map.json owns only Skill-side scenario selection.
 
-The configured library defaults are `main`; explicit source/ref inputs take precedence.
-Use the links actually present at that version rather than assuming a fixed docs layout.
-For an older monolithic README, use its headings to read the relevant sections instead.
-If a needed page is missing or a link is broken, report it; do not silently substitute another
-version. Follow additional links only when needed to understand the selected contract.
-Do not concatenate `docs/`, preload every module, or crawl unrelated references.
+## Make the change
 
-#### Resolving which copy to read
+Inspect existing CI, Docker, chart, environment, and test assets before writing. For
+onboard, classify the repository shape, choose only executable workflows and modules,
+and preserve discovered ports, settings, mounts, and runtime behavior. Add a chart's
+optional jobs, cronjobs, metrics, or persistence only when the workload needs them; pair
+each enabled value with its required tpl entrypoint. For a new chart, let the Helm
+library derive the main image repository from partOf/component/subComponent when
+image.repository is empty. Keep explicit repository values for images that need a
+different path.
 
-Reading a library "fresh" is only meaningful once the run knows *which* copy. Resolve it
-first, and never guess:
+### Phase 2b: interactive choices before scaffolding
 
-```bash
-python3 core/scripts/libraries.py [repo] --platform gitlab|github
-```
+Before scaffolding a new image or chart, show the detected platform, repository
+shape, harvested settings, selected library provenance, and proposed files. Ask
+the relevant questions for each artifact being added. An existing runnable
+fixture is evidence for enabling its test; state that proposed default when asking.
+An explicit user request or clear existing workload configuration settles an
+optional resource choice without asking it again.
 
-Each library has a named flag — `--gitlab-ci-library`, `--github-ci-library`,
-`--helm-tpl-library` — accepted by `libraries.py` and `audit.py` alike. `--lib NAME=SOURCE`
-does the same thing generically.
-
-A source is a local path, a git URL with an optional `@<ref>`, or the web URL you get from a
-browser address bar:
-
-| Source | Means |
-| --- | --- |
-| `/abs/path/github-ci-library` · `~/lib/x` · `../x` · `file:///srv/x` | local working copy, **read in place** |
-| `https://github.com/org/repo` | git, default branch |
-| `https://github.com/org/repo/tree/dev` | git at a branch, web URL form |
-| `https://github.com/org/repo/tree/e7c31d0…` | git at a commit, web URL form |
-| `https://gitlab.com/org/repo/-/tree/1.0.0` | same, GitLab's `/-/tree/` form |
-| `https://host/g/repo.git@1.0.0` · `@main` · `@6de3e62` | git at a tag, branch or commit |
-| `git@host:g/repo.git@1.0.0` | scp-style URL plus tag |
-
-A `/tree/<ref>` URL takes everything after `tree/` as the ref, so a branch containing a slash
-works. Otherwise only the last `@` **after** the last `/` introduces a ref — so `git@host:`
-and `https://user:token@host/` parse correctly — except that `.git@` always splits, which is
-how `repo.git@feature/x` works. `#` is an alternative separator.
-
-Precedence — highest first, and per library, so one may be local while another is pinned:
-
-| # | Layer | Use for |
+| Present | Ask | If enabled |
 | --- | --- | --- |
-| 1 | `--<library-name> SOURCE`, or `--lib NAME=SOURCE` | this run only — testing an unreleased library |
-| 2 | `$PLATFORM_BUILDER_LIB_<NAME>` (`-` → `_`, upper-cased) | a whole shell session or CI job |
-| 3 | `<repo>/.platform-builder.json` → `{"libraries": {...}}` | the repo's own pin, committed with it |
-| 4 | `core/libraries.json` | the org default |
-
-Git sources are cloned once into `~/.cache/platform-builder/libraries`
-(`$PLATFORM_BUILDER_CACHE` overrides). Only a full 40-character commit SHA is served from
-cache untouched; a branch moves, a tag can be force-pushed, and a short hex ref may be a
-branch that merely looks like a SHA, so all three are re-fetched. `--refresh` re-clones.
-
-**Three rules the resolver enforces, and you must not talk your way around:**
-
-1. **A local source is read in place, never copied.** That is the point — an uncommitted
-   working copy is visible to the run. When the resolver reports `UNCOMMITTED CHANGES`, say
-   so in the confirmation table: you are generating against a state no pipeline can consume
-   until it is pushed and tagged.
-2. **A ref on a local path is refused, not ignored.** Checking one out would mutate the
-   user's tree. Drop the ref, or point at the git URL.
-3. **An unusable source stops the run.** Do not scaffold against a library you could not
-   read; report it and ask.
-
-Report the resolved `name @ ref (kind, via layer)` for every library in the Phase 2
-confirmation table. An audit whose library provenance is unstated cannot be reproduced —
-half its findings depend on the version the repo was measured against.
-
-#### The ref you scaffold with is the ref you resolved
-
-**Every generated `uses:` and every `include: ref:` carries the ref the resolver reported —
-never a version copied out of a README example.** Those examples write `@1.0.0` to show the
-shape; writing it into a consumer pins the pipeline to a tag that may not exist. A caller
-pinned to a ref the library has never published fails to resolve, and the error names the
-caller, not the mistake.
-
-| Resolved as | Write |
-| --- | --- |
-| a tag — `@1.0.0` | that tag |
-| a branch — `@dev` | that branch |
-| a commit | that SHA |
-| a **local path** | the branch that copy is checked out at |
-
-A local path deserves care. GitHub cannot consume `/Users/me/lib`: the generated workflow
-has to name the library on its remote, so use the branch the local copy sits on and say so.
-Two things then need stating rather than assuming:
-
-- **Uncommitted changes.** The resolver warns when the working copy is dirty. The pipeline
-  will run against what is *pushed*, not what you read. Say which, and let the user decide.
-- **No such ref upstream.** If the local branch has never been pushed, the scaffold cannot
-  work yet. Say so at Phase 2, before writing — not after.
-
-Check before you write: `git -C <library> tag --list` and `git -C <library> status
---porcelain` answer both questions in one step.
-
-### 0.1 Single-Source Law
-
-Every fact has one home. When two places disagree, the one listed here wins — never reconcile
-by copying.
-
-| Fact | Single source |
-| --- | --- |
-| Module/workflow → option mapping | `platforms/<platform>/workflow-map.json` |
-| Helm chart structure, values contract, schema | `core/references/helm-chart-standard.md` |
-| Stack requirements (what and why) | `core/references/language-stacks-core.md` |
-| Stack YAML (how) | the relevant example linked from the resolved library's `README.md`; GitLab-only wiring in `platforms/gitlab/references/stack-snippets.md` |
-| Security principles | `core/references/security-core.md` |
-| Platform security mechanics | `platforms/<platform>/references/security-addendum.md` |
-| What a shared CI/Helm library does, and its migration steps | that library's README-linked topic contracts at the resolved ref; `MIGRATION.md` for upgrades and compatibility checks |
-| How a file mount is declared and classified | `core/references/file-mounts-standard.md` |
-| What each ignore file must and must not contain | `core/references/ignore-files-standard.md` |
-| Which copy of a library a run reads | the precedence chain in §0.0, resolved by `core/scripts/libraries.py` |
-
-### 0.2 Minimal-Change Law
-
-**Read before you write. Change the minimum. Justify every edit.**
-
-Except on an empty repository these commands are *editors*, not generators. A working pipeline
-someone tuned by hand is the artefact of record; regenerating it discards that work and produces
-an unreviewable diff.
-
-1. **Read the existing files first.** Never write one you have not read.
-2. **Diff intent against reality.** What actually differs from the standard is your entire change set.
-3. **Preserve deliberate deviation.** A pinned SHA, an extra job, an unusual condition, a
-   `when: never` override, or a custom project variable (such as `PROJECT_CACHE_KEY: "chat"`) —
-   assume it was intentional and ask before removing or changing it. Respect manual user decisions;
-   "it differs from the default template or stack name" is not a reason.
-4. **Preserve formatting** — key order, comments, quoting, blank lines.
-5. **Justify each edit in one line**, tied to a rule or migration step.
-6. **Never fork a shared template or reusable workflow** to change one line.
-7. **When in doubt, propose rather than apply.** Audit never writes.
-
----
-
-## 1. Platform Detection — Always First
-
-```bash
-python3 core/scripts/platform.py [repo]
-```
-
-Signals, ranked by how directly they express *intent* rather than hosting:
-
-| Rank | Signal | Confidence |
-| --- | --- | --- |
-| 1 | caller passed `--platform` | explicit |
-| 2 | `.gitlab-ci.yml` or `.github/workflows/` committed | certain |
-| 3 | `$GITLAB_CI` / `$GITHUB_ACTIONS` in the environment | certain |
-| 4 | origin host contains "gitlab"/"github" | **likely — still confirm** |
-| 5 | neither, or **both** | ambiguous → **ask** |
-
-> **Hostname is never a verdict.** Self-hosted is the norm: `gitlab.contoso.com` happens to
-> contain "gitlab", but a GitLab instance at `scm.internal` or GitHub Enterprise at
-> `git.company.com` carry no hint at all. When the host is inconclusive, probe
-> `/api/v4/version` (GitLab) or `/api/v3` (GHE), or ask.
-
-**Two cases are choices, not detections, and must route to a question:** a repo with **both**
-config types (mirrored, or a migration in flight), and a repo with **neither** during onboard —
-where a repo is *hosted* is not always where its CI should *run*.
-
----
-
-## 2. Commands
-
-| Command | Purpose |
-| --- | --- |
-| `platform onboard [repo]` | Scaffold CI, Dockerfile, and chart for a repo that has none. |
-| `platform update [repo]` | Migrate to current standards, applying only what is required. |
-| `platform ship [repo] <env>` | Add deployment wiring for a target environment. |
-| `platform audit [repo]` | Read-only compliance and security audit. |
-
-Every command accepts library sources on the same syntax as §0.0, e.g.
-`platform onboard ./svc --github-ci-library https://github.com/grootan-devops/github-ci-library/tree/dev --helm-tpl-library /path/to/helm-tpl-library`.
-
-### 2.1 Interactive Protocol — Never Scaffold Silently
-
-**Phase 1 — Context.** Detect the platform. Resolve the library sources (§0.0), read the
-applicable README indexes, and follow the relevant topic links from those resolved paths.
-For upgrades, also read the migration chain. Refresh the selected documents for this run;
-never answer from memory or mix in a library version the resolver did not select.
-
-**Phase 2 — Classify and confirm.** Run the engine to get the detected shape, then present:
-platform (with confidence and signals), shape, what will be created, and anything present that
-the shape does not need. **Stop and confirm before writing.**
-
-**Phase 2b — Ask about tests. They are off by default, so silence disables them.**
-
-Both libraries ship the jobs; neither runs without being asked for. A scaffold that omits
-them is not "no tests yet", it is a pipeline that builds an artifact nobody executed.
-
-| Present | Ask | Turns on |
-| --- | --- | --- |
-| a `Dockerfile` | "Smoke-test the built image?" | `docker.yml` (or `buildah.yml`) `test: true`. Runs `test-script` — default `ci_image_test.sh` — inside the image before it is pushed. GitLab: `.Image:Test`. |
-| a chart | "Unit-test the chart?" | `chart.yml` `run-unittest: true` with `mock-chart` (default `tests`, accepts space-separated chart directories). Runs each chart's own `tests/*_test.yaml` suites. |
-| a chart | "Does the workload require persistent storage (PVC)?" | Adds `persistence:` in `values.yaml` and `{{- include "tpl.pvc" . }}` below `---` in `templates/manifest.yaml`. Default is **no**; stateless workloads omit both. Never add `persistence:` if persistent storage is not needed, and never re-add it if deleted. |
-
-Ask for each artifact that exists, and ask **both** where both exist — they are independent
-decisions. If the repository already ships the script or the mock chart, say so and default
-to enabling; a test that exists and never runs is the worst of the three outcomes.
-
-If the answer is yes and the fixture does not exist yet, scaffold it:
-
-- **Image** — a `ci_image_test.sh` that asserts what the image promises: the binary is on
-  `PATH` and reports the expected version, the declared `EXPOSE` port is listening, the
-  process runs as `10001`. Assert the contract, not the base image's contents.
-- **Chart** — follow the **Testing** link in helm-tpl-library's resolved README. `tpl-library` already
-  tests the Kubernetes-level rendering it owns, and duplicating that in a consumer chart
-  buys nothing and breaks on every library upgrade. A consumer's tests cover what only that
-  chart knows.
-
-**Generated YAML carries no narration.** A comment in a consumer's pipeline earns its place
-only by preventing a specific mistake — why a job accepts a skipped dependency, why a value
-must not be re-declared. Explaining what a workflow *is*, or how it differs from another
-one, is what this skill's references and the library README are for; repeated into every
-generated file it becomes something to maintain and, on the next library change, something
-that is quietly wrong. Applies to both platforms.
-
-**Phase 3 — Scaffold, then validate.**
-
-```bash
-python3 core/scripts/audit.py [repo] --strict [--lib NAME=SOURCE ...]
-```
-
-Pass the same `--lib` sources you scaffolded against, so the validation measures the repo
-against the library it was built for.
-
----
-
-## 3. Standards
-
-### 3.1 Adaptive Selection
-
-A repository declares **only the CI it can actually execute**. On GitLab that means the
-`WORKFLOW` option list matching the `include:` list; on GitHub it means only the workflow files
-the shape needs. Either way an option or file with nothing behind it produces an empty pipeline
-— a dead button for whoever clicks it. See the platform's `workflow-matrix.md`.
-
-A Dockerfile without an application dependency manifest is an **image-only** repository. Give
-it image build, smoke-test and image-scan coverage, but no source dependency-license scan, source
-SBOM workflow, language build, or SonarQube workflow. Those concerns become applicable only when
-a supported application manifest exists. Git-history secret scanning remains applicable.
-
-Do not schedule placeholder jobs for absent repository features. Build a matrix from detected
-files before job expansion so a repository without a Dockerfile or chart has no Dockerfile or
-chart job in its run graph. On GitHub, direct public registry image references are valid and
-`CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX` must not be generated or passed; that variable is
-GitLab-only. The candidate image repository is resolved once, by the library's `init.yml`, which
-normalises a path-style development suffix to a tag-style one on registries with no nested
-repository paths (`<repo>/dev` becomes `<repo>-dev` on Docker Hub). Never ask a consumer to pick
-the suffix per registry, never hand-write a dev repository in a caller, and never add a
-validation rule for it — consume `needs.init.outputs.image-dev-repository`. A GitHub image scan pulls the pushed image from the
-registry by its digest-pinned reference; do not save, upload and download an
-image tar between jobs. That is a GitLab artifact-passing idiom, and on GitHub
-it only adds a slow upload of something the registry already holds. Pin the
-runner label (`vars.CI_RUNNER || 'ubuntu-26.04'`) rather than tracking
-`ubuntu-latest`, so a platform migration cannot change the build environment
-underneath a release. A pipeline change must verify itself
-without releasing itself: a PR workflow that filters paths always includes `.github/**`, and the
-release workflow on the default branch always carries `paths-ignore: [".github/**"]` so a
-workflow-only commit cannot cut a release. A release workflow may carry a `workflow_dispatch`
-trigger, but it must then refuse any ref that is not the default branch: GitLab
-forbids a manual release outright (`.release-rules` sends `web`/`api` pipelines
-to `when: never`), and a GitHub dispatch is looser still because it can target
-any ref, so without that guard a release can be cut from a feature branch.
-
-### 3.2 Job Grouping
-
-One concern per workflow/dispatch mode: checks are existence and drift assertions; lint is
-linters; build is dependencies → build → test; publish is publish. A job running outside its
-class is a defect to report.
-
-### 3.3 Job Wiring
-
-Every job declares its dependencies explicitly. The platform-specific trap differs and both are
-in the snippets: GitLab requires an explicit `optional:` on every `needs:` entry; GitHub has no
-`optional:` at all, so cleanup jobs must declare `if: always()` or they are skipped exactly when
-needed.
-
-**Nothing runs once its input is known to be bad.** Wire `needs:` so a job starts the moment its
-own inputs exist and never after a failed dependency; stage ordering alone gives neither. Runner
-minutes are real money and real feedback latency, and a pipeline that keeps going after a failure
-teaches people to ignore it.
-
-Audit every edge for **both** directions of waste:
-
-| Symptom | Fix |
-| --- | --- |
-| Work that runs when it cannot succeed | add the missing `needs:` edge |
-| Work that waits when it needn't | remove the edge — a job that reads none of an upstream's artifacts must not wait on it |
-| A ~10s job blocked behind a whole stage | declare `needs:` instead of relying on stage order |
-| A gate that serialises work which could overlap | move the gate later, to the first job that must not proceed |
-
-The last is the one most often got wrong in the safe-looking direction. Gating the *build* on unit
-tests stops nothing shippable and costs the whole test duration on every run; gating the *push*
-costs nothing and still lets nothing ship untested. Place a gate where it stops waste earliest
-**without** serialising work that could have run concurrently.
-
-### 3.4 Least-Privilege Tokens
-
-Prefer the short-lived job-scoped token (`CI_JOB_TOKEN` / `GITHUB_TOKEN`) over any long-lived
-credential, and scope it to the minimum. Cross-project publishing needs an explicitly granted
-credential — if it "just works", something is over-permissioned. Mechanics differ per platform;
-see the addendum.
-
-### 3.5 Docker & Helm
-
-Identical on both platforms — `core/references/language-stacks-core.md` §3 and
-`core/references/helm-chart-standard.md`.
-
-Publishing defaults differ: follow the selected library's chart and registry configuration
-guides. GitHub requires `CHART_REGISTRY` for OCI publishing. GitLab uses OCI when that variable
-is nonempty, otherwise its current project's Helm Package Registry. Do not fill an absent
-GitLab chart registry with `CI_REGISTRY` or an image registry. Keep dependency-only registry
-authentication separate, use chart-specific credentials, and generate no HTTP backend selector.
-Check these contracts at the resolved ref before using newer settings with an older library.
-
-Two rules that are broken often enough to name here:
-
-- **Dependencies are cached, never artifacted.** No `node_modules/`, `.venv/` or `vendor/`
-  in an `artifacts:` block, ever. The image installs *offline* from the package cache,
-  bind-mounted by BuildKit. Compiled output (`dist/`, `*.jar`, a binary) is the artifact.
-  Wiring: the Docker guide linked from the library's README, plus `platforms/gitlab/references/stack-snippets.md`.
-- **A consumer `values.yaml` is a replica of the library's**, not a subset — every key
-  kept, empty ones included, with their examples. Consumer-only keys live under one
-  `Application Configuration` banner. `helm-chart-standard.md` §3.0.
-- **`main` is used exactly once per `values.yaml`** — as `containers.main`, the single
-  application container. Never as an init container key, and never as a `jobs:` container
-  key; `tpl-library` fails the render on both. A `cronjobs:` entry is different: it reuses the
-  root `containers:`, so `main` appears in its pod by design. Every other key is
-  **derived, not
-  looked up**: name the role this container performs in this chart, such that the key would
-  survive swapping the image and reads correctly after the component prefix
-  (`order-backend-<key>`). Vendor names (`alloy`, `envoy`, `pgbouncer`) and placeholders
-  (`sidecar`, `helper`, `aux`) are always wrong. Init keys name a completed precondition.
-  `helm-chart-standard.md` §2.1 has the four-question test and worked examples.
-
-### 3.6 File Mounts
-
-**Assess on every chart.** Any file the application reads at runtime — `nginx.conf`,
-`application.properties`, `appsettings.json`, a certificate — is declared in `values.yaml` under
-`mounts:`, not baked into the image and not hand-written as a ConfigMap template.
-
-Three decisions, all confirmed with the user, never inferred silently:
-
-1. **Does the app need one?** Check the stack's usual config file and any `COPY` of a config file
-   in the Dockerfile — that `COPY` is the anti-pattern this replaces.
-2. **ConfigMap or Secret?** Judge the *content*, never the filename. `application.properties`
-   holding a datasource password is a Secret; an `nginx.conf` with only routing is a ConfigMap.
-3. **What should it derive?** Mount content is rendered through `tpl … $`, so `{{ .Values.x }}`
-   works inside the file. Template the port, hostname, and sibling service names rather than
-   duplicating them.
-
-**Storage is the sibling question.** A `mounts.pvc` entry names a claim; something has to
-create it. `tpl-library` ships `tpl.pvc` for exactly that, but it is an opt-in entrypoint —
-`tpl.deployment` does not call it, so a chart whose `manifest.yaml` omits it, or whose
-`persistence:` section is empty, leaves the pod `Pending` while `helm template` and
-`helm install` both succeed. Ask "does something create this?" of every reference the values
-introduce. Follow the templates and configuration/storage links from helm-tpl-library's README
-for entrypoints and claim-name pairing.
-
-Full schema, examples, and anti-patterns: `core/references/file-mounts-standard.md`.
-`assets/nginx-default.conf` is a placeholder showing the *shape* of a config — not the delivery
-mechanism.
-
----
-
-## 4. Audit
-
-**Step 1 — Refresh context.** Detect platform; resolve library sources (§0.0); read each
-applicable README index and only the linked contracts involved in the audit. Read migration
-sections when comparing versions.
-
-**Step 2 — Run the engine.**
-
-```bash
-python3 core/scripts/audit.py [repo] [--platform gitlab|github] [--strict] [--json]
-                              [--lib NAME=SOURCE ...] [--refresh]
-```
-
-It runs the common checks (Dockerfile, chart, ignore files, hygiene) plus the detected
-platform's CI checks in one pass.
-
-**Step 3 — Review what the engine cannot see.** Load `core/references/security-core.md` and the
-platform addendum, and apply them. This is the highest-value part of the audit: credentials
-embedded in values, chart posture, untrusted-input paths, token appropriateness.
-
-**Step 4 — Report** by severity with `file:line` and a one-line rationale.
-
-Mark every finding `[engine]` or `[judged]`. An `[engine]` finding is a reproducible fact,
-stated flatly; a `[judged]` finding is a considered opinion that may be wrong, so give the
-evidence and invite the user to overrule you. Never present a judged finding as if the engine
-produced it. **Never fix during an audit** — propose, and let the user decide.
+| Dockerfile | Smoke-test the built image? | Wire the GitHub `docker.yml`/`buildah.yml` `test: true` and `test-script` (default `ci_image_test.sh`), or GitLab `.Image:Test`. |
+| Chart | Unit-test the chart? | Wire GitHub `chart.yml` `run-unittest: true` with `tests/*_test.yaml` suites, or the selected GitLab chart test job. |
+| Chart | Does the workload require persistent storage (PVC)? | Add `persistence:` and `tpl.pvc`; otherwise omit both. |
+| Chart | Does the workload require batch jobs, recurring cronjobs, or Prometheus metrics scraping? | Add only required values and matching `tpl.job`, `tpl.cronjob`, or `tpl.servicemonitor` entrypoints. |
+
+If a runnable smoke script or chart test suite already exists, preserve and wire
+it by default. If the user enables a new test, create a fixture that checks the
+application's actual contract. Do not declare a test job without a runnable
+fixture. Questions about optional chart resources are unnecessary when the
+workload evidence or explicit request already answers them.
+
+For update, compare the current consumer with the selected library versions and
+intermediate migration notes. Change only required refs, schemas, wiring, and verified
+defects. Preserve intentional cache keys, custom jobs, values, annotations, probes, and
+formatting. Ask only when a genuine ambiguity or a conflicting customization cannot
+be resolved from the repository. Do not reset files to starter templates.
+
+For ship, prepare wiring for the requested environment and validate it. Do not infer
+a production target, credential, or cluster. A local change does not authorize a
+deployment, commit, or push.
+
+For audit, run the engine and review what it cannot establish: secret handling,
+token scope, rendered chart security, untrusted input paths, and unsupported library
+options. Label findings as engine results or manual judgments and give file evidence.
+Do not edit the audited target.
+
+## Validate and report
+
+Run core/scripts/audit.py with --strict and the same local paths or refs used for the
+change. Check rendered Helm output and schema when a chart changed, and the selected
+platform's native lint or CI checks when a pipeline changed. Report exact library
+provenance, commands and outcomes, remaining risks, and any publishing prerequisite.
+Do not claim a local library change is present in a remote workflow or chart release.

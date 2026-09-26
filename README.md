@@ -1,6 +1,6 @@
 # AI Agent Skills
 
-Release `1.2.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.3.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 This directory contains reusable, production-hardened **AI Agent Skills**. Skills are modular packages of procedures, automated validation scripts, reference baselines, and architectural contracts that transform AI coding assistants into specialized platform engineers.
 
@@ -10,9 +10,14 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 
 | Skill Name | Supported Platforms | Description |
 | --- | --- | --- |
-| [`terraform-module-builder`](./terraform-module-builder/) | AWS, Azure, GCP, Kubernetes | Industrial-grade Terraform module engineering platform: provider schema introspection, capability-aware security, 7-level testing pyramid, zero-destroy state migrations, and canonical documentation generation. |
+| [`terraform-module-builder`](./terraform-module-builder/) | AWS reference modules; other providers require schema evidence | Terraform module creation, updates, and audits with provider schema checks, migration review, and repository-native validation. |
 | [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters. Strict 3-job separation, packaging-only Dockerfiles, Nginx frontend standard, least-privilege `GITHUB_TOKEN` permissions, SHA-pinned actions, breaking-change migrations, and minimal YAML footprints. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
 | [`gitops-manager`](./gitops-manager/) | Argo CD, Helm, Git | Focused Argo CD environment bootstrap: authenticated preflight, cluster metadata discovery, standard root/extras charts, validation, and root Application creation. |
+
+Maintainer regression checks for the platform checker live in
+[`platform-builder`](./platform-builder/README.md#maintainer-regression-checks).
+The Terraform migration detector's checks live in
+[`terraform-module-builder`](./terraform-module-builder/README.md#local-tools).
 
 ---
 
