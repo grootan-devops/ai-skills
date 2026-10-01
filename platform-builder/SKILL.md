@@ -45,7 +45,8 @@ The resolver and `audit.py` accept `--lib NAME=SOURCE` and the named flags
 
 `SOURCE` may be a local path or `file://` URL (read in place), a Git URL with an
 optional `@ref` or `#ref`, or a GitHub/GitLab `/tree/<ref>` URL. A ref may be a
-branch, tag, or commit. Named flags take precedence over a generic `--lib` for
+branch, tag, or commit; give a branch containing `/` as `#<ref>`, `<url>.git@<ref>` or
+`/tree/<ref>`, because `<url>@<ref>` reads such a ref as part of the URL. Named flags take precedence over a generic `--lib` for
 the same name; the resolver is the authority for parsing and errors.
 
 A local library checkout is evidence for this run, not a publishable consumer pin. Before

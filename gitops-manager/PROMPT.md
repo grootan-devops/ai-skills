@@ -86,7 +86,7 @@ Target argocd-gitops-tpl-library source/version: <source-or-version>
 ### Quick
 
 ```text
-Run argocd app add for <service> in the <project>/<environment> environment at <gitops-root>. Chart: <chart-repo-url> <chart-name> <published-version>; service chart source for values: <chart-dir-or-pulled-copy>; <single release | release <release> of group <group>, overlay <values.release.yaml>>. Verify the version is published, run scripts/app_add.py with --dry-run and show it, then write the apps entry and values file. Ask me for every placeholder it leaves, run scripts/override_check.py, render the root chart, and report the Application name, namespace, release name, CI yq path and prerequisites. Do not commit, push, create an Application, or sync.
+Run argocd app add for <service> in the <project>/<environment> environment at <gitops-root>; library source: <source-or-default>. Chart: <chart-repo-url> <chart-name> <published-version>; service chart source for values: <chart-dir-or-pulled-copy>; <single release | release <release> of group <group>, overlay <values.release.yaml>>. Verify the version is published, run scripts/app_add.py with --dry-run and show it, then write the apps entry and values file. Ask me for every placeholder it leaves, run scripts/override_check.py, render the root chart, and report the Application name, namespace, release name, CI yq path and prerequisites. Do not commit, push, create an Application, or sync.
 ```
 
 ### Full
@@ -97,6 +97,7 @@ Act as a GitOps engineer using the gitops-manager skill. Add the service
 Chart: <chart-repo-url> / <chart-name> / <version>, or chart path <path>.
 Service chart source for the values scaffold: <chart-dir-or-pulled-copy>.
 Releases: <single | group <group> with releases <r1>, <r2> and their overlays>.
+argocd-gitops-tpl-library source/ref: <source-or-default>.
 
 1. Read the root values.yaml: existing apps, naming, namespace, sync options
    and the library version, and the library's README index task for adding a service at that
@@ -122,7 +123,7 @@ Releases: <single | group <group> with releases <r1>, <r2> and their overlays>.
 ### Quick
 
 ```text
-Run argocd env audit for <project>/<environment> in <gitops-repo-url> with Argo CD <argocd-url>. Inspect the selected library pin, chart files, rendered Applications, and available read-only remote health information. Report findings with file evidence and any unavailable authentication or cluster check. Make no changes.
+Run argocd env audit for <project>/<environment> in <gitops-repo-url> with Argo CD <argocd-url>; library source: <source-or-default>. Inspect the selected library pin, chart files, rendered Applications, and available read-only remote health information. Report findings with file evidence and any unavailable authentication or cluster check. Make no changes.
 ```
 
 ### Full
@@ -130,6 +131,7 @@ Run argocd env audit for <project>/<environment> in <gitops-repo-url> with Argo 
 ```text
 Act as a GitOps auditor using the gitops-manager skill. Audit
 <project>/<environment> in <gitops-repo-url>; Argo CD URL <argocd-url>.
+argocd-gitops-tpl-library source/ref: <source-or-default>.
 Read the repository's default-branch cluster metadata and the environment
 branch. Resolve the exact library source and chart dependency version; read
 the relevant guides at that ref. Inspect root and extras charts, values,
