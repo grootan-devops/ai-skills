@@ -23,9 +23,12 @@ change or a verified defect requires otherwise.
 
 ## Resolve the authority
 
-terraform-modules holds the modules and every standard they are built to. Locate it, stopping
-at the first that exists: `$TERRAFORM_MODULES_REPO`; a `terraform-modules/` checkout beside
-the directory this skill is installed in; otherwise ask for the path. Never guess.
+terraform-modules holds the modules and every standard they are built to. Locate the checkout
+to work in, stopping at the first that exists: a path named in the request; the current
+repository when it is terraform-modules or a fork of it; `$TERRAFORM_MODULES_REPO`; a
+`terraform-modules/` checkout beside the directory this skill is installed in. Otherwise ask
+for the path, offering to clone the default, `https://github.com/grootan-devops/terraform-modules`;
+an audit may read that repository at `main` instead. Never guess.
 
 Read its README documentation index and follow only the rows the request needs — public API,
 names and tags, security controls, module README, releases and state changes, tests — all at

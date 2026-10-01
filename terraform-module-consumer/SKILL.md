@@ -25,11 +25,12 @@ example repository.
 
 The composition rules — pinning, layout, one stack and state per environment,
 backends and state keys, providers, secrets, lock files and validation — live in the
-module library. Locate it, stopping at the first that exists: `$TERRAFORM_MODULES_REPO`;
-a `terraform-modules/` checkout beside this skill's directory; the repository and ref of
-the pinned module source; otherwise ask. Read its README documentation index and follow
-the row for consuming modules at that ref, or the equivalent guide of the project's own
-catalog.
+module library. Locate it, stopping at the first that exists: a path or repository/ref
+named in the request; `$TERRAFORM_MODULES_REPO`; the repository and ref of the stack's
+pinned module source; a `terraform-modules/` checkout beside this skill's directory;
+otherwise the default, `https://github.com/grootan-devops/terraform-modules` at `main`.
+Read its README documentation index and follow the row for consuming modules at that
+ref, or the equivalent guide of the project's own catalog.
 
 ## Compose the stack
 

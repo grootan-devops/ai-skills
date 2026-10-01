@@ -228,6 +228,16 @@ library repositories (`gitlab-ci-library`, `github-ci-library`, `helm-tpl-librar
 README index at the resolved branch, tag or local checkout — so a documentation change needs
 no skill release.
 
+Each skill resolves its library sources the same way: an explicit source in the request wins,
+and the public repository at `main` is the default.
+
+| Skill | Library | Resolved from, highest first |
+| --- | --- | --- |
+| `platform-builder` | `gitlab-ci-library`, `github-ci-library`, `helm-tpl-library` | a `--<library>` flag, `$PLATFORM_BUILDER_LIB_<NAME>`, the repository's `.platform-builder.json`, then `core/libraries.json` |
+| `gitops-manager` | `argocd-gitops-tpl-library` | a checkout or repository/ref in the request, then `https://github.com/grootan-devops/argocd-gitops-tpl-library` |
+| `terraform-module-builder` | `terraform-modules` (edited in place) | a path in the request, the current repository, `$TERRAFORM_MODULES_REPO`, a sibling checkout; otherwise it offers to clone `https://github.com/grootan-devops/terraform-modules` |
+| `terraform-module-consumer` | `terraform-modules` | the request, `$TERRAFORM_MODULES_REPO`, the stack's pinned module source, a sibling checkout, then `https://github.com/grootan-devops/terraform-modules` |
+
 ### Progressive Disclosure
 
 To prevent overwhelming the AI assistant's context window:

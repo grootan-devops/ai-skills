@@ -22,10 +22,12 @@ inventing a different consumer layout.
 
 When consuming `argocd-gitops-tpl-library`:
 
-1. Resolve the requested local checkout or repository/ref first. Explicit branches, tags,
-   and commits are exact; a local path includes its current uncommitted files. A repository
-   URL without a ref uses that repository's actual default branch. With no source specified,
-   use `main`. Never mix linked documentation from another ref.
+1. Resolve the library source: a local checkout or repository/ref named in the request,
+   otherwise the default, `https://github.com/grootan-devops/argocd-gitops-tpl-library` at
+   `main`. Explicit branches, tags, and commits are exact; a local path includes its current
+   uncommitted files. A repository URL without a ref uses that repository's actual default
+   branch. Report the source and ref you read, and never mix linked documentation from
+   another ref.
 2. Read that source's `README.md` first, then only the linked docs relevant to the task —
    environment bootstrap, adding a service, or its values file. Resolve relative links from the same checkout/ref; do not follow a link to
    another branch or recursively crawl unrelated docs. When upgrading, read that source's
