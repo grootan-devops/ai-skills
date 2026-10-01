@@ -1,6 +1,6 @@
 # AI Agent Skills
 
-Release `1.3.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.4.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 This directory contains reusable, production-hardened **AI Agent Skills**. Skills are modular packages of procedures, automated validation scripts, reference baselines, and architectural contracts that transform AI coding assistants into specialized platform engineers.
 
@@ -11,6 +11,7 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 | Skill Name | Supported Platforms | Description |
 | --- | --- | --- |
 | [`terraform-module-builder`](./terraform-module-builder/) | AWS reference modules; other providers require schema evidence | Terraform module creation, updates, and audits with provider schema checks, migration review, and repository-native validation. |
+| [`terraform-module-consumer`](./terraform-module-consumer/) | Terraform, Terragrunt, provider-agnostic modules | Compose existing versioned modules into environment infrastructure configurations, with state-safe validation and no direct managed resources or apply. |
 | [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters. Strict 3-job separation, packaging-only Dockerfiles, Nginx frontend standard, least-privilege `GITHUB_TOKEN` permissions, SHA-pinned actions, breaking-change migrations, and minimal YAML footprints. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
 | [`gitops-manager`](./gitops-manager/) | Argo CD, Helm, Git | Focused Argo CD environment bootstrap: authenticated preflight, cluster metadata discovery, standard root/extras charts, validation, and root Application creation. |
 
@@ -39,7 +40,7 @@ npx skills add https://github.com/grootan-devops/ai-skills \
 ```
 
 Swap `--skill` for any supported skill in the catalog above — `terraform-module-builder`,
-`platform-builder`, `ci-library-builder` or `gitops-manager`. Repeat the command to
+`terraform-module-consumer`, `platform-builder` or `gitops-manager`. Repeat the command to
 install more than one.
 
 Each skill is self-contained: the CLI copies that directory and nothing else, so a skill
@@ -138,7 +139,7 @@ Cursor supports project-specific rules (`.cursor/rules/*.mdc`) and agent skills 
 
   When authoring, auditing, testing, or refactoring Terraform modules:
   - Refer directly to `.cursor/skills/terraform-module-builder/SKILL.md` for command workflows.
-  - Apply standards in `.cursor/skills/terraform-module-builder/references/`.
+  - Apply the standards in the terraform-modules repository docs the skill names.
   - Execute audit scripts from `.cursor/skills/terraform-module-builder/scripts/`.
   ```
 
@@ -165,7 +166,7 @@ Claude Code supports project-level skills and `CLAUDE.md` instruction files.
   ```
 
 - **Claude Projects (Web)**:
-  Upload `SKILL.md` and the documents in `references/` directly into your Claude Project's **Project Knowledge**.
+  Upload `SKILL.md` (and any `references/` it has) into your Claude Project's **Project Knowledge**, together with the library documentation it reads.
 
 ---
 
@@ -187,7 +188,7 @@ Kiro recognizes skills in `.kiro/skills/` or standard `.agent/skills/`.
 ### 3.5. OpenAI / Codex / ChatGPT
 
 - **Custom GPTs**:
-  Create a Custom GPT (e.g. "Terraform Module Platform Architect"), paste the contents of `SKILL.md` into the **Instructions**, and upload the files in `references/` into **Knowledge**.
+  Create a Custom GPT (e.g. "Terraform Module Platform Architect"), paste the contents of `SKILL.md` into the **Instructions**, and upload the library documentation it reads into **Knowledge**.
 - **Codex / API Agents**:
   Symlink or place the skill into `.codex/skills/` or pass `SKILL.md` as a system prompt directive.
 
@@ -216,11 +217,16 @@ Every skill in this repository follows the standard layout:
 
 ```text
 skills/<skill_name>/
-├── SKILL.md          # Required: YAML frontmatter + core orchestrator instructions
+├── SKILL.md          # Required: YAML frontmatter + the workflow instructions
 ├── scripts/          # Optional: Automated CLI linters, generators, and validators
-├── references/       # Optional: In-depth technical specifications and knowledge baselines
-└── assets/           # Optional: Visual architectural diagrams and templates
+└── references/       # Optional: step-by-step instructions for one workflow
 ```
+
+Standards, contracts and starter templates are not copied into a skill. They live in the
+library repositories (`gitlab-ci-library`, `github-ci-library`, `helm-tpl-library`,
+`argocd-gitops-tpl-library`, `terraform-modules`), and a skill reads them from the library's
+README index at the resolved branch, tag or local checkout — so a documentation change needs
+no skill release.
 
 ### Progressive Disclosure
 
@@ -228,7 +234,7 @@ To prevent overwhelming the AI assistant's context window:
 
 1. Only the skill's `name` and `description` from the YAML frontmatter are indexed initially.
 2. The complete `SKILL.md` is loaded only when a prompt matches the skill's triggers.
-3. Bulky reference guides in `references/` are read on-demand when specific deep-dive procedures are required.
+3. Library documentation is read on demand, following only the README-index links the task needs.
 
 ## License
 

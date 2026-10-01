@@ -48,12 +48,12 @@ class DockerfileCacheGuidanceTests(unittest.TestCase):
         )
         arg_findings = [f for f in findings if f.category == "Missing Default Base Image in ARG"]
         self.assertEqual(len(arg_findings), 1)
-        self.assertIn("grootantech/python-3-12:latest", arg_findings[0].message)
+        self.assertIn("grootantech/micro-python-3-12:latest", arg_findings[0].message)
 
     def test_gitlab_dockerfile_default_enterprise_arg_passes(self):
         findings = self.findings_for(
             "gitlab",
-            "ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/python-3-12:latest\nFROM ${PYTHON_312_MICRO_BASE_IMAGE}\nCOPY . /app\nUSER 10001\n",
+            "ARG PYTHON_312_MICRO_BASE_IMAGE=grootantech/micro-python-3-12:latest\nFROM ${PYTHON_312_MICRO_BASE_IMAGE}\nCOPY . /app\nUSER 10001\n",
         )
         arg_findings = [f for f in findings if f.category == "Missing Default Base Image in ARG"]
         self.assertEqual(len(arg_findings), 0)

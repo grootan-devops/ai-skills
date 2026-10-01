@@ -14,13 +14,27 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import yaml
     HAVE_YAML = True
 except ImportError:
     HAVE_YAML = False
+
+if HAVE_YAML:
+    class _GitLabLoader(yaml.SafeLoader):
+        """SafeLoader that accepts GitLab's `!reference [job, key]` tag.
+
+        The reference is kept as its literal text: the audit reads structure, not the
+        spliced result, and a string keeps script-line checks working unchanged.
+        """
+
+    def _reference(loader: yaml.SafeLoader, node: yaml.Node) -> str:
+        parts = loader.construct_sequence(node) if isinstance(node, yaml.SequenceNode) else [loader.construct_scalar(node)]
+        return f"!reference [{', '.join(str(p) for p in parts)}]"
+
+    _GitLabLoader.add_constructor("!reference", _reference)
 
 from checks_common import (Finding, iter_jobs, CI_RESERVED_KEYS,
                            MULTILINE_SHELL_MARKERS, classify_unproxied_public_image)
@@ -88,7 +102,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
 
     if HAVE_YAML:
         try:
-            data = yaml.safe_load(content) or {}
+            data = yaml.load(content, Loader=_GitLabLoader) or {}  # noqa: S506 - SafeLoader subclass
         except Exception as e:
             findings.append(Finding("P0", "YAML Syntax Error", str(ci_file), f"Failed to parse YAML: {e}"))
             return findings, {}
@@ -159,7 +173,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
     elif isinstance(workflow_var, str):
         workflow_options = [workflow_var]
 
-    # Bidirectional WORKFLOW <-> module consistency (references/workflow-matrix.md section 1).
+    # Bidirectional WORKFLOW <-> module consistency (gitlab-ci-library pipeline lifecycle, Declaring WORKFLOW).
     # Option without module => clicking it yields an empty pipeline.
     # Module without option => dead weight the user can never dispatch.
     if workflow_options:
@@ -173,7 +187,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
                 ))
 
         # Retiring an option by disabling its job with `rules: [{when: never}]` is the
-        # sanctioned way to drop inapplicable work (workflow-matrix.md section 4), so a
+        # sanctioned way to drop inapplicable work (the library's pipeline lifecycle), so a
         # deliberately disabled job is not an unreachable module.
         disabled_jobs = {
             name for name, body in iter_jobs(data)
@@ -210,8 +224,9 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
             ))
         elif img_repo.endswith("-service"):
             findings.append(Finding(
-                "P1", "Forbidden 'service' Suffix", f"{ci_file.name}:variables.IMAGE_REPOSITORY",
-                f"IMAGE_REPOSITORY '{img_repo}' uses forbidden generic suffix '-service'. Sub-component must be 'backend', 'frontend', 'worker', or 'gateway'."
+                "P2", "Generic Image Repository Name", f"{ci_file.name}:variables.IMAGE_REPOSITORY",
+                f"IMAGE_REPOSITORY '{img_repo}' ends in the generic '-service'. Suggest a name that says "
+                f"what the workload does and confirm it with the user."
             ))
 
     findings.extend(check_job_needs(data, ci_file))
@@ -239,7 +254,9 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
         "image/" in f for f in included_files
     )
 
-    if (not dep_jobs and not is_chart_only_pipeline
+    # Only a pipeline that includes a language module has a library dependency job to
+    # wire; a stack the library does not cover (e.g. a framework CLI build) has none.
+    if (has_language_module and not dep_jobs
             and not any("common/.mono" in f for f in included_files)
             and not any("mono/" in f for f in included_files)):
         findings.append(Finding(
@@ -422,40 +439,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
                     f"'{module_frag}' is included but {required_file} is missing. {why}"
                 ))
 
-    # USE_DOCKER_BUILDX is a coupled decision, not a feature toggle. The library default
-    # is "false"; .image-common already exports DOCKER_BUILDKIT=1, so BuildKit syntax
-    # (RUN --mount) works without it. Setting it adds a builder container and pushes a
-    # per-branch buildcache tag, with mode=max, into the image repository.
-    if str(variables.get("USE_DOCKER_BUILDX", "")).strip().lower() == "true":
-        df = ci_file.parent / "Dockerfile"
-        df_text = df.read_text(encoding="utf-8", errors="ignore") if df.exists() else ""
-        findings.append(Finding(
-            "P2", "USE_DOCKER_BUILDX Enabled", f"{ci_file.name}:variables",
-            "USE_DOCKER_BUILDX is 'true' (library default is 'false'). This pushes a "
-            "'buildcache-<branch>' tag with mode=max into the image repository on every "
-            "branch, requires push credentials in the build job, and pulls a buildkit "
-            "container before the Dockerfile is read. Note DOCKER_BUILDKIT=1 is already "
-            "set by .image-common, so 'RUN --mount' does NOT require this flag -- confirm "
-            "the build actually fails without it. Never pair mode=max with a secret "
-            "passed as ARG: intermediate layers leave the runner."))
-
-        # A bind mount reads from the build context, so a denied path yields an EMPTY
-        # mount rather than an error -- the install silently goes to the network instead.
-        for m in re.finditer(r"--mount=type=bind[^\n]*?source=([^\s,]+)", df_text):
-            # Strip a leading "./" only -- lstrip("./") would eat the dot of ".npm".
-            src = re.sub(r"^\./", "", m.group(1).strip())
-            di = ci_file.parent / ".dockerignore"
-            di_text = di.read_text(encoding="utf-8", errors="ignore") if di.exists() else ""
-            allowed = any(ln.strip().lstrip("!").rstrip("/*").rstrip("/") == src.rstrip("/")
-                          for ln in di_text.splitlines() if ln.strip().startswith("!"))
-            if di.exists() and not allowed:
-                findings.append(Finding(
-                    "P1", "Bind Mount Source Not In Build Context",
-                    f"Dockerfile:--mount source={src}",
-                    f"The Dockerfile bind-mounts '{src}', but .dockerignore does not "
-                    f"re-admit it. A denied mount source is empty rather than an error, so "
-                    f"an offline install silently falls back to the network or fails with a "
-                    f"cache miss. Add '!{src}' and '!{src}/**' to .dockerignore."))
+    findings.extend(check_project_version(data, ci_file))
 
     # Runtime anchors: .Node:24, .Python:12, .Go, .Java — they own image: and cache.
     _ANCHOR_RE = re.compile(r"^\.(Node|Python|Go|Java)[:0-9]*$")
@@ -566,11 +550,20 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
     return findings, data
 
 
-def library_refs(data: Dict[str, Any]) -> Dict[str, str]:
-    """{library repo name: ref} for every `include: project:` the pipeline pulls in.
+#: Raw-file URLs that carry a repository name and ref: GitHub raw, GitHub /raw/, GitLab /-/raw/.
+_REMOTE_REF = (
+    re.compile(r"^https?://raw\.githubusercontent\.com/[^/]+/(?P<repo>[^/]+)/(?P<ref>[^/]+)/"),
+    re.compile(r"^https?://[^/]+/(?:[^/]+/)*(?P<repo>[^/]+)/-/raw/(?P<ref>[^/]+)/"),
+    re.compile(r"^https?://[^/]+/(?:[^/]+/)*(?P<repo>[^/-][^/]*)/raw/(?P<ref>[^/]+)/"),
+)
 
-    The ref on an include is the consumer's pinned library version. It was parsed and
-    thrown away before, so nothing could tell which migrations the repo still owes.
+
+def library_refs(data: Dict[str, Any]) -> Dict[str, str]:
+    """{library repo name: ref} for every library include the pipeline pulls in.
+
+    The ref on an include is the consumer's pinned library version -- on `include:
+    project:` it is `ref:`, on `include: remote:` it is a path segment of the raw URL.
+    Without it nothing can tell which migrations the repo still owes.
     """
     found: Dict[str, str] = {}
     inc = data.get("include") if isinstance(data, dict) else None
@@ -580,7 +573,96 @@ def library_refs(data: Dict[str, Any]) -> Dict[str, str]:
         project, ref = entry.get("project"), entry.get("ref")
         if isinstance(project, str) and isinstance(ref, str) and ref:
             found.setdefault(project.rstrip("/").split("/")[-1], ref)
+        remote = entry.get("remote")
+        if isinstance(remote, str):
+            for rx in _REMOTE_REF:
+                m = rx.match(remote)
+                if m:
+                    found.setdefault(m.group("repo"), m.group("ref"))
+                    break
     return found
+
+
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+
+
+def _project_version(repo: Path, template: str) -> Tuple[str, str]:
+    """(source file, version) that a `.<Stack>:Project:Version:Init` template reads."""
+    try:
+        if template.startswith(".Node"):
+            pkg = repo / "package.json"
+            return "package.json", str(json.loads(pkg.read_text(encoding="utf-8")).get("version", "")) if pkg.exists() else ""
+        if template.startswith(".Python"):
+            py = repo / "pyproject.toml"
+            m = re.search(r'(?ms)^\[project\].*?^version\s*=\s*["\']([^"\']+)["\']', py.read_text(encoding="utf-8")) if py.exists() else None
+            return "pyproject.toml", m.group(1) if m else ""
+        if template.startswith(".Java"):
+            pom = repo / "pom.xml"
+            if pom.exists():
+                import xml.etree.ElementTree as ET  # noqa: WPS433
+                root = ET.parse(pom).getroot()
+                ns = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
+                el = root.find(f"{ns}version")
+                return "pom.xml", (el.text or "").strip() if el is not None else ""
+    except Exception:
+        return "", ""
+    return "", ""
+
+
+def check_project_version(data: Dict[str, Any], ci_file: Path) -> List[Finding]:
+    """Project:Version:Init copies the project's version into the chart version.
+
+    Helm accepts SemVer only, so a four-part version such as `4.3.1.2` fails every chart
+    job. Drop the job and version the chart on its own when the project does not use SemVer.
+    """
+    job = data.get("Project:Version:Init") if isinstance(data, dict) else None
+    if not isinstance(job, dict) or "script" in job:
+        return []
+    ext = job.get("extends")
+    ext = ext if isinstance(ext, list) else [ext] if isinstance(ext, str) else []
+    template = next((e for e in ext if isinstance(e, str) and e.endswith(":Project:Version:Init")), "")
+    if not template:
+        return []
+    src, version = _project_version(ci_file.parent, template)
+    if not src or not version or _SEMVER.match(version):
+        return []
+    return [Finding(
+        "P1", "Non-SemVer Project Version", f"{ci_file.name}:Project:Version:Init",
+        f"{src} declares version '{version}', which is not SemVer. Project:Version:Init copies it "
+        "into the chart version and Helm rejects it. Remove the job and set the chart version "
+        "directly; do not rewrite the project's own version.")]
+
+
+def check_extends_targets(data: Dict[str, Any], ci_file: Path, library_root: Path,
+                          library_ref: str = "") -> List[Finding]:
+    """Every `extends:` names a template that exists in the pinned library (or locally).
+
+    A template that is not there -- `.Node:20` against a library that ships only
+    `.Node:24`, a mis-cased `.Java:build` -- fails pipeline creation.
+    """
+    if not isinstance(data, dict) or not library_root or not Path(library_root).is_dir():
+        return []
+    known: Set[str] = {k for k in data if isinstance(k, str) and k.startswith(".")}
+    for yml in Path(library_root).rglob("*.yml"):
+        try:
+            for line in yml.read_text(encoding="utf-8", errors="ignore").splitlines():
+                m = re.match(r"^(\.[^\s#][^#]*?):\s*(?:#.*)?$", line)
+                if m:
+                    known.add(m.group(1).strip().strip("'\""))
+        except OSError:
+            continue
+    findings: List[Finding] = []
+    for name, body in data.items():
+        if not isinstance(body, dict):
+            continue
+        ext = body.get("extends")
+        for target in (ext if isinstance(ext, list) else [ext] if isinstance(ext, str) else []):
+            if isinstance(target, str) and target.startswith(".") and target not in known:
+                findings.append(Finding(
+                    "P1", "Unknown extends Target", f"{ci_file.name}:{name}",
+                    f"'{name}' extends '{target}', which neither this file nor gitlab-ci-library"
+                    f"{' ' + library_ref if library_ref else ''} defines. Pipeline creation fails."))
+    return findings
 
 
 def check_job_needs(data: Dict[str, Any], ci_file: Path) -> List[Finding]:

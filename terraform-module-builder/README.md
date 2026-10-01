@@ -13,13 +13,12 @@ copyable requests.
 | `terraform-module update <module_path>` | Target the latest stable provider and make a reviewed, surgical module change. |
 | `terraform-module audit <module_path_or_repo>` | Report findings without editing. |
 
-The reference repository's README defines its module API, naming, security,
-documentation, release, and test standards. Its MIGRATION.md records
-release-specific consumer actions; the Skill's state-migration guide explains
-how to assess a proposed change. Read both at the selected ref, then inspect
-actual modules and tests before treating examples as shipped behavior. The
-current reference repository is AWS-focused; other providers require their
-own schema and contract evidence.
+The reference repository's README documentation index links its module API,
+naming, security, documentation, release, state-migration and test standards;
+its MIGRATION.md records release-specific consumer actions. Read both at the
+selected ref, then inspect actual modules and tests before treating examples
+as shipped behavior. The current reference repository is AWS-focused; other
+providers require their own schema and contract evidence.
 
 ## Local tools
 
@@ -44,11 +43,8 @@ in `scripts/tests/`. From the `ai-skills` repository root, run
 The separate `terraform-modules/tests/verify_modules.py` remains that library's
 native `make verify` entry point so its contract gate works in a standalone clone.
 
-## References
+## Standards
 
-- [Reference repository resolution](./references/reference-repo-link.md)
-- [Provider schema](./references/provider-schema-guide.md)
-- [Naming](./references/naming-standards.md)
-- [Security capabilities](./references/security-capability-matrix.md)
-- [State migration](./references/state-migration-guide.md)
-- [Testing](./references/testing-strategy.md)
+The module contract, provider-schema mapping, naming bounds, security capability statuses,
+state migration, test shapes and the architecture diagram template live in terraform-modules,
+indexed from its README. [SKILL.md](./SKILL.md) says which to read for each task.

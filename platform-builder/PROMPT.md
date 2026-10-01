@@ -9,7 +9,7 @@ for exact inputs, security rules, and migration contracts.
 ### Quick
 
 ```text
-Run platform onboard for <repo>. Detect GitHub Actions or GitLab CI. Inspect docker-compose.yml, compose.yaml, .env, .env.*, Dockerfile, existing charts/Kubernetes manifests, .gitlab-ci.yml, .github/workflows, tests, and application manifests. Harvest ports, commands, mounts, services, config keys, probes, and resources; classify runtime settings as ConfigMap or Secret without printing secret values. Resolve the CI and Helm libraries, use only supported components, omit optional chart resources without evidence, ask about image smoke and chart unit tests, then validate against those same library checkouts. Make local changes only and report library provenance and any unpublished pin.
+Run platform onboard for <repo>. Detect GitHub Actions or GitLab CI. Inspect docker-compose.yml, compose.yaml, .env, .env.*, Dockerfile, existing charts/Kubernetes manifests, .gitlab-ci.yml, .github/workflows, tests, and application manifests. Harvest ports, commands, mounts, services, config keys, probes, and resources; classify runtime settings as ConfigMap or Secret without printing secret values. Resolve the CI and Helm libraries, use only supported components, omit optional chart resources without evidence, suggest partOf/component/subComponent and ask for the image registry, pull secret and repository path when the repository does not state them, ask about image smoke and chart unit tests, then validate against those same library checkouts. Change only platform files in this repository, warn about any AI/agent files instead of committing them, and report library provenance and any unpublished pin.
 ```
 
 ### Full
@@ -34,17 +34,22 @@ Act as a Platform Engineer using the platform-builder skill. Onboard <repo>.
    fixtures by default. Ask about PVC, batch jobs, cronjobs, and metrics only
    when the source evidence does not settle them. Omit persistence:, jobs:,
    cronjobs:, and metrics: for a stateless app without those needs.
-4. Implement: preserve existing runtime behavior. Generate only workflows/jobs
-   the repository can execute. Package the image using the selected CI library
-   contract. For a chart, use the selected helm-tpl-library's values, schema,
-   and tpl entrypoints. Let its main image repository auto-resolve from
-   partOf/component/subComponent when the selected version supports that and
-   image.repository is empty. Use matching tpl.pvc/job/cronjob/servicemonitor
-   entrypoints for each optional feature enabled. Never copy example pins.
+4. Implement: preserve existing runtime behavior and change only platform files
+   in this repository. Generate only workflows/jobs the repository can execute.
+   Package the image following the selected CI library's Dockerfile
+   standards. For a chart,
+   use the selected helm-tpl-library's values, schema, and tpl entrypoints.
+   Suggest partOf, component and subComponent and use the confirmed values; set
+   the registry, pull secret and image repository to what CI pushes (ask when
+   unknown). Use matching tpl.pvc/job/cronjob/servicemonitor entrypoints for
+   each optional feature enabled and leave the others out. Never copy example
+   pins. Leave lockfiles and dependency manifests alone, and warn about AI/agent
+   files rather than committing them.
 5. Verify: run core/scripts/audit.py <repo> --strict with the same --lib sources.
-   Run applicable native CI, Helm lint/template/schema, and test checks. Report
-   the files changed, exact checks/results, unresolved choices, and publishing
-   prerequisites. Do not commit, push, deploy, or release unless requested.
+   Run core/scripts/chart-lint.sh and core/scripts/chart-docs.sh for the chart,
+   and the applicable native CI and test checks. Report the files changed, exact
+   checks/results, unresolved choices, and publishing prerequisites. Do not
+   commit, push, deploy, or release unless requested.
 ```
 
 ## `platform update`

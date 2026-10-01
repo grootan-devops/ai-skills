@@ -23,8 +23,8 @@ Keeping that interface at three names is deliberate. If it grows past a handful,
 abstraction has stopped paying for itself and the platforms should diverge again.
 
 Everything emitted here is deterministic and tagged [engine]. Judgement-based findings
-come from the agent's pass over core/references/security-core.md plus the platform
-addendum, and are tagged [judged]. The two are never blurred: one is a reproducible fact,
+come from the agent's review against the selected libraries' security guides, and are
+tagged [judged]. The two are never blurred: one is a reproducible fact,
 the other a considered opinion the user may overrule.
 """
 
@@ -115,12 +115,24 @@ def run(repo_path: str, platform_name: Optional[str] = None,
     # Shared checks whose REMEDY differs per platform read this; the principle they
     # enforce is universal, the fix they suggest is not.
     common.set_platform(det.platform or "generic")
+    common.set_repo_context(repo)
+
+    if not common.HAVE_YAML:
+        findings.append(Finding(
+            "P1", "PyYAML Missing", "python3",
+            "PyYAML is not installed, so every check that parses CI or chart YAML was skipped. "
+            "Install it (`pip install pyyaml`) and re-run before trusting this report."))
 
     # --- CI checks (platform-specific) -------------------------------------------
     if det.platform:
         adapter = load_adapter(det.platform)
         ci_findings, ci_data = adapter.ci_checks(repo, shape)
         findings += ci_findings
+        extends_check = getattr(adapter, "check_extends_targets", None)
+        if extends_check and ci_data:
+            for r in resolved_libs:
+                if r.name == "gitlab-ci-library" and r.ok and getattr(r, "path", None):
+                    findings += extends_check(ci_data, repo / ".gitlab-ci.yml", Path(r.path), r.ref or "")
     else:
         findings.append(Finding(
             "P1", "Platform unresolved", str(repo),
@@ -167,9 +179,21 @@ def run(repo_path: str, platform_name: Optional[str] = None,
         findings += common.check_dockerfile(df, shape)
         findings += common.check_dockerignore(repo)
     findings += common.check_gitignore(repo, cdir)
-    if (cdir / "Chart.yaml").exists():
+    has_chart = (cdir / "Chart.yaml").exists()
+    findings += common.check_comment_style(repo, cdir if has_chart else None)
+    if has_chart:
         findings += common.check_helm_chart(cdir)
         findings += common.check_helmignore(cdir)
+        findings += common.check_container_overrides(cdir)
+        findings += common.check_chart_runtime(cdir)
+        findings += common.check_secret_placement(cdir)
+        findings += common.check_schema_contract(cdir)
+        findings += common.check_modes(cdir)
+        findings += common.check_optional_blocks(cdir)
+        findings += common.check_values_leaf_docs(cdir)
+        if det.platform == "gitlab":
+            ci_vars = ci_data.get("variables") if isinstance(ci_data, dict) and isinstance(ci_data.get("variables"), dict) else {}
+            findings += common.check_image_path_alignment(repo, cdir, ci_vars)
         # Measured against the tpl-library copy this run actually resolved, so the parity
         # report moves with the library rather than against a frozen expectation.
         for r in resolved_libs:
@@ -225,8 +249,8 @@ def run(repo_path: str, platform_name: Optional[str] = None,
         print("-" * 80)
         print(f"Audit Summary: P0 (Critical): {len(p0)} | P1 (High): {len(p1)} | P2 (Medium): {len(p2)}")
         print("-" * 80)
-        print("NOTE: structural checks only. Run the agent's pass over "
-              "core/references/security-core.md + the platform addendum for [judged] findings.")
+        print("NOTE: structural checks only. Review against the selected libraries' security "
+              "guides for [judged] findings.")
 
     if p0:
         return 2

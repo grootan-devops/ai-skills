@@ -9,8 +9,8 @@ against known-good baselines, so behaviour is unchanged by the extraction. Platf
 mechanics (CI config shape, job wiring, token model) live in platforms/<name>/ci_checks.py.
 
 Severity contract: every Finding produced here is DETERMINISTIC and reproducible, and is
-tagged [engine]. Judgement-based findings are the agent's job -- see
-core/references/security-core.md -- and are tagged [judged]. Never blur the two.
+tagged [engine]. Judgement-based findings are the agent's job -- a review against the
+selected libraries' security guides -- and are tagged [judged]. Never blur the two.
 """
 
 from __future__ import annotations
@@ -80,19 +80,32 @@ def _load_trusted_registries() -> set:
 
 TRUSTED_INTERNAL_REGISTRIES = _load_trusted_registries()
 
+# The repository's own GitLab project registry, derived from its git remote by
+# set_repo_context(). Generic GitLab convention, not org configuration: an image the
+# project pushes to its own registry is not an external dependency.
+_OWN_REGISTRIES: Set[str] = set()
 
-INTERNAL_BASE_VARS = {
-    "PYTHON_312_MICRO_BASE_IMAGE",
-    "JAVA_25_MICRO_BASE_IMAGE",
-    "MICRO_ROOT_BASE_IMAGE",
-    "NODE_JS_24_MICRO_BASE_IMAGE",
-    "NGINX_MICRO_BASE_IMAGE",
-    "TOOLKIT_BUILD_IMAGE",
-    "CI_REGISTRY",
-    "CI_REGISTRY_IMAGE",
-    "IMAGE_REPOSITORY",
-    "CONTAINER_DEV_REGISTRY",
-}
+
+def origin_project(repo: Path) -> Tuple[str, str]:
+    """(host, project path) from the repository's `origin` remote, or ("", "")."""
+    try:
+        import subprocess  # noqa: WPS433
+        out = subprocess.run(["git", "-C", str(repo), "config", "--get", "remote.origin.url"],
+                             capture_output=True, text=True, timeout=5)
+        url = out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        url = ""
+    m = re.match(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?/?$", url)
+    return (m.group(1).lower(), m.group(2)) if m else ("", "")
+
+
+def set_repo_context(repo: Path) -> None:
+    """Trust the repository's own project registry. Called once by the harness."""
+    _OWN_REGISTRIES.clear()
+    host, path = origin_project(repo)
+    if host and path:
+        _OWN_REGISTRIES.update({f"{host}:5050/{path}", f"registry.{host}/{path}", f"{host}/{path}"})
+
 
 
 CI_RESERVED_KEYS = {
@@ -127,7 +140,7 @@ class Finding:
 
     def __str__(self) -> str:
         # Everything this engine emits is deterministic and reproducible. The agent's
-        # own security review (core/references/security-core.md) emits [judged] findings
+        # own security review (the libraries' security guides) emits [judged] findings
         # alongside these; the tags keep the two kinds distinguishable in one report.
         return f"[{self.severity}] [engine] {self.category:<24} {self.location}\n     -> {self.message}"
 
@@ -148,6 +161,10 @@ def classify_unproxied_public_image(image_str: str, known_stages: set = None) ->
     known_stages = known_stages or set()
     img = image_str.strip().strip("'\"")
 
+    # 0. An empty default (`ARG CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX=""`) names no image.
+    if not img:
+        return False, ""
+
     # 1. Scratch or local multi-stage reference (local only, does not pull from internet)
     if img.lower() == "scratch" or img in known_stages:
         return False, ""
@@ -156,15 +173,15 @@ def classify_unproxied_public_image(image_str: str, known_stages: set = None) ->
     if "CI_DEPENDENCY_PROXY" in img:
         return False, ""
 
-    # 3. Enterprise internal base image variables (resolved to ${CI_REGISTRY})
-    if img.startswith("$") or img.startswith("${"):
-        is_trusted_internal_var = any(var in img for var in INTERNAL_BASE_VARS) or ("_MICRO_BASE_IMAGE" in img) or ("_BASE_IMAGE" in img)
-        if is_trusted_internal_var:
-            return False, ""
+    # 3. A variable reference is supplied by CI at build time. Its literal default, where one
+    #    is declared, is checked on the ARG line itself.
+    if img.startswith("$"):
+        return False, ""
 
-    # 4. Check if image explicitly points to trusted internal enterprise registry
-    for trusted in TRUSTED_INTERNAL_REGISTRIES:
-        if img.startswith(trusted + "/") or f"//{trusted}/" in img or img == trusted:
+    # 4. Check if image explicitly points to a trusted registry or the project's own registry
+    for trusted in TRUSTED_INTERNAL_REGISTRIES | _OWN_REGISTRIES:
+        if img == trusted or img.startswith((trusted + "/", trusted + ":", trusted + "@")) \
+                or f"//{trusted}/" in img:
             return False, ""
 
     # 5. All other images pull from the internet (Docker Hub, ghcr.io, quay.io, gcr.io, etc.)
@@ -222,9 +239,8 @@ def _logical_instructions(lines: List[str]):
 # CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX, and `BASE_IMAGE` would match BASE_IMAGE_REPO.
 _BUILD_IMAGE_VAR = re.compile(r"\$\{?\w*(?:_BUILD_IMAGE|_BUILDER_IMAGE|TOOLKIT\w*_IMAGE)\b", re.I)
 _BUILD_STAGE_NAME = re.compile(r"^(build|builder|deps|dependencies|compile|sdk|toolkit)", re.I)
-_PIN_ARG = re.compile(r"^ARG\s+([A-Za-z0-9_]*_(?:VERSION|TAG))\s*=\s*(\S+)", re.I)
-_SHIM_ARGV0 = {"tini", "dumb-init", "catatonit", "gosu", "su-exec",
-               "s6-svscan", "supervisord", "entrypoint", "docker-entrypoint"}
+# Process supervisors that make a sane PID 1: forward signals, reap zombies.
+_INIT_ARGV0 = {"dumb-init", "tini", "catatonit"}
 
 
 def _stages(lines: List[str]):
@@ -265,6 +281,90 @@ def _argv0(instruction: str) -> str:
         except (ValueError, IndexError):
             return ""
     return body.split()[0] if body.split() else ""
+
+
+def _exec_form(instruction: str) -> Optional[List[str]]:
+    """The JSON argv of an exec-form CMD/ENTRYPOINT, or None for shell form."""
+    body = instruction.split(None, 1)[1].strip() if len(instruction.split(None, 1)) > 1 else ""
+    if not body.startswith("["):
+        return None
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return None
+    return [str(p) for p in parsed] if isinstance(parsed, list) else None
+
+
+_VAR_REF = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _image_refs(lines: List[str]) -> List[Tuple[int, str]]:
+    """(line, reference) for every place Docker expects an image: FROM and COPY --from."""
+    out: List[Tuple[int, str]] = []
+    for line_no, ins in _logical_instructions(lines):
+        toks = ins.split()
+        if not toks:
+            continue
+        op = toks[0].upper()
+        if op == "FROM":
+            out.append((line_no, next((t for t in toks[1:] if not t.startswith("--")), "")))
+        elif op == "COPY":
+            out += [(line_no, t[len("--from="):]) for t in toks[1:] if t.startswith("--from=")]
+    return out
+
+
+def _image_position_vars(lines: List[str]) -> Tuple[Set[str], Set[str]]:
+    """(whole, partial): ARGs that ARE an image reference, and ARGs that are only part of one.
+
+    `FROM ${BASE}` makes BASE a whole image. In `FROM ${REGISTRY}/${PROJECT}/base:${TAG}`
+    each ARG is a fragment: its default alone is not an image, the resolved reference is.
+    """
+    whole: Set[str] = set()
+    partial: Set[str] = set()
+    for _, ref in _image_refs(lines):
+        m = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", ref)
+        if m:
+            whole.add(m.group(1))
+        else:
+            partial |= set(_VAR_REF.findall(ref))
+    return whole, partial
+
+
+def _is_image_arg(name: str, image_vars: Tuple[Set[str], Set[str]]) -> bool:
+    whole, partial = image_vars
+    return name in whole or (name not in partial and bool(re.search(r"IMAGE$", name, re.I)))
+
+
+def _ci_build_args(root: Path) -> Set[str]:
+    """ARG names the CI pipeline passes in (gitlab-ci-library `DOCKER_BUILD_ARG_<NAME>`)."""
+    ci = root / ".gitlab-ci.yml"
+    try:
+        text = ci.read_text(encoding="utf-8", errors="ignore") if ci.exists() else ""
+    except OSError:
+        text = ""
+    return set(re.findall(r"DOCKER_BUILD_ARG_([A-Za-z0-9_]+)\s*:", text))
+
+
+# Registries anyone can pull from. Renovate needs a `# renovate:` hint for an image version
+# held in an ARG; private and internal registries are not tracked that way.
+_PUBLIC_REGISTRY_HOSTS = {
+    "docker.io", "index.docker.io", "registry-1.docker.io", "ghcr.io", "gcr.io", "k8s.gcr.io",
+    "registry.k8s.io", "quay.io", "public.ecr.aws", "mcr.microsoft.com", "docker.elastic.co",
+    "nvcr.io", "registry.access.redhat.com", "registry.redhat.io", "cgr.dev",
+}
+
+
+def _is_public_image(ref: str) -> bool:
+    """True when a resolved image reference points at a public registry."""
+    ref = ref.strip().strip("'\"")
+    if not ref or "$" in ref:
+        return False            # unresolved: supplied by CI, registry unknown
+    first = ref.split("/", 1)[0]
+    has_host = "/" in ref and ("." in first or ":" in first or first == "localhost")
+    if not has_host:
+        return True             # Docker Hub shorthand (python:3.12, org/image:tag)
+    host = first.split(":", 1)[0].lower()
+    return host in _PUBLIC_REGISTRY_HOSTS or host.endswith(".gcr.io")
 
 
 def _opaque_block_keys(values_text: str) -> Set[str]:
@@ -311,8 +411,8 @@ def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Fi
     """Consumer application values: top level, ahead of the workload plumbing.
 
     The library declares no key for application configuration, so whatever the app needs
-    is the consumer's to add. Two shapes go wrong on their own (helm-chart-standard
-    §3.0d): wrapping the domain groups in an `app:` envelope, which lengthens every
+    is the consumer's to add. Two shapes go wrong on their own (helm-tpl-library chart
+    standards, *Application values*): wrapping the domain groups in an `app:` envelope, which lengthens every
     reference a deployer types for no gain, and appending them after the library's keys,
     which buries the only section anyone opens the file for behind hundreds of lines of
     plumbing they inherit and never touch.
@@ -346,7 +446,7 @@ def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Fi
                 f"`{key}:` wraps {', '.join(inner[:4])}, so every reference reads "
                 f"`.Values.{key}.{inner[0]}...` instead of `.Values.{inner[0]}...`. "
                 "Lift the domain groups to the top level; the library declares none of "
-                "these names, so nothing collides (helm-chart-standard §3.0d).",
+                "these names, so nothing collides (helm-tpl-library chart standards, Application values).",
             ))
 
     # --- appended after the plumbing instead of ahead of it -----------------
@@ -361,7 +461,7 @@ def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Fi
                 f"{'appears' if len(late) == 1 else 'appear'} after `restartPolicy:`. Application "
                 "configuration is what a deployer edits; the plumbing is inherited. Move "
                 "these above `restartPolicy:` and keep the library's own key order "
-                "otherwise, so the replica still diffs cleanly (helm-chart-standard §3.0d).",
+                "otherwise, so the replica still diffs cleanly (helm-tpl-library chart standards).",
             ))
     return findings
 
@@ -500,7 +600,16 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
 
     has_tpl_metrics = _has_include("tpl.servicemonitor") or _has_include("tpl.podmonitor")
     if not has_tpl_metrics:
-        lib_paths = {p for p in lib_paths if p != "metrics" and not p.startswith("metrics.")}
+        # global.metrics only feeds tpl.servicemonitor/podmonitor, so it goes with them.
+        lib_paths = {
+            p for p in lib_paths
+            if p not in ("metrics", "global.metrics")
+            and not p.startswith(("metrics.", "global.metrics."))
+        }
+
+    # No tpl template reads global.tracing; it documents the app's own OTEL settings, so a
+    # chart keeps it only when the application actually consumes tracing configuration.
+    lib_paths = {p for p in lib_paths if p != "global.tracing" and not p.startswith("global.tracing.")}
 
     consumer_global = consumer.get("global") or {}
     consumer_metrics_global = consumer_global.get("metrics") or {}
@@ -527,6 +636,57 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
             "even when optional and empty, with its comment block and its `### Example`. Copy the "
             "library file and override the values this application needs."
         ))
+    return findings
+
+
+def check_container_overrides(chart_dir: Path) -> List[Finding]:
+    """Charts leave the image's ENTRYPOINT and CMD alone: `command: []`, `args: []`.
+
+    A container `command:` replaces the image ENTRYPOINT, so dumb-init silently stops
+    being PID 1. `args:` replaces CMD, and a `/bin/sh -c "a; b"` chain there hides the
+    process contract in values instead of the image. Both belong in the image: its CMD,
+    or a MODE dispatcher script that `exec`s each branch. Overlays (`values.*.yaml`) and
+    job containers are held to the same rule; cronjobs reuse the root containers.
+    """
+    findings: List[Finding] = []
+    try:
+        import yaml  # noqa: WPS433
+    except ImportError:
+        return findings
+    for vf in sorted(chart_dir.glob("values*.yaml")):
+        try:
+            data = yaml.safe_load(vf.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        groups = [("containers", data.get("containers"), True),
+                  ("initContainers", data.get("initContainers"), False)]
+        jobs = data.get("jobs")
+        if isinstance(jobs, dict):
+            for jname, job in jobs.items():
+                if isinstance(job, dict):
+                    groups.append((f"jobs.{jname}.containers", job.get("containers"), True))
+                    groups.append((f"jobs.{jname}.initContainers", job.get("initContainers"), False))
+        for prefix, cmap, is_workload in groups:
+            if not isinstance(cmap, dict):
+                continue
+            for cname, cont in cmap.items():
+                if not isinstance(cont, dict):
+                    continue
+                where = f"{vf.name}:{prefix}.{cname}"
+                if cont.get("command"):
+                    findings.append(Finding(
+                        "P1" if is_workload else "P2", "Chart Overrides Image Entrypoint", where,
+                        "`command:` replaces the image ENTRYPOINT, so dumb-init is no longer PID 1 "
+                        "and SIGTERM/zombie handling is lost. Keep `command: []` and put the process "
+                        "in the image CMD (or a script it runs that ends with `exec`)."))
+                if cont.get("args"):
+                    findings.append(Finding(
+                        "P1" if is_workload else "P2", "Chart Overrides Image Command", where,
+                        "`args:` replaces the image CMD. Keep `args: []` (tpl-library standard) and move "
+                        "the start sequence into the image: CMD, or a MODE dispatcher script selected "
+                        "by a `mode` value rendered into configmapEnvs."))
     return findings
 
 
@@ -578,6 +738,18 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
     has_copy = False
     proxy_reported: Set[int] = set()
     declared_arg_defaults: Set[str] = set()
+    image_vars = _image_position_vars(lines)
+    ci_args = _ci_build_args(df_file.parent)
+    arg_defaults: Dict[str, str] = {}
+    for _, ins in _logical_instructions(lines):
+        if ins.split() and ins.split()[0].upper() == "ARG":
+            for tok in ins.split()[1:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    arg_defaults.setdefault(k, v.strip().strip("'\""))
+
+    def _resolved(ref: str) -> str:
+        return _VAR_SUB.sub(lambda m: arg_defaults.get(m.group(1) or m.group(2), "$" + (m.group(1) or m.group(2))), ref)
 
     for line_no, line in enumerate(lines, start=1):
         stripped = line.strip()
@@ -591,6 +763,11 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                 if not tok.startswith("--"):
                     image_token = tok
                     break
+            # A reference assembled from ARG fragments is judged whole, once resolved;
+            # a bare `${VAR}` reference is judged on its ARG line instead.
+            if image_token and "$" in image_token and not re.fullmatch(r"\$\{?[A-Za-z_]\w*\}?", image_token):
+                resolved = _resolved(image_token)
+                image_token = resolved if "$" not in resolved else image_token
             if image_token:
                 unproxied, suggested = classify_unproxied_public_image(image_token, known_stages)
                 if unproxied:
@@ -611,6 +788,10 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                     # `ARG YQ_VERSION=4.53.6` is a version pin, not an image.
                     if re.search(r"_(VERSION|TAG)$", var_name.strip(), re.I):
                         continue
+                    # Only an ARG that feeds an image reference names an image;
+                    # `ARG BUILD_TRANSLATIONS="false"` is a build switch.
+                    if not _is_image_arg(var_name.strip(), image_vars):
+                        continue
                     unproxied, suggested = classify_unproxied_public_image(var_val.strip(), known_stages)
                     if unproxied:
                         findings.append(Finding(
@@ -619,15 +800,20 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                         ))
                 else:
                     var_name = token.strip()
+                    # CI passes it (DOCKER_BUILD_ARG_<NAME>), e.g. a prebuilt project base
+                    # image in the project's own registry: a default here would only
+                    # duplicate a value CI owns.
+                    if var_name in ci_args or var_name.endswith("_PREFIX"):
+                        continue
                     if var_name not in declared_arg_defaults and (
                         var_name.endswith("_IMAGE") or "_BASE_IMAGE" in var_name or "_BUILD_IMAGE" in var_name
                     ):
                         suggested_default = ""
                         for known_arg, default_img in [
-                            ("PYTHON_312_MICRO_BASE_IMAGE", "grootantech/python-3-12:latest"),
-                            ("NODE_JS_24_MICRO_BASE_IMAGE", "grootantech/node-js-24:latest"),
-                            ("JAVA_25_MICRO_BASE_IMAGE", "grootantech/java-25:latest"),
-                            ("NGINX_MICRO_BASE_IMAGE", "grootantech/nginx:latest"),
+                            ("PYTHON_312_MICRO_BASE_IMAGE", "grootantech/micro-python-3-12:latest"),
+                            ("NODE_JS_24_MICRO_BASE_IMAGE", "grootantech/micro-node-24:latest"),
+                            ("JAVA_25_MICRO_BASE_IMAGE", "grootantech/micro-java-25:latest"),
+                            ("NGINX_MICRO_BASE_IMAGE", "grootantech/micro-nginx:latest"),
                             ("MICRO_ROOT_BASE_IMAGE", "grootantech/micro-root:latest"),
                             ("TOOLKIT_BUILD_IMAGE", "grootantech/toolkit:latest"),
                         ]:
@@ -778,32 +964,80 @@ def _check_runtime_base(df_file: Path, stages) -> List[Finding]:
         f"a micro base image and COPY --from the builder stage.")]
 
 
-def _check_version_pins(df_file: Path, lines: List[str]) -> List[Finding]:
-    """A literal version pin with no '# renovate:' above it is invisible to the bot.
+_VAR_SUB = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
-    Only ARGs with a literal VALUE are pins. A bare `ARG YQ_VERSION` re-declares a global
-    into a stage -- Docker requires it, and treating it as a pin misreads ~50 lines of a
-    typical multi-stage toolkit image.
+
+def _has_renovate_above(lines: List[str], line_no: int) -> bool:
+    idx = line_no - 2
+    while idx >= 0 and not lines[idx].strip():
+        idx -= 1
+    while idx >= 0 and lines[idx].strip().startswith("#"):
+        if lines[idx].strip().lower().startswith("# renovate:"):
+            return True
+        idx -= 1
+    return False
+
+
+def _check_version_pins(df_file: Path, lines: List[str]) -> List[Finding]:
+    """An image version for a PUBLIC registry, pinned in an ARG, carries `# renovate:`.
+
+    Renovate reads a literal `FROM image:tag` by itself, but a version held in an ARG is
+    invisible to it without the annotation. Only ARGs that feed a FROM / COPY --from which
+    resolves to a public registry (Docker Hub, GHCR, GCR, Quay, ECR Public, ...) are
+    checked: private and internal registries, and ARGs that are not image versions, are not
+    tracked this way. A bare `ARG YQ_VERSION` re-declares a global and is not a pin.
     """
     findings: List[Finding] = []
+    defaults: Dict[str, str] = {}
+    arg_lines: Dict[str, int] = {}
     for line_no, ins in _logical_instructions(lines):
-        m = _PIN_ARG.match(ins)
-        if not m or "$" in m.group(2):
+        toks = ins.split()
+        if toks and toks[0].upper() == "ARG":
+            for tok in toks[1:]:
+                if "=" in tok:
+                    name, val = tok.split("=", 1)
+                    defaults.setdefault(name, val.strip().strip("'\""))
+                    arg_lines.setdefault(name, line_no)
+
+    def resolve(ref: str) -> str:
+        return _VAR_SUB.sub(lambda m: defaults.get(m.group(1) or m.group(2), "$" + (m.group(1) or m.group(2))), ref)
+
+    def is_pin(name: str, val: str) -> bool:
+        if not val or "$" in val:
+            return False
+        if re.search(r"_(VERSION|TAG)$", name, re.I):
+            return val.lower() != "latest"
+        tail = val.rsplit("/", 1)[-1]
+        return "@sha256:" in val or (":" in tail and tail.split(":", 1)[1].lower() != "latest")
+
+    flagged: Set[str] = set()
+    for _line_no, ins in _logical_instructions(lines):
+        toks = ins.split()
+        if not toks:
             continue
-        idx = line_no - 2
-        while idx >= 0 and not lines[idx].strip():
-            idx -= 1
-        annotated = False
-        while idx >= 0 and lines[idx].strip().startswith("#"):
-            if lines[idx].strip().lower().startswith("# renovate:"):
-                annotated = True
-                break
-            idx -= 1
-        if not annotated:
-            findings.append(Finding(
-                "P2", "Unannotated Version Pin", f"{df_file.name}:{line_no}",
-                f"ARG '{m.group(1)}' pins {m.group(2)} with no '# renovate:' annotation on the "
-                f"line above. An unannotated pin is invisible to the bot and rots silently."))
+        refs: List[str] = []
+        if toks[0].upper() == "FROM":
+            refs.append(next((t for t in toks[1:] if not t.startswith("--")), ""))
+        elif toks[0].upper() == "COPY":
+            refs += [t[len("--from="):] for t in toks[1:] if t.startswith("--from=")]
+        for ref in refs:
+            names = [a or b for a, b in _VAR_SUB.findall(ref)]
+            if not names:
+                continue
+            resolved = resolve(ref)
+            if not _is_public_image(resolved):
+                continue
+            for name in names:
+                if name in flagged or name not in defaults or not is_pin(name, defaults[name]):
+                    continue
+                if _has_renovate_above(lines, arg_lines[name]):
+                    continue
+                flagged.add(name)
+                findings.append(Finding(
+                    "P2", "Unannotated Version Pin", f"{df_file.name}:{arg_lines[name]}",
+                    f"ARG '{name}' pins {defaults[name]} for the public image '{resolved}' with no "
+                    f"'# renovate:' annotation on the line above, so the bot cannot see it. "
+                    f"Pins for private registries need no annotation."))
     return findings
 
 
@@ -862,7 +1096,7 @@ def _check_copy_from_tags(df_file: Path, stages) -> List[Finding]:
                 "P1", "Floating Copy Source", f"{df_file.name}:{line_no}",
                 f"COPY --from='{ref}' is {'untagged' if not tag else 'pinned to :latest'}. "
                 f"What it copies in today is not what it copied yesterday. Pin an explicit "
-                f"tag with a '# renovate:' annotation."))
+                f"tag."))
     return findings
 
 
@@ -888,17 +1122,115 @@ def _check_runtime_instructions(df_file: Path, stages, shape: Optional[str]) -> 
             "contract, and the chart's containerPort cannot be checked against anything "
             "without it."))
 
-    if has_expose and "ENTRYPOINT" in ops and "CMD" not in ops:
-        ep = next(i for _, i in runtime[3] if i.split()[0].upper() == "ENTRYPOINT")
-        argv0 = _argv0(ep)
-        base = argv0.rsplit("/", 1)[-1]
-        if argv0 and not (base.endswith((".sh", ".bash", ".py")) or base in _SHIM_ARGV0):
+    # PID 1 has one shape: ENTRYPOINT ["/usr/bin/dumb-init", "--"] and the process -- or a
+    # start script that ends every branch with `exec` -- in CMD. The runtime stage declares
+    # it itself: a base image's ENTRYPOINT is invisible here, and some bases ship a
+    # shell-form one that drops CMD. Keeping the script in CMD (not ENTRYPOINT) means an
+    # override such as `docker run <image> sh` still runs under dumb-init.
+    if has_start:
+        eps = [i for _, i in runtime[3] if i.split()[0].upper() == "ENTRYPOINT"]
+        cmds = [i for _, i in runtime[3] if i.split()[0].upper() == "CMD"]
+        argv = _exec_form(eps[-1]) if eps else None
+        canonical = ["/usr/bin/dumb-init", "--"]
+        where = f"{df_file.name}"
+        if not eps:
             findings.append(Finding(
-                "P2", "Entrypoint Misuse", f"{df_file.name}",
-                f"ENTRYPOINT invokes '{argv0}' directly. ENTRYPOINT is for a pre-start shim; "
-                f"launching the application itself belongs in CMD, which an operator can "
-                f"override without --entrypoint."))
+                "P1", "Missing PID 1 Init", where,
+                "The runtime stage declares no ENTRYPOINT. Declare "
+                "ENTRYPOINT [\"/usr/bin/dumb-init\", \"--\"] and keep the process in CMD: "
+                "dumb-init forwards SIGTERM to the whole process group and reaps zombies, which a "
+                "bare python/java/node PID 1 does not."))
+        elif argv is None:
+            findings.append(Finding(
+                "P1", "Non-Canonical PID 1", where,
+                "ENTRYPOINT is in shell form, which runs under /bin/sh and drops CMD. Use exactly "
+                "ENTRYPOINT [\"/usr/bin/dumb-init\", \"--\"] with the process in CMD."))
+        elif argv != canonical:
+            base = argv[0].rsplit("/", 1)[-1] if argv else ""
+            if base in _INIT_ARGV0:
+                rest = [a for a in argv[1:] if a != "--"]
+                findings.append(Finding(
+                    "P1", "Non-Canonical PID 1", where,
+                    f"ENTRYPOINT is {argv}. Keep it exactly [\"/usr/bin/dumb-init\", \"--\"]"
+                    + (f" and move {rest} into CMD" if rest else "")
+                    + ", so an overridden command still runs under dumb-init."))
+            else:
+                findings.append(Finding(
+                    "P1", "Missing PID 1 Init", where,
+                    f"The runtime stage starts {argv[0] if argv else 'nothing'!r} as PID 1. Declare "
+                    "ENTRYPOINT [\"/usr/bin/dumb-init\", \"--\"] and move the process or start "
+                    "script into CMD; the script ends every branch with `exec`."))
+        elif not cmds:
+            findings.append(Finding(
+                "P1", "Missing CMD", where,
+                "ENTRYPOINT is dumb-init, but no CMD names the process for it to run."))
+        if cmds:
+            findings += _check_start_script(df_file, runtime, cmds[-1])
     return findings
+
+
+def _check_start_script(df_file: Path, runtime, cmd: str) -> List[Finding]:
+    """A start script run from CMD replaces itself with the service: every branch `exec`s.
+
+    Without `exec` the shell stays between dumb-init and the service, and the container's
+    exit code is the shell's. A MODE dispatcher (`case "$MODE" in ...`) needs `exec` (or an
+    `exit`) in each branch, and an unknown mode should exit non-zero.
+    """
+    argv = _exec_form(cmd) or cmd.split()[1:]
+    script = next((a for a in argv if a.endswith((".sh", ".bash"))), "")
+    if not script:
+        return []
+    base = script.rsplit("/", 1)[-1]
+    sources = [
+        df_file.parent / tok
+        for _, ins in runtime[3] if ins.split()[0].upper() in ("COPY", "ADD")
+        for tok in ins.split()[1:-1]
+        if not tok.startswith("--") and tok.rsplit("/", 1)[-1] == base
+    ]
+    path = next((p for p in sources if p.is_file()), None)
+    if not path:
+        return []
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    body = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    where = f"{df_file.name}:CMD {script}"
+    if not any(re.match(r"^exec\s", ln) or " exec " in f" {ln} " for ln in body):
+        return [Finding(
+            "P2", "Start Script Without exec", where,
+            f"'{base}' never uses `exec`, so the shell stays PID 1's child and the service's exit "
+            "code is lost. End the script (every branch of a MODE dispatcher) with `exec <service>`.")]
+    missing: List[str] = []
+    in_case, label, has_exit = False, "", False
+    for ln in body:
+        if re.match(r"^case\b", ln):
+            in_case = True
+            continue
+        if in_case and re.match(r"^esac\b", ln):
+            in_case = False
+            continue
+        if not in_case:
+            continue
+        m = re.match(r"^([^()]+)\)\s*(.*)$", ln)
+        if m and not label:
+            label, rest = m.group(1).strip(), m.group(2)
+            has_exit = bool(re.search(r"\b(exec|exit)\b", rest))
+            if rest.endswith(";;"):
+                if not has_exit:
+                    missing.append(label)
+                label = ""
+            continue
+        if label:
+            if re.search(r"\b(exec|exit)\b", ln):
+                has_exit = True
+            if ln.endswith(";;"):
+                if not has_exit:
+                    missing.append(label)
+                label = ""
+    if missing:
+        return [Finding(
+            "P2", "Start Script Without exec", where,
+            f"'{base}' branch(es) {', '.join(missing)} neither `exec` nor `exit`. Each MODE branch "
+            "ends with `exec <service>`; an unknown mode exits non-zero.")]
+    return []
 
 
 def check_dockerignore(root: Path) -> List[Finding]:
@@ -1075,7 +1407,7 @@ def check_helmignore(chart_dir: Path) -> List[Finding]:
         findings.append(Finding(
             "P2", "Incomplete .helmignore", str(hi_file.name),
             f"Missing baseline entries: {', '.join(missing)}. These end up inside the "
-            f"packaged chart. See helm-chart-standard.md for the full baseline."))
+            f"packaged chart. The baseline is in the helm-tpl-library chart standards, Repository ignore files."))
 
     return findings
 
@@ -1129,9 +1461,9 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
         c_name = name_match.group(1).strip().strip("'\"")
         if c_name.endswith("-service") or c_name == "service":
             findings.append(Finding(
-                "P1", "Chart Name Suffix Violation", str(chart_yaml_file),
-                f"Chart name '{c_name}' uses the forbidden generic suffix '-service'. "
-                "Sub-component must reflect actual functional role: 'backend', 'frontend', 'worker', or 'gateway'."
+                "P2", "Generic Chart Name", str(chart_yaml_file),
+                f"Chart name '{c_name}' ends in the generic '-service'. Suggest a name that says "
+                f"what the workload does and confirm it with the user."
             ))
 
     # Verify manifest.yaml includes tpl.deployment
@@ -1166,38 +1498,32 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
     else:
         val_content = values_yaml_file.read_text(encoding="utf-8")
 
-        # Check subComponent standard (standalone single-component charts can have an empty/null subComponent)
+        # subComponent is optional for a single-mode chart and suggested, never enforced
+        # from a fixed vocabulary; check_modes() requires it where one chart runs several
+        # modes. A generic 'service' only earns a suggestion.
         sub_match = re.search(r"^subComponent:\s*[\"']?([^\"'\n#]*)[\"']?", val_content, re.MULTILINE)
-        if sub_match:
-            sub_val = sub_match.group(1).strip()
-            if sub_val and sub_val not in ["null", "~", '""', "''"]:
-                if sub_val == "service" or "service" in sub_val:
-                    findings.append(Finding(
-                        "P1", "Sub-Component Role Violation", f"{values_yaml_file.name}:subComponent",
-                        f"subComponent cannot be generic 'service' (found '{sub_val}'). "
-                        "Must strictly be one of: 'backend', 'frontend', 'worker', or 'gateway'. "
-                        "Industry naming guidance: use 'backend' for APIs/REST services (e.g. pii-service -> pii-backend), "
-                        "'worker' for background consumers/scrubbers/batch jobs (e.g. pii-masker/pii-scrubber -> pii-worker), "
-                        "'gateway' for edge proxies/BFFs (e.g. auth-gateway -> auth-gateway), and 'frontend' for SPAs/UIs (e.g. admin-portal -> admin-frontend)."
-                    ))
-                elif sub_val not in ["backend", "frontend", "worker", "gateway"]:
-                    findings.append(Finding(
-                        "P1", "Sub-Component Standard", f"{values_yaml_file.name}:subComponent",
-                        f"subComponent '{sub_val}' is invalid. Must strictly be one of: backend, frontend, worker, gateway (or empty for standalone charts). "
-                        "Guidance: use 'backend' for APIs/REST services, 'worker' for async consumers/scrubbers, "
-                        "'gateway' for edge proxies/BFFs, and 'frontend' for SPAs/UIs."
-                    ))
-        else:
+        sub_val = sub_match.group(1).strip() if sub_match else ""
+        if sub_val in ("null", "~", '""', "''"):
+            sub_val = ""
+        if sub_val == "service":
             findings.append(Finding(
-                "P1", "Missing subComponent", str(values_yaml_file),
-                "Missing 'subComponent' in values.yaml. Must strictly be 'backend', 'frontend', 'worker', or 'gateway' (or empty for standalone charts)."
+                "P2", "Generic subComponent", f"{values_yaml_file.name}:subComponent",
+                "subComponent 'service' says nothing about the workload. Suggest the role or mode "
+                "it runs (e.g. 'api', 'worker', 'frontend') and use what the user confirms."
             ))
 
-        # Check global.partOf (Product Name) and releaseNameLength
-        part_of_match = re.search(r"partOf:\s*[\"']?([^\"'\n]+)[\"']?", val_content)
+        # partOf and component are mandatory: suggest values, confirm them with the user.
+        part_of_match = re.search(r"partOf:\s*[\"']?([^\"'\n]*)[\"']?", val_content)
         rel_len_match = re.search(r"releaseNameLength:\s*(\d+)", val_content)
 
-        if part_of_match:
+        if not part_of_match or not part_of_match.group(1).strip():
+            findings.append(Finding(
+                "P1", "Missing partOf", f"{values_yaml_file.name}:global.partOf",
+                "global.partOf (the product name) is required. Suggest one from the repository "
+                "and its sibling charts, confirm it with the user, and set releaseNameLength to "
+                "its length."
+            ))
+        elif part_of_match:
             part_of_val = part_of_match.group(1).strip()
             if not part_of_val or part_of_val in ["myorg", "myproduct", "[PRODUCT_NAME]"]:
                 findings.append(Finding(
@@ -1212,19 +1538,28 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                         f"global.releaseNameLength ({rel_len}) does not match character length of global.partOf '{part_of_val}' ({len(part_of_val)})."
                     ))
 
-        # Check component standard and Chart.yaml naming convention: <productname>-<componentname><-subcomponentname>
-        comp_match = re.search(r"^component:\s*[\"']?([^\"'\n#]+)[\"']?", val_content, re.MULTILINE)
-        comp_val = comp_match.group(1).strip() if comp_match else None
+        comp_match = re.search(r"^component:\s*[\"']?([^\"'\n#]*)[\"']?", val_content, re.MULTILINE)
+        comp_val = comp_match.group(1).strip() if comp_match else ""
+        if not comp_val:
+            findings.append(Finding(
+                "P1", "Missing component", f"{values_yaml_file.name}:component",
+                "component is required. Suggest one (the product area this workload serves), "
+                "confirm it with the user, and use what they say."
+            ))
 
+        # Chart name: '<partOf>-<component>' or '<partOf>-<component>-<subComponent>'. A
+        # suggestion, not a rule -- the user may name the chart differently.
         if name_match and part_of_match and comp_val:
             part_of_val = part_of_match.group(1).strip()
             if part_of_val and part_of_val not in ["myorg", "myproduct", "[PRODUCT_NAME]"]:
-                has_sub = sub_match and sub_val and sub_val not in ["null", "~", '""', "''"]
-                expected_chart_name = f"{part_of_val}-{comp_val}-{sub_val}" if has_sub else f"{part_of_val}-{comp_val}"
-                if c_name != expected_chart_name:
+                accepted = {f"{part_of_val}-{comp_val}"}
+                if sub_val:
+                    accepted.add(f"{part_of_val}-{comp_val}-{sub_val}")
+                if c_name not in accepted:
                     findings.append(Finding(
-                        "P1", "Chart Name Standard Violation", str(chart_yaml_file),
-                        f"Chart name '{c_name}' does not match standard '<productname>-<componentname><-subcomponentname>' (expected '{expected_chart_name}')."
+                        "P2", "Chart Name Suggestion", str(chart_yaml_file),
+                        f"Chart name '{c_name}' is neither {' nor '.join(sorted(accepted))}. Suggest one "
+                        f"of those and keep whatever the user confirms."
                     ))
 
         # Check image repository formatting
@@ -1232,38 +1567,24 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             findings.append(Finding(
                 "P1", "Generic Image Repository", str(values_yaml_file),
                 "Image repository contains generic placeholder ('myorg/' or '[PRODUCT_NAME]'). "
-                "Leave the main image repository empty for library auto-resolution, or set a real explicit image path."
+                "Set the repository CI pushes to (ask the user if unknown)."
             ))
 
-        # Check cross-service sibling URL override pattern
-        if 'include "tpl.resource.siblingName"' in val_content:
-            sibling_invocations = re.findall(r'(\w+):\s*[\'"][^\'"]*include "tpl.resource.siblingName"[^\'"]*[\'"]', val_content)
-            for sib_line in sibling_invocations:
-                if ".internalUrl" not in sib_line and "default" not in sib_line:
-                    findings.append(Finding(
-                        "P1", "Cross-Service Override Law Violation", str(values_yaml_file),
-                        "Cross-service sibling URLs must follow the Override-First Law: "
-                        "'{{ tpl .Values.<service>.internalUrl $ | default (printf \"http://%s:8080\" (include \"tpl.resource.siblingName\" ...)) }}'."
-                    ))
-                    break
-
-        # Cleartext credentials in configmapEnvs.
-        #
-        # Deliberately narrow: this matches KEY NAMES only, which catches the obvious
-        # `PASSWORD: hunter2` and nothing else. It cannot see a credential embedded in a
-        # value -- `DATABASE_URL: postgres://svc:pw@host` has an innocuous key -- nor can
-        # it tell a real secret from `API_KEY: ""`. Classifying by value is judgement work
-        # and belongs to the agent's pass over core/references/security-core.md section 1.
-        # Do not grow this list; a longer regex only adds noise.
-        cm_match = re.search(r"configmapEnvs:\s*\|(.*?)(?=\n\s*[a-zA-Z0-9_-]+:|$)", val_content, re.DOTALL)
-        if cm_match:
-            cm_block = cm_match.group(1)
-            for token_pattern in [r"PASSWORD\s*:", r"SECRET\s*:", r"TOKEN\s*:", r"API_KEY\s*:"]:
-                if re.search(token_pattern, cm_block, re.IGNORECASE):
-                    findings.append(Finding(
-                        "P0", "Secret Leak in ConfigMap", f"{values_yaml_file.name}:configmapEnvs",
-                        f"Sensitive credentials found in configmapEnvs ({token_pattern.strip(r':\s*')}). Must be placed in secretEnvs!"
-                    ))
+        # A sibling-service URL stays overridable per environment: the templated default
+        # sits behind `.Values.<service>.internalUrl`. Only URL-like keys are judged; a
+        # sibling name used for something else (a PVC claimName) is not a URL.
+        for raw_line in val_content.splitlines():
+            if 'include "tpl.resource.siblingName"' not in raw_line or raw_line.strip().startswith("#"):
+                continue
+            key = raw_line.split(":", 1)[0].strip().strip("-").strip()
+            if re.search(r"(url|uri|host|endpoint|addr|server)", key, re.I) and "internalUrl" not in raw_line:
+                findings.append(Finding(
+                    "P1", "Cross-Service Override Law Violation", f"{values_yaml_file.name}:{key}",
+                    "Cross-service sibling URLs follow the Override-First Law: "
+                    "'{{ tpl .Values.<service>.internalUrl $ | default (printf \"http://%s\" "
+                    "(include \"tpl.resource.siblingName\" ...)) }}'."
+                ))
+                break
 
         # Check for database grouping
         if "DATABASE_" in val_content or "POSTGRES_" in val_content:
@@ -1351,67 +1672,695 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
         except Exception:
             pass
 
-    # Check README.md exists and is updated via helm-docs
+    # Check README.md exists and matches what helm-docs generates now
     readme_file = chart_dir / "README.md"
     if not readme_file.exists():
         findings.append(Finding(
             "P1", "Missing chart/README.md", str(readme_file),
-            "chart/README.md is missing. Run 'helm-docs -c chart --template-files \"README.gotmpl\" --sort-values-order file --document-dependency-values' to generate documentation."
+            f"chart/README.md is missing. Generate it inside chart/: `{HELM_DOCS_COMMAND}` "
+            "(core/scripts/chart-docs.sh runs exactly that)."
         ))
-    elif values_yaml_file.exists():
-        v_mtime = values_yaml_file.stat().st_mtime
-        r_mtime = readme_file.stat().st_mtime
-        if v_mtime > r_mtime + 2.0:
-            findings.append(Finding(
-                "P2", "Outdated chart/README.md (helm-docs drift)", str(readme_file),
-                "chart/values.yaml has been modified more recently than chart/README.md. "
-                "Whenever values.yaml changes, chart/README.md must be updated via helm-docs: "
-                "'helm-docs -c chart --template-files \"README.gotmpl\" --sort-values-order file --document-dependency-values'."
-            ))
+    else:
+        findings += _check_readme_drift(chart_dir, readme_file)
 
     return findings
 
 
+#: The one helm-docs invocation, run inside the chart directory. Plain `helm-docs` renders a
+#: different README (other ordering, no dependency values), which is how hand edits start.
+HELM_DOCS_COMMAND = ("helm-docs --template-files README.gotmpl --sort-values-order file "
+                     "--document-dependency-values")
+
+
+def _check_readme_drift(chart_dir: Path, readme_file: Path) -> List[Finding]:
+    """Regenerate the README in memory and compare, instead of trusting file timestamps.
+
+    Needs `helm-docs` on PATH; without it drift cannot be proven, so nothing is reported.
+    """
+    import shutil  # noqa: WPS433
+    import subprocess  # noqa: WPS433
+    if not shutil.which("helm-docs") or not (chart_dir / "README.gotmpl").exists():
+        return []
+    try:
+        out = subprocess.run(
+            ["helm-docs", "--chart-search-root", ".", "--template-files", "README.gotmpl",
+             "--sort-values-order", "file", "--document-dependency-values", "--dry-run"],
+            cwd=str(chart_dir), capture_output=True, text=True, timeout=60)
+    except Exception:
+        return []
+    if out.returncode != 0 or not out.stdout.strip():
+        return []
+    generated = out.stdout.strip()
+    current = readme_file.read_text(encoding="utf-8").strip()
+    if generated == current:
+        return []
+    return [Finding(
+        "P2", "Outdated chart/README.md (helm-docs drift)", str(readme_file),
+        f"chart/README.md differs from what helm-docs generates now. Regenerate it inside chart/ "
+        f"with `{HELM_DOCS_COMMAND}` (core/scripts/chart-docs.sh); never edit README.md by hand."
+    )]
+
+
+#: AI/agent tooling that must never reach a commit. Matched on any path segment, so nested
+#: copies (`services/api/CLAUDE.md`) count too.
+_AI_TOOLING_DIRS = {".claude", ".agents", ".codex", ".gemini", ".cursor", ".windsurf", ".aider"}
+_AI_TOOLING_FILES = {"AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md", "GPT.md",
+                     "skills-lock.json", ".cursorrules", ".windsurfrules", ".aider.conf.yml"}
+
+
+def _git_paths(root: Path, *args: str) -> List[str]:
+    try:
+        import subprocess  # noqa: WPS433
+        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=20)
+        return [ln for ln in out.stdout.splitlines() if ln] if out.returncode == 0 else []
+    except Exception:
+        return []
+
+
+def _ai_tooling(paths: List[str]) -> List[str]:
+    hits: Set[str] = set()
+    for p in paths:
+        parts = p.split("/")
+        for i, part in enumerate(parts):
+            if part in _AI_TOOLING_DIRS:
+                hits.add("/".join(parts[:i + 1]) + "/")
+                break
+        else:
+            if parts[-1] in _AI_TOOLING_FILES:
+                hits.add(p)
+    return sorted(hits)
+
+
 def check_project_hygiene(root: Path) -> List[Finding]:
+    """Repository hygiene that is not about any one artefact.
+
+    AI/agent tooling is reported, never removed: the user decides whether it is deleted.
+    Dependency manifests and lockfiles are deliberately not judged here -- dependency
+    management is outside this Skill.
+    """
     findings: List[Finding] = []
-    # Python projects must exclusively use pyproject.toml with uv.
-    # Legacy requirements*.txt files are strictly forbidden (P0 Critical violation).
-    raw_req_files = list(root.glob("requirements*.txt")) + list(root.glob("requirements/*.txt")) + list(root.glob("*requirements*.txt"))
-    # Filter out ignore directories like .venv, venv, .agents, .git, etc.
-    req_files = sorted(list(set(
-        f for f in raw_req_files
-        if not any(part.startswith(".") or part in ["venv", ".venv", "node_modules"] for part in f.parts)
-    )))
-    is_python = (root / "pyproject.toml").exists() or bool(req_files)
-    if is_python and req_files:
-        for rf in req_files:
-            try:
-                rel = str(rf.relative_to(root))
-            except Exception:
-                rel = str(rf)
+    tracked = _ai_tooling(_git_paths(root, "ls-files"))
+    if tracked:
+        findings.append(Finding(
+            "P2", "AI/Agent Files Tracked", str(root.name),
+            f"Committed AI/agent tooling: {', '.join(tracked[:10])}"
+            f"{' (+more)' if len(tracked) > 10 else ''}. These must not be committed. Ask the "
+            "user whether to delete them; do not delete or commit anything without that answer."))
+    untracked = _ai_tooling(_git_paths(root, "ls-files", "--others", "--exclude-standard"))
+    if untracked:
+        findings.append(Finding(
+            "P2", "AI/Agent Files Present", str(root.name),
+            f"Uncommitted AI/agent tooling in the working tree: {', '.join(untracked[:10])}. Never "
+            "stage these; ask the user whether to delete them."))
+    findings += check_changelog(root)
+    return findings
+
+
+def check_changelog(root: Path) -> List[Finding]:
+    """The changelog's first line is its H1 (markdownlint MD041, which Changelog:Lint runs).
+
+    A licence or HTML comment above the heading fails the lint; move it below the H1.
+    """
+    cl = root / "CHANGELOG.md"
+    if not cl.exists():
+        return []
+    first = next((ln for ln in cl.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()), "")
+    if first.startswith("# "):
+        return []
+    return [Finding(
+        "P2", "Changelog Not Starting With H1", "CHANGELOG.md:1",
+        f"CHANGELOG.md starts with '{first[:40]}' instead of its '# ' heading, so markdownlint "
+        "MD041 fails. Move any licence or comment block below the H1.")]
+
+
+# ---------------------------------------------------------------------------
+# Chart runtime contract -- checks learned from charts that rendered but did not run.
+# ---------------------------------------------------------------------------
+
+def _load_yaml(path: Path) -> Any:
+    if not HAVE_YAML or not path.exists():
+        return None
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _merge_values(base: Any, over: Any) -> Any:
+    """Helm's values merge: maps merge, anything else replaces, null deletes the key."""
+    if not isinstance(base, dict) or not isinstance(over, dict):
+        return over
+    out = dict(base)
+    for key, val in over.items():
+        if val is None:
+            out.pop(key, None)
+        elif isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge_values(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
+def _overlay_files(chart_dir: Path) -> List[Path]:
+    """Per-release overlays: values.<release>.yaml (and the values-<release>.yaml variant)."""
+    found = set(chart_dir.glob("values.*.yaml")) | set(chart_dir.glob("values-*.yaml"))
+    return sorted(p for p in found if p.name != "values.yaml")
+
+
+def _variants(chart_dir: Path) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
+    """(file name, effective values, raw overlay) for values.yaml and every overlay."""
+    base = _load_yaml(chart_dir / "values.yaml")
+    if not isinstance(base, dict):
+        return []
+    out = [("values.yaml", base, base)]
+    for ov in _overlay_files(chart_dir):
+        raw = _load_yaml(ov)
+        if isinstance(raw, dict):
+            out.append((ov.name, _merge_values(base, raw), raw))
+    return out
+
+
+def _manifest_includes(chart_dir: Path) -> Set[str]:
+    tdir = chart_dir / "templates"
+    texts = [p.read_text(encoding="utf-8", errors="ignore")
+             for p in (list(tdir.glob("*.yaml")) + list(tdir.glob("*.tpl")) if tdir.is_dir() else [])]
+    return {m for t in texts for m in re.findall(r'include\s+["\'](tpl\.[\w.]+)["\']', t)}
+
+
+def check_chart_runtime(chart_dir: Path) -> List[Finding]:
+    """Ports, probes, mounts and pod security that break a chart only once it runs.
+
+    tpl-library derives a container's ports from `service.*.spec.ports`, so an empty port
+    list leaves routes and named-port probes pointing at nothing. It skips an emptyDir
+    without `enabled: true`. An empty pod securityContext fails chart scanning.
+    """
+    findings: List[Finding] = []
+    seen: Set[Tuple[str, str]] = set()
+
+    def add(sev: str, cat: str, loc: str, msg: str) -> None:
+        if (cat, loc) not in seen:
+            seen.add((cat, loc))
+            findings.append(Finding(sev, cat, loc, msg))
+
+    for name, vals, raw in _variants(chart_dir):
+        service = vals.get("service")
+        routes = vals.get("routes") if isinstance(vals.get("routes"), dict) else {}
+        enabled_routes = {k: r for k, r in routes.items()
+                          if isinstance(r, dict) and r.get("enabled", True) is not False}
+        port_names: Set[str] = set()
+        if isinstance(service, dict):
+            for svc in service.values():
+                spec = svc.get("spec") if isinstance(svc, dict) else None
+                for p in (spec or {}).get("ports") or []:
+                    if isinstance(p, dict) and p.get("name"):
+                        port_names.add(str(p["name"]))
+        if isinstance(service, dict) and enabled_routes and not port_names:
+            add("P1", "Service Without Ports", f"{name}:service",
+                "Routes are enabled but no `service.*.spec.ports` entry is declared. tpl-library "
+                "derives the container ports from these, so the route (and any probe on a named "
+                "port) has nothing to reach. Declare the port, e.g. `name: http`.")
+        for rkey, route in enabled_routes.items():
+            for path in route.get("paths") or []:
+                port = path.get("port") if isinstance(path, dict) else None
+                if isinstance(port, str) and not port.isdigit() and port not in port_names:
+                    add("P1", "Route Port Not Declared", f"{name}:routes.{rkey}",
+                        f"Route path uses port '{port}', which no `service.*.spec.ports` entry names.")
+
+        containers = vals.get("containers") if isinstance(vals.get("containers"), dict) else {}
+        for cname, cont in containers.items():
+            probes = cont.get("probes") if isinstance(cont, dict) else None
+            if not isinstance(probes, dict) or probes.get("enabled", True) is False:
+                continue
+            for kind in ("readiness", "liveness", "startup"):
+                probe = probes.get(kind)
+                if not isinstance(probe, dict):
+                    continue
+                for handler in ("httpGet", "tcpSocket", "grpc"):
+                    h = probe.get(handler)
+                    port = h.get("port") if isinstance(h, dict) else None
+                    if isinstance(port, str) and not port.isdigit() and port not in port_names:
+                        add("P1", "Probe Port Not Declared", f"{name}:containers.{cname}.probes.{kind}",
+                            f"The {kind} probe targets port '{port}', which no `service.*.spec.ports` "
+                            "entry names, so the container never exposes it.")
+                if raw.get("service", "absent") is None and isinstance(probe.get("httpGet"), dict):
+                    add("P2", "HTTP Probe Without Service", f"{name}:containers.{cname}.probes.{kind}",
+                        "This release sets `service: ~` (no HTTP port) but keeps an httpGet probe. "
+                        "Use an exec probe (or disable probes) for a non-HTTP process.")
+
+        if raw.get("service", "absent") is None and enabled_routes:
+            add("P2", "Routes On Release Without Service", f"{name}:routes",
+                "This release sets `service: ~` but its routes are still enabled. Set "
+                "`routes.default.enabled: false` for a non-HTTP process.")
+
+        # Reported where the value is written: values.yaml, or an overlay that sets it.
+        own = raw if name != "values.yaml" else vals
+        pod = own.get("pod") if isinstance(own.get("pod"), dict) else {}
+        if "securityContext" in pod and not pod.get("securityContext"):
+            add("P1", "Empty Pod securityContext", f"{name}:pod.securityContext",
+                "pod.securityContext is empty, which chart scanning rejects (e.g. KSV-0118). Keep "
+                "the library's non-root defaults (runAsUser/runAsGroup/fsGroup 10001, runAsNonRoot, "
+                "seccompProfile RuntimeDefault).")
+
+        mounts = own.get("mounts") if isinstance(own.get("mounts"), dict) else {}
+        for mname, m in (mounts.get("emptyDir") or {}).items():
+            if isinstance(m, dict) and m.get("enabled") is not True:
+                add("P1", "emptyDir Not Enabled", f"{name}:mounts.emptyDir.{mname}",
+                    "tpl-library mounts an emptyDir only when `enabled: true` is set; without it the "
+                    "path silently stays unwritable.")
+        persistence = vals.get("persistence") if isinstance(vals.get("persistence"), dict) else {}
+        for mname, m in (mounts.get("pvc") or {}).items():
+            claim = m.get("claimName") if isinstance(m, dict) else None
+            if isinstance(claim, str) and claim and "{{" not in claim and mname in persistence:
+                add("P2", "Hard-coded PVC Claim", f"{name}:mounts.pvc.{mname}.claimName",
+                    f"claimName '{claim}' is a literal, but tpl.pvc names the claim it creates from "
+                    "the release and component. Derive it with tpl.resource.siblingName (or leave "
+                    "it empty) so every release mounts the claim that actually exists.")
+    return findings
+
+
+# The credential word must END the values path: `.Values.auth.password` is a credential,
+# `.Values.auth.token.expiresIn` is configuration about one.
+_CRED_REF = re.compile(
+    r"\.Values\.[\w.]*\b(password|passwd|secret|secretKey|token|apiKey|api_key|clientSecret|"
+    r"privateKey|encryptionKey|credentials?)\b(?![\w.])", re.I)
+_CRED_KEY = re.compile(r"(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)\s*$", re.I)
+
+
+def _container_groups(data: Dict[str, Any]):
+    """(prefix, containers map) for workload, init, job and cronjob containers."""
+    yield "containers", data.get("containers")
+    yield "initContainers", data.get("initContainers")
+    for block in ("jobs", "cronjobs"):
+        items = data.get(block)
+        if isinstance(items, dict):
+            for jname, job in items.items():
+                if isinstance(job, dict):
+                    yield f"{block}.{jname}.containers", job.get("containers")
+                    yield f"{block}.{jname}.initContainers", job.get("initContainers")
+
+
+def check_secret_placement(chart_dir: Path) -> List[Finding]:
+    """Credentials live in `secretEnvs` -- never in configmapEnvs, `env` values or `args`.
+
+    Applies to every container, init container, job and cronjob, in values.yaml and every
+    overlay. Matches credential-named keys and templated references to credential values
+    (`{{ .Values.x.auth.password }}` inside a ConfigMap is still a password in a ConfigMap).
+    """
+    findings: List[Finding] = []
+    files = [chart_dir / "values.yaml"] + _overlay_files(chart_dir)
+    for vf in files:
+        data = _load_yaml(vf)
+        if not isinstance(data, dict):
+            continue
+        for prefix, cmap in _container_groups(data):
+            if not isinstance(cmap, dict):
+                continue
+            for cname, cont in cmap.items():
+                if not isinstance(cont, dict):
+                    continue
+                where = f"{vf.name}:{prefix}.{cname}"
+                cm = cont.get("configmapEnvs")
+                cm_text = cm if isinstance(cm, str) else (yaml.safe_dump(cm) if HAVE_YAML and isinstance(cm, dict) else "")
+                for line in (cm_text or "").splitlines():
+                    if not line.strip() or line.strip().startswith("#") or ":" not in line:
+                        continue
+                    key = line.split(":", 1)[0].strip()
+                    if _CRED_KEY.search(key) or _CRED_REF.search(line):
+                        findings.append(Finding(
+                            "P0", "Secret Leak in ConfigMap", f"{where}.configmapEnvs",
+                            f"'{key}' carries a credential in configmapEnvs. Move it to secretEnvs."))
+                        break
+                for env in cont.get("env") or []:
+                    if isinstance(env, dict) and isinstance(env.get("value"), str) and _CRED_REF.search(env["value"]):
+                        findings.append(Finding(
+                            "P0", "Secret Leak in Container Env", f"{where}.env",
+                            f"env '{env.get('name')}' renders a credential as a plain value. Move it to secretEnvs."))
+                        break
+                for arg in cont.get("args") or []:
+                    if isinstance(arg, str) and _CRED_REF.search(arg):
+                        findings.append(Finding(
+                            "P0", "Secret Leak in Container Args", f"{where}.args",
+                            "A credential is passed on the command line, visible in the pod spec. "
+                            "Move it to secretEnvs and read it from the environment."))
+                        break
+    return findings
+
+
+def _schema_node(schema: Dict[str, Any], path: List[str]) -> Optional[Dict[str, Any]]:
+    """Walk a JSON schema along a values path, following local $refs."""
+    def deref(node: Any) -> Any:
+        seen = 0
+        while isinstance(node, dict) and isinstance(node.get("$ref"), str) and node["$ref"].startswith("#/") and seen < 10:
+            cur: Any = schema
+            for part in node["$ref"][2:].split("/"):
+                cur = cur.get(part) if isinstance(cur, dict) else None
+            node, seen = cur, seen + 1
+        return node
+
+    node = deref(schema)
+    for part in path:
+        if not isinstance(node, dict):
+            return None
+        props = node.get("properties") or {}
+        if part in props:
+            node = deref(props[part])
+            continue
+        pattern = next((v for k, v in (node.get("patternProperties") or {}).items() if re.match(k, part)), None)
+        if pattern is not None:
+            node = deref(pattern)
+            continue
+        extra = node.get("additionalProperties")
+        node = deref(extra) if isinstance(extra, dict) else None
+    return node if isinstance(node, dict) else None
+
+
+def check_schema_contract(chart_dir: Path) -> List[Finding]:
+    """values.schema.json must accept the chart's own values.
+
+    `helm lint --strict -f values.yaml` runs on the defaults alone, so a `minLength` on a
+    key whose default is "" (say, an image repository the library derives) fails every
+    pipeline. Mode/subComponent enums list the real modes -- no empty value -- and every
+    value values.yaml or an overlay sets.
+    """
+    findings: List[Finding] = []
+    schema_file = chart_dir / "values.schema.json"
+    if not schema_file.exists():
+        return findings
+    try:
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
+    except ValueError:
+        return findings
+    variants = _variants(chart_dir)
+    if not variants:
+        return findings
+    base = variants[0][1]
+
+    def leaves(node: Any, prefix: List[str]):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from leaves(v, prefix + [str(k)])
+        else:
+            yield prefix, node
+
+    for path, val in leaves(base, []):
+        if val != "":
+            continue
+        node = _schema_node(schema, path)
+        if node and isinstance(node.get("minLength"), int) and node["minLength"] > 0:
             findings.append(Finding(
-                "P0", "Legacy Python Requirements File", rel,
-                f"Python projects must exclusively use 'pyproject.toml' with 'uv'. Legacy requirements file '{rf.name}' is strictly forbidden and must be converted to pyproject.toml and removed."
-            ))
+                "P1", "Schema Rejects Default Value", f"values.schema.json:{'.'.join(path)}",
+                f"'{'.'.join(path)}' defaults to \"\" in values.yaml but the schema sets minLength "
+                f"{node['minLength']}, so `helm lint --strict` fails on the chart's own defaults. "
+                "Drop the minLength (the library fills an empty value) or give it a real default."))
 
-    # Check pyproject.toml indentation hygiene
-    pyproject_file = root / "pyproject.toml"
-    if pyproject_file.exists():
-        try:
-            content = pyproject_file.read_text(encoding="utf-8")
-            for section in ["dependencies", "dev"]:
-                m = re.search(rf'{section}\s*=\s*\[(.*?)\]', content, re.DOTALL)
-                if m:
-                    for line in m.group(1).splitlines():
-                        stripped = line.strip()
-                        if stripped and not stripped.startswith("#"):
-                            if not line.startswith("    "):
-                                findings.append(Finding(
-                                    "P2", "pyproject.toml Indentation", "pyproject.toml",
-                                    f"Array entry '{stripped}' in '{section}' is not properly indented with 4 spaces. Ensure 4-space indentation."
-                                ))
-                                break
-        except Exception:
-            pass
+    for key in ("mode", "subComponent"):
+        node = _schema_node(schema, [key])
+        enum = node.get("enum") if node else None
+        if not isinstance(enum, list):
+            continue
+        if "" in enum:
+            findings.append(Finding(
+                "P2", "Empty Enum Value", f"values.schema.json:{key}",
+                f"The `{key}` enum allows \"\". List only the real modes and default values.yaml to "
+                "the primary one."))
+        for fname, vals, raw in variants:
+            val = raw.get(key) if fname != "values.yaml" else vals.get(key)
+            if val is not None and val not in enum:
+                findings.append(Finding(
+                    "P1", "Value Not In Schema Enum", f"{fname}:{key}",
+                    f"{fname} sets {key} '{val}', which values.schema.json does not list "
+                    f"({enum}). Helm (and any GitOps sync) rejects the release."))
+    return findings
 
+
+def check_modes(chart_dir: Path) -> List[Finding]:
+    """One chart, several modes: every mode runs as its own subComponent.
+
+    subComponent is optional for a single-mode chart. Once overlays run different modes
+    (API + worker, queue + worker), releases that share a subComponent render identical
+    resource names, so each mode needs its own.
+    """
+    findings: List[Finding] = []
+    variants = _variants(chart_dir)
+    if len(variants) < 2:
+        return findings
+    rows = [(f, str(v.get("mode") or ""), str(v.get("component") or ""), str(v.get("subComponent") or ""))
+            for f, v, _ in variants]
+    modes = {m for _, m, _, _ in rows if m}
+    if len(modes) < 2:
+        return findings
+    by_name: Dict[Tuple[str, str], Set[str]] = {}
+    for fname, mode, comp, sub in rows:
+        if not mode:
+            continue
+        if not sub:
+            findings.append(Finding(
+                "P1", "Missing subComponent For Mode", f"{fname}:subComponent",
+                f"This chart runs several modes ({', '.join(sorted(modes))}); {fname} runs "
+                f"'{mode}' without a subComponent. Suggest one per mode (e.g. the mode name), "
+                "confirm it with the user."))
+        else:
+            by_name.setdefault((comp, sub), set()).add(mode)
+    for (comp, sub), name_modes in by_name.items():
+        if len(name_modes) > 1:
+            findings.append(Finding(
+                "P1", "Duplicate subComponent Across Modes", "values*.yaml:subComponent",
+                f"Modes {', '.join(sorted(name_modes))} all run as '{comp}-{sub}', so their releases "
+                "render the same resource names. Give each mode its own subComponent."))
+    return findings
+
+
+_OPTIONAL_BLOCKS = (
+    ("jobs", ("tpl.job",)),
+    ("cronjobs", ("tpl.cronjob",)),
+    ("persistence", ("tpl.pvc",)),
+    ("metrics", ("tpl.servicemonitor", "tpl.podmonitor")),
+    ("global.metrics", ("tpl.servicemonitor", "tpl.podmonitor")),
+)
+
+
+def check_optional_blocks(chart_dir: Path) -> List[Finding]:
+    """jobs, cronjobs, persistence and metrics exist only where the service uses them.
+
+    Each is paired with its tpl entrypoint. A block with no entrypoint renders nothing and
+    documents a feature the chart does not have; drop it from values.yaml and the schema.
+    (global.tracing is judged by whether the application reads it, which no file shows.)
+    """
+    findings: List[Finding] = []
+    values = _load_yaml(chart_dir / "values.yaml")
+    if not isinstance(values, dict):
+        return findings
+    includes = _manifest_includes(chart_dir)
+    schema: Dict[str, Any] = {}
+    try:
+        schema = json.loads((chart_dir / "values.schema.json").read_text(encoding="utf-8"))
+    except Exception:
+        schema = {}
+    for block, helpers in _OPTIONAL_BLOCKS:
+        if any(h in includes for h in helpers):
+            continue
+        parts = block.split(".")
+        cur: Any = values
+        for p in parts:
+            cur = cur.get(p, "absent") if isinstance(cur, dict) else "absent"
+        in_values = cur != "absent"
+        in_schema = _schema_node(schema, parts) is not None if schema else False
+        if in_values or in_schema:
+            where = ", ".join(w for w, on in (("values.yaml", in_values), ("values.schema.json", in_schema)) if on)
+            findings.append(Finding(
+                "P2", "Unused Optional Block", f"{chart_dir.name}:{block}",
+                f"`{block}` is in {where}, but no template includes {' or '.join(helpers)}. Optional "
+                "features are added only when the service uses them; remove the block and its "
+                "schema property."))
+    return findings
+
+
+def check_values_leaf_docs(chart_dir: Path) -> List[Finding]:
+    """Under jobs/cronjobs/persistence every leaf carries its own `# --` line.
+
+    helm-docs gives each documented leaf a README row. A `# --` on a parent map instead
+    collapses the whole object into one JSON-blob row -- unless that parent is marked
+    `# @default -- Check values.yaml` (rendered as one opaque value on purpose).
+    """
+    vf = chart_dir / "values.yaml"
+    if not vf.exists():
+        return []
+    lines = vf.read_text(encoding="utf-8").splitlines()
+    key_re = re.compile(r"^(\s*)([A-Za-z0-9_.\-]+):(.*)$")
+    entries = []  # (line_idx, indent, key, has_inline_value, comment_block)
+    comment: List[str] = []
+    scalar_indent: Optional[int] = None   # inside a `key: |` block scalar
+    list_indent: Optional[int] = None     # inside the items of a block list
+    for idx, raw in enumerate(lines):
+        s = raw.strip()
+        indent_now = len(raw) - len(raw.lstrip())
+        if scalar_indent is not None:
+            if not s or indent_now > scalar_indent:
+                continue
+            scalar_indent = None
+        if s.startswith("- "):
+            list_indent = indent_now if list_indent is None else min(list_indent, indent_now)
+            comment = []
+            continue
+        if list_indent is not None and s and not s.startswith("#"):
+            if indent_now > list_indent:
+                continue
+            list_indent = None
+        if s.startswith("#"):
+            comment.append(s)
+            continue
+        if not s:
+            comment = []
+            continue
+        m = key_re.match(raw)
+        if m and not s.startswith("- "):
+            entries.append((idx, len(m.group(1)), m.group(2), bool(m.group(3).strip()), comment))
+            if re.match(r"^\s*[|>][-+]?\d*\s*(#.*)?$", m.group(3)):
+                scalar_indent = len(m.group(1))
+        comment = []
+
+    undocumented: List[str] = []
+    parent_documented: List[str] = []
+    stack: List[Tuple[int, str, bool]] = []   # (indent, dotted, opaque)
+    for pos, (idx, indent, key, inline, block) in enumerate(entries):
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        dotted = f"{stack[-1][1]}.{key}" if stack else key
+        opaque_parent = any(o for _, _, o in stack)
+        top = dotted.split(".", 1)[0]
+        has_doc = any(c.startswith("# --") for c in block)
+        opaque = any("@default -- Check values.yaml" in c for c in block)
+        nxt = entries[pos + 1] if pos + 1 < len(entries) else None
+        is_parent = not inline and nxt is not None and nxt[1] > indent
+        if is_parent and not inline:
+            # a block list (`key:` then `- item`) is a leaf value, not a map
+            first_child = next((lines[j].strip() for j in range(idx + 1, len(lines)) if lines[j].strip() and not lines[j].strip().startswith("#")), "")
+            if first_child.startswith("- "):
+                is_parent = False
+        if top in ("jobs", "cronjobs", "persistence") and "." in dotted and not opaque_parent:
+            if is_parent and has_doc and not opaque:
+                parent_documented.append(dotted)
+            elif not is_parent and not has_doc:
+                undocumented.append(dotted)
+        stack.append((indent, dotted, opaque))
+
+    findings: List[Finding] = []
+    if undocumented:
+        findings.append(Finding(
+            "P2", "Undocumented Values Leaf", f"{vf.name}",
+            f"{len(undocumented)} leaf key(s) under jobs/cronjobs/persistence have no `# --` line, "
+            f"so helm-docs gives them no README row: {', '.join(undocumented[:8])}"
+            f"{' (+more)' if len(undocumented) > 8 else ''}. Add `# --` and `# @section --` above each."))
+    if parent_documented:
+        findings.append(Finding(
+            "P2", "Parent Map Documented", f"{vf.name}",
+            f"`# --` sits on parent map(s) {', '.join(parent_documented[:6])}, which helm-docs renders "
+            "as one blob row. Document the leaves instead, or mark the parent "
+            "`# @default -- Check values.yaml` when it really is one opaque value."))
+    return findings
+
+
+_COMMENT_DIRECTIVE = re.compile(
+    r"^#\s*(renovate:|syntax=|escape=|check=|hadolint|shellcheck|yamllint|noqa|nosec|!|@section|@default)", re.I)
+
+
+def check_comment_style(root: Path, chart_dir: Optional[Path]) -> List[Finding]:
+    """Comments in CI, Dockerfiles, templates and overlays: one line, saying why.
+
+    A comment explains a deviation from the library default in a single line. Banners and
+    multi-line prose describe what the next line already says and drift from it. Tool
+    directives (`# renovate:`, `# syntax=`, `# hadolint ...`) and a licence header at the
+    top of a file are not prose. values.yaml is exempt: its `# --` lines feed helm-docs.
+    """
+    targets: List[Path] = [p for p in sorted(root.glob("Dockerfile*")) if p.is_file()]
+    targets += [p for p in (root / ".gitlab-ci.yml",) if p.exists()]
+    if chart_dir is not None and chart_dir.exists():
+        tdir = chart_dir / "templates"
+        if tdir.is_dir():
+            targets += sorted(list(tdir.glob("*.yaml")) + list(tdir.glob("*.tpl")))
+        targets += _overlay_files(chart_dir)
+    findings: List[Finding] = []
+    for path in targets:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        runs: List[Tuple[int, int]] = []
+        start, count, seen_code = None, 0, False
+        for idx, raw in enumerate(lines + [""], 1):
+            s = raw.strip()
+            is_comment = s.startswith("#") and not _COMMENT_DIRECTIVE.match(s)
+            if is_comment:
+                if start is None:
+                    start, count = idx, 0
+                count += 1
+                continue
+            if start is not None and count >= 2:
+                header = not seen_code and any(w in " ".join(lines[start - 1:start - 1 + count]).lower()
+                                               for w in ("license", "licence", "copyright"))
+                if not header:
+                    runs.append((start, count))
+            start, count = None, 0
+            if s:
+                seen_code = True
+        if runs:
+            shown = ", ".join(f"{path.name}:{a} ({n} lines)" for a, n in runs[:3])
+            findings.append(Finding(
+                "P2", "Multi-line Comment", f"{path.relative_to(root) if path.is_relative_to(root) else path.name}",
+                f"Comment blocks: {shown}{' (+more)' if len(runs) > 3 else ''}. Keep at most one line "
+                "that says why something differs from the library default; drop banners and prose."))
+    return findings
+
+
+def check_image_path_alignment(repo: Path, chart_dir: Path, ci_vars: Dict[str, Any]) -> List[Finding]:
+    """The image the chart renders must be the image CI pushes (GitLab).
+
+    gitlab-ci-library's Common:Init pushes to CI_PROJECT_PATH unless IMAGE_REPOSITORY is set.
+    A chart that leaves `repository` empty gets `<partOf>/<component>[/<subComponent>]` from
+    the library instead, and silently deploys an image that was never pushed. The library's
+    placeholder registry and pull secret (`cr.io`, `cr-cred`) are never right for a real
+    project -- ask the user for the registry, pull secret and repository path.
+    """
+    findings: List[Finding] = []
+    values = _load_yaml(chart_dir / "values.yaml")
+    if not isinstance(values, dict):
+        return findings
+    glob_ = values.get("global") if isinstance(values.get("global"), dict) else {}
+    image_g = glob_.get("image") if isinstance(glob_.get("image"), dict) else {}
+    registry = image_g.get("registry")
+    if registry == "cr.io":
+        findings.append(Finding(
+            "P1", "Library Placeholder Registry", "values.yaml:global.image.registry",
+            "global.image.registry is still the library placeholder 'cr.io'. Set the registry CI "
+            "pushes to (ask the user)."))
+    if image_g.get("pullSecrets") == ["cr-cred"]:
+        findings.append(Finding(
+            "P2", "Library Placeholder Pull Secret", "values.yaml:global.image.pullSecrets",
+            "global.image.pullSecrets is still the library placeholder 'cr-cred'. Set the pull "
+            "secret that exists in the target namespaces (ask the user)."))
+
+    _host, project_path = origin_project(repo)
+    ci_repo = str(ci_vars.get("IMAGE_REPOSITORY") or "") or project_path
+    ci_repo = ci_repo.replace("${CI_PROJECT_PATH}", project_path).replace("$CI_PROJECT_PATH", project_path)
+    if not ci_repo or "$" in ci_repo:
+        return findings
+    main = ((values.get("containers") or {}).get("main") or {}) if isinstance(values.get("containers"), dict) else {}
+    explicit = str(((main.get("image") or {}).get("repository")) or "") if isinstance(main, dict) else ""
+    if "{{" in explicit:
+        return findings
+    if explicit:
+        chart_repo = explicit
+    else:
+        part_of = values.get("partOf") or glob_.get("partOf") or ""
+        comp, sub = values.get("component") or "", values.get("subComponent") or ""
+        path = f"{comp}/{sub}" if comp and sub else (comp or sub)
+        chart_repo = f"{part_of}/{path}" if part_of and path else path
+    if chart_repo and chart_repo.strip("/") != ci_repo.strip("/"):
+        findings.append(Finding(
+            "P1", "Chart Image Differs From CI Push Path", "values.yaml:containers.main.image.repository",
+            f"The chart renders repository '{chart_repo}'{' (derived by the library)' if not explicit else ''}, "
+            f"but CI pushes to '{ci_repo}'. Set containers.main.image.repository to the CI push path "
+            "(confirm it with the user)."))
+    ci_registry = str(ci_vars.get("IMAGE_REGISTRY") or "")
+    if ci_registry and "$" not in ci_registry and registry and registry != ci_registry:
+        findings.append(Finding(
+            "P1", "Chart Image Differs From CI Push Path", "values.yaml:global.image.registry",
+            f"The chart pulls from registry '{registry}' but CI pushes to '{ci_registry}'."))
     return findings

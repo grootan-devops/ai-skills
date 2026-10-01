@@ -22,6 +22,18 @@ python3 core/scripts/libraries.py /path/to/repo --platform github
 python3 core/scripts/audit.py /path/to/repo --strict
 ```
 
+Chart helpers:
+
+```bash
+core/scripts/chart-lint.sh path/to/chart        # lint + render values.yaml and each overlay
+core/scripts/chart-docs.sh path/to/chart         # regenerate README.md (--check reports drift)
+python3 core/scripts/names.py path/to/chart -f path/to/chart/values.worker.yaml
+python3 core/scripts/verify_siblings.py chart-a chart-b ...
+```
+
+Standards and starter templates (the chart `README.gotmpl`, the `MODE` dispatcher, a SPA
+server config, a project base image and its builder) live in the selected libraries' docs.
+
 The resolver and audit accept --github-ci-library, --gitlab-ci-library,
 --helm-tpl-library, or repeatable --lib NAME=SOURCE overrides. Use local
 checkout paths when validating uncommitted library changes. The resolver
@@ -47,10 +59,8 @@ python3 -m unittest discover -s platform-builder/core/scripts/tests -v
   CI platform adapter. It reports the resolved library provenance.
 - core/libraries.json defines default sources; core/scripts/libraries.py
   implements source precedence and selected-ref resolution.
-- platforms/github and platforms/gitlab own their CI checks, workflow-map.json,
-  and platform-specific references. Do not mix their syntax or cache mechanics.
-- core/references holds shared Helm, Docker, security, migration, file-mount,
-  and ignore-file guidance. Read only the references relevant to the task.
+- platforms/github and platforms/gitlab own their CI checks and workflow-map.json.
+  Do not mix their syntax or cache mechanics.
 - aliases/ contains thin platform-specific entry points; AGENTS.md is an
   agent-discovery pointer.
 

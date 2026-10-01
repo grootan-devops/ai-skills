@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-01
+
+### Added
+
+- `terraform-module-consumer`: composes existing, versioned Terraform modules into Terraform or Terragrunt environment configurations, with state-safe validation and no direct managed resources or apply.
+- `platform-builder`: working rules for scope, change size, removed content, runtime dependencies and lockfiles; project values (registry, pull secret, repository path, `partOf`, component, subComponent) are suggested and confirmed with the user.
+- `platform-builder`: audit checks for the canonical PID 1 shape (`ENTRYPOINT ["/usr/bin/dumb-init", "--"]` with the process or a start script in `CMD`), chart `command`/`args` overrides and start scripts that do not `exec`.
+- `platform-builder`: chart checks for Service ports, named probe and route ports, empty pod `securityContext`, disabled mounts, hard-coded PVC claims, non-HTTP release overlays, per-mode `subComponent`, schema enums and `minLength` on empty defaults, unused optional blocks, undocumented job/cronjob/persistence leaves, and credentials in ConfigMaps, `env` values or `args` across all containers.
+- `platform-builder`: checks that the chart image equals the CI push path, placeholder registry and pull secret, AI/agent files present or committed (reported, never removed), changelog H1, SemVer for `Project:Version:Init`, and unknown `extends:` targets.
+- `platform-builder`: `chart-lint.sh`, `chart-docs.sh`, `names.py` and `verify_siblings.py`.
+- `gitops-manager`: `argocd app add` — service bootstrap steps and `app_add.py`, which adds a service's `apps` entry (single release or a release of a multi-release group) to an environment's root `values.yaml`, scaffolds its `values/` file from the service chart with placeholders for environment values and credentials, never overwrites, and can render-check the new Application.
+- `gitops-manager`: `override_check.py`, which reports environment overrides that belong in the chart.
+
+### Changed
+
+- Every skill holds only its workflow instructions and scripts. Standards, contracts and starter templates are documented in the libraries the skills read at the resolved ref:
+  - `helm-tpl-library`: chart description and README, the values replica, naming, container keys, derived names, routes, mounts and file mounts, rendering behaviour, secrets, schema, security posture, probes, renames, ignore files and charts with several releases;
+  - `gitlab-ci-library` and `github-ci-library`: the include set and scenario files, project jobs, `WORKFLOW` options, job responsibilities, per-stack rules, Dockerfile standards (PID 1, base images, comments, `# renovate:`, cache handoff, `.dockerignore`, project base images) and the consumer security review;
+  - `argocd-gitops-tpl-library`: the `apps` registry, what an environment values file overrides, the environment starter files and the GitOps README cluster convention;
+  - `terraform-modules`: module consumption, provider-schema mapping, state migration, test shapes, other-provider tables and the architecture diagram template.
+- The skills name decision areas, never library file names: each reads a library's README index at the resolved ref and follows only the rows a task needs, so a library can rename, split or extend its guides without a skill release.
+- `platform-builder`: SKILL.md carries the update and audit steps (engine and judged findings) that the removed references held.
+- `terraform-module-builder` and `terraform-module-consumer` locate terraform-modules (`$TERRAFORM_MODULES_REPO`, a sibling checkout, then the pinned module source) and follow its documentation index.
+- `platform-builder`: subComponent and chart names are suggestions, not a fixed vocabulary; subComponent is required only for multi-mode charts.
+- `platform-builder`: jobs, cronjobs, persistence, metrics and `global.tracing` are optional features, absent unless used; `global.metrics` may be omitted without a monitor entrypoint.
+- `platform-builder`: PID 1 findings are P1 against the canonical shape; comments in CI files are one line saying why.
+- `platform-builder`: README drift is detected by regenerating with helm-docs instead of file timestamps.
+
+### Removed
+
+- `platform-builder`: `core/references/`, `platforms/*/references/` and `assets/`; `gitops-manager`: `assets/bootstrap/`; `terraform-module-builder`: `references/` and `assets/` — their content moved to the libraries above. The lists of known library defects are dropped; the one still open (`Terraform:Check:README` gating) is fixed in `gitlab-ci-library`.
+- `platform-builder`: the `USE_DOCKER_BUILDX` guidance and finding, merge-request instructions, the requirements-file and `pyproject.toml` indentation checks, and automatic removal of agent tooling.
+
+### Fixed
+
+- `platform-builder`: GitLab `!reference` tags parse; non-image `ARG` defaults and the project's own registry are no longer reported as external images; the Cross-Service Override Law check no longer fires on every sibling reference; a dependency-download job is required only when a language module is included; library pins are read from `remote:` include URLs.
+- `platform-builder`: suggested micro base image names match the published `grootantech/micro-*` repositories.
+
 ## [1.3.0] - 2026-09-25
 
 ### Added

@@ -142,8 +142,14 @@ def available_platforms() -> List[str]:
 
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else "."
-    det = detect(target)
-    print(f"Repository: {Path(target).resolve()}")
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Detect which CI platform a repository targets.")
+    ap.add_argument("repo_path", nargs="?", default=".")
+    ap.add_argument("--platform", choices=[GITLAB, GITHUB],
+                    help="state the platform explicitly (reported as confidence=explicit)")
+    args = ap.parse_args()
+    det = detect(args.repo_path, explicit=args.platform)
+    print(f"Repository: {Path(args.repo_path).resolve()}")
     print(det.summary())
     print(f"\nAdapters available: {', '.join(available_platforms()) or 'none'}")

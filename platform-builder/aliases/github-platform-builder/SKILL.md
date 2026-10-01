@@ -10,7 +10,7 @@ description: >-
 # GitHub Actions Platform Builder
 
 Read [`../../SKILL.md`](../../SKILL.md) with the platform fixed to `github`.
-Skip platform detection and load only the GitHub references relevant to the task.
+Skip platform detection and read only the github-ci-library and helm-tpl-library docs relevant to the task.
 
 ```bash
 python3 core/scripts/audit.py [repo] --platform github [--strict] [--json]
