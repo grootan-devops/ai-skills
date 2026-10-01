@@ -10,7 +10,7 @@ description: >-
 # GitLab CI Platform Builder
 
 Read [`../../SKILL.md`](../../SKILL.md) with the platform fixed to `gitlab`.
-Skip platform detection and load only the GitLab references relevant to the task.
+Skip platform detection and read only the gitlab-ci-library and helm-tpl-library docs relevant to the task.
 
 ```bash
 python3 core/scripts/audit.py [repo] --platform gitlab [--strict] [--json]

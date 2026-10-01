@@ -78,3 +78,20 @@ jobs:
 
       - name: Test Terraform Skill Tools
         run: python3 -m unittest discover -s terraform-module-builder/scripts/tests -v
+
+  gitops-skill-tests:
+    name: GitOps Skill Regression Tests
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test GitOps Skill Tools
+        run: python3 -m unittest discover -s gitops-manager/scripts/tests -v

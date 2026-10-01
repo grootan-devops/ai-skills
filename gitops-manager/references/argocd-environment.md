@@ -31,19 +31,12 @@ has not passed. Never ask users to paste passwords or tokens into chat.
    `argocd version --server <ARGOCD_URL>` and
    `argocd account get-user-info --server <ARGOCD_URL>`. Use the CLI's supported TLS/gRPC
    flags when required by the deployment. Do not print tokens or credential-bearing URLs.
-3. Read `README.md` from the GitOps repository's default branch. It must contain an explicit
-   cluster name and Argo CD cluster name, for example:
-
-   ```yaml
-   # Midgard (cluster name)
-   ArgoCD server name: in-cluster
-   ```
-
-   The first value is the cluster name used in generated Application names; the second must
-   match the Argo CD cluster `NAME` shown by `argocd cluster list --server <ARGOCD_URL>`.
-   Stop local preparation if that README or either value is missing. Check the cluster entry
-   before activation. Do not
-   infer these values from the URL, branch, or a different README.
+3. Read `README.md` from the GitOps repository's default branch. It must record the cluster
+   label and the Argo CD cluster name in the format the library documents for the root
+   Application. The cluster label is used in generated Application names; the Argo CD cluster name
+   must match the `NAME` shown by `argocd cluster list --server <ARGOCD_URL>`. Stop local
+   preparation if that README or either value is missing, and check the cluster entry before
+   activation. Do not infer these values from the URL, branch, or a different README.
 4. Before activation, check that the Argo CD URL is reachable and authenticated, and that the GitOps repository
    URL is valid and readable by the current Git identity. Confirm Argo CD can use the
    repository (including its registered credentials/access); if its repository status is
@@ -65,65 +58,19 @@ has not passed. Never ask users to paste passwords or tokens into chat.
    overwrite an existing branch, change an existing app, or use `argocd app create --upsert`
    unless the user specifically asks to update that existing environment.
 
-When creating a new local branch, base it on the repository's default branch. In the example README block, treat
-the text in `# Midgard (cluster name)` as the cluster label. Normalize a human label such as
-`Midgard` to a DNS-safe value such as `midgard` only after showing the mapping to the user;
-use the README's Argo CD cluster name exactly. If the user does not confirm a required
-normalization, stop.
+When creating a new local branch, base it on the repository's default branch. Normalize a
+human cluster label to a DNS-safe value only after showing the mapping to the user; use the
+README's Argo CD cluster name exactly. If the user does not confirm a required normalization,
+stop.
 
-## Derived configuration
+## Derived configuration and files
 
-Use the cluster name and Argo CD cluster name from the default-branch README, plus the user-provided
-project, environment, Git URL, and optional branch. The root and extras chart names are the
-same project name. Use `developer` as the consumer-chart Argo CD Project, `cluster-admin` for
-the bootstrap root Application, and `argo-cd` for the namespace containing Application CRs.
-
-The generated chart branch defaults to `<project>/<environment>` (or `<project>` when there
-is no environment). Set `branch` in both values files only when the user supplied a different
-revision; otherwise leave it empty so the library derives `<Chart.Name>/<environment>` or
-`<Chart.Name>`. The root Application always targets the actual branch created.
-
-The root Application name is:
-
-```text
-<cluster>-<project>-<environment>-root
-<cluster>-<project>-root                 # when environment is empty
-```
-
-In an Argo CD `Application`, the README's Argo CD cluster **name** maps to
-`spec.destination.name`, not `spec.destination.server` (which expects a server URL).
-
-## Consumer repository scaffold
-
-Copy and fill the starter files under `assets/bootstrap/`. Keep this layout:
-
-```text
-.
-├── .gitignore
-├── .helmignore
-├── Chart.yaml
-├── README.md
-├── values.yaml
-├── templates/apps.yaml
-├── values/.gitkeep
-└── extras/
-    ├── .helmignore
-    ├── Chart.yaml
-    ├── values.yaml
-    ├── templates/apps.yaml
-    └── manifests/.gitkeep
-```
-
-Add future workload manifests only below a named directory such as
-`extras/manifests/clamav/`. The `extras/` chart has the same `Chart.yaml` name as the root
-chart, depends on the same library release, and carries its own `.Values.extras` defaults
-and per-directory `.Values.apps` overrides. Never put workload YAML directly in the root
-chart or at `extras/manifests/` itself. Keep `renderExtrasManifests: false`: direct rendering
-from the root chart is rejected; each named directory is reconciled by a generated child
-Application.
-
-The generated README records the environment, Argo CD URL, project, repository, branch,
-cluster/server names, and derived root Application name. It must not contain credentials.
+Take the cluster label and Argo CD cluster name from the default-branch README, plus the
+user's project, environment, Git URL and optional branch. The naming, branch defaults, layout,
+starter files and root Application manifest (Argo CD projects, `argo-cd` namespace, sync
+options, destination by name) are in the library docs at the resolved ref — follow the README
+index tasks for bootstrapping an environment and the root Application exactly. Keep credentials out of
+every file, the environment README included.
 
 ## Validate locally; activate only when requested
 
@@ -146,27 +93,5 @@ cluster/server names, and derived root Application name. It must not contain cre
    its sync/health status and branch/commit. If creation or sync fails, stop; do not repeatedly
    retry or change credentials/configuration without user direction.
 
-## Root Application contract
-
-Use `assets/bootstrap/root-application.yaml` as the basis. Set the repository URL and actual
-branch, project `cluster-admin`, source path `.`, destination cluster **name** from the
-repository README, and namespace `argo-cd`. Keep the requested sync options and retry policy:
-
-```yaml
-syncOptions:
-  - Validate=true
-  - CreateNamespace=false
-  - PrunePropagationPolicy=foreground
-  - PruneLast=true
-  - RespectIgnoreDifferences=true
-  - ApplyOutOfSyncOnly=true
-retry:
-  limit: 2
-  backoff:
-    duration: 5s
-    factor: 2
-    maxDuration: 3m0s
-```
-
-The `argocd app create` command must target the same Argo CD URL and cluster identity checked
-during preflight. Do not silently substitute another cluster or a Kubernetes context.
+The `argocd app create` command targets the same Argo CD URL and cluster identity checked
+during preflight. Never silently substitute another cluster or a Kubernetes context.

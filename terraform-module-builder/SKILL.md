@@ -2,9 +2,9 @@
 name: terraform-module-builder
 description: >-
   Create, update, and audit Terraform modules against the checked-out
-  terraform-modules repository. Use for module APIs, provider upgrades,
-  migration safety, and module validation. Apply only after an explicit
-  request, review of the exact saved plan, and confirmation of its target.
+  terraform-modules repository. Use for new modules, module APIs and
+  documentation, provider upgrades, resource-address and state migrations,
+  and module validation.
 ---
 
 # Terraform Module Builder
@@ -23,25 +23,25 @@ change or a verified defect requires otherwise.
 
 ## Resolve the authority
 
-Resolve terraform-modules using [reference-repo-link.md](./references/reference-repo-link.md)
-before choosing a contract. Read its README sections relevant to the request, its
-MIGRATION.md for upgrades, and the actual module code, tests, and provider schema at
-the selected ref. Shipped behavior and executable checks establish what works today;
-explicit standard-versus-current-state notes in the library README establish intended
-future conventions. Report a disagreement instead of silently copying either version.
-Do not transplant AWS-specific rules into Azure, GCP, or Kubernetes modules without
-schema and repository evidence.
+terraform-modules holds the modules and every standard they are built to. Resolve it, stopping
+at the first that exists: a path or repository/ref named in the request; the current
+repository when it is terraform-modules or a fork of it; `$TERRAFORM_MODULES_REPO`; a
+`terraform-modules/` checkout beside the directory this skill is installed in; otherwise the
+default, `https://github.com/grootan-devops/terraform-modules` at `main`. Adding or updating a
+module edits a local checkout — the repository the request names, otherwise the resolved one
+when it is local — so ask before cloning one. Never guess.
 
-Load only the relevant detail:
+Read its README documentation index and follow only the rows the request needs — public API,
+names and tags, security controls, module README, releases and state changes, tests — all at
+the selected ref; for an upgrade, read `MIGRATION.md` between the versions. Shipped
+behaviour and executable checks establish what works today; the README's "current state"
+callouts record where modules diverge from the standard, and the standard wins. Report a
+disagreement instead of silently copying either version. Do not transplant AWS-specific rules
+into another provider without schema and repository evidence.
 
-- [provider-schema-guide.md](./references/provider-schema-guide.md) for a new resource
-  or provider upgrade.
-- [naming-standards.md](./references/naming-standards.md) for public names and tags.
-- [security-capability-matrix.md](./references/security-capability-matrix.md) when a
-  security control's provider support is uncertain.
-- [state-migration-guide.md](./references/state-migration-guide.md) for resource
-  address, key, default, or provider changes.
-- [testing-strategy.md](./references/testing-strategy.md) when adding or changing tests.
+Lift every project, company or customer name in a request into `var.application`,
+`var.environment` and `var.name`, and say in one line which variable now carries it; no brand
+label goes into module code, examples or diagrams.
 
 ## Execute
 
@@ -53,8 +53,9 @@ a provider argument or a credential default.
 For update, resolve the latest stable provider release even when the requested edit is
 otherwise narrow. Compare its schema and changelog with the current constraint before
 changing code; report compatibility and SemVer impact. Run the migration detector to
-find candidate API and resource-address changes. It is a textual aid, not a proof of
-state safety. Inspect each affected consumer state/plan or a representative fixture,
+find candidate API and resource-address changes
+(`scripts/detect-migrations.py <module_path> --compare-ref HEAD`), and scaffold a verified
+move with `--scaffold-move <FROM> <TO>`. It is a textual aid, not a proof of state safety. Inspect each affected consumer state/plan or a representative fixture,
 write moved blocks only for verified address mappings, and keep an explicit record of
 any remaining replacement or destruction risk. Changed defaults and `count`/`for_each`
 keys also need plan review even when resource labels stay the same. A moved block only

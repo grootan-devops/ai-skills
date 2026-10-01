@@ -4,7 +4,8 @@ description: >-
   Create, update, and audit GitHub Actions or GitLab CI pipelines, packaging
   Dockerfiles, and Helm consumer charts against the selected CI and Helm
   libraries. Use for repository onboarding, library migrations, deployment
-  wiring, and platform compliance reviews.
+  wiring, and platform compliance reviews — and for any change to a Dockerfile,
+  chart, chart README or CI file, including one made while deploying.
 ---
 
 # Platform Builder
@@ -44,7 +45,8 @@ The resolver and `audit.py` accept `--lib NAME=SOURCE` and the named flags
 
 `SOURCE` may be a local path or `file://` URL (read in place), a Git URL with an
 optional `@ref` or `#ref`, or a GitHub/GitLab `/tree/<ref>` URL. A ref may be a
-branch, tag, or commit. Named flags take precedence over a generic `--lib` for
+branch, tag, or commit; give a branch containing `/` as `#<ref>`, `<url>.git@<ref>` or
+`/tree/<ref>`, because `<url>@<ref>` reads such a ref as part of the URL. Named flags take precedence over a generic `--lib` for
 the same name; the resolver is the authority for parsing and errors.
 
 A local library checkout is evidence for this run, not a publishable consumer pin. Before
@@ -54,33 +56,59 @@ Branch and SHA refs need its explicit testing escape hatch and are not release-r
 GitLab include refs and Helm chart versions follow their own selected-library contracts.
 Never copy a version from a README example.
 
-## Load the relevant reference
+## Read the library docs
 
-| Decision | Reference |
-| --- | --- |
-| CI scenarios, job selection, and platform pinning | `platforms/<github or gitlab>/references/workflow-matrix.md` and its `workflow-map.json` |
-| Platform credential and permission mechanics | core/references/security-core.md, then the selected platform's security-addendum.md |
-| Language build, cache, and packaging | core/references/language-stacks-core.md and the selected library's module guide |
-| Helm values, helpers, schema, and naming | core/references/helm-chart-standard.md and the selected Helm library guides |
-| Runtime files and storage | core/references/file-mounts-standard.md |
-| Ignore files | core/references/ignore-files-standard.md |
-| Version changes | core/references/migration-standard.md |
-| GitLab-specific stack wiring | platforms/gitlab/references/stack-snippets.md |
+Every standard, process and starter template lives in the selected libraries, not in this
+Skill. For each library, start at its README index and follow only the rows a decision needs —
+pipeline setup, project jobs, Dockerfile and base images, security review, chart structure and
+values, naming, mounts and configuration — all at the resolved ref. For an upgrade, read its
+MIGRATION.md sections between the consumer's pin and the target. Read one CI library for a
+single-platform task. The selected library's implementation remains authoritative for its
+supported inputs and outputs; `platforms/<platform>/workflow-map.json` is the audit's own
+scenario map.
 
-Do not load both platform adapters for an ordinary single-platform task. The selected
-library's implementation remains authoritative for its supported inputs and outputs;
-workflow-map.json owns only Skill-side scenario selection.
+## Working rules
+
+- **Scope is the repository in front of you.** "All" means every file in it. Do not survey or
+  edit sibling repositories unless the user names them.
+- **Change only what the request covers.** A reported runtime error gets a fix for that
+  service, not CI or infrastructure edits alongside it. Onboarding changes platform files
+  only — CI, Dockerfile, chart, ignore files; report application-code risks instead of
+  rewriting application code or scripts.
+- **Never re-add what the user removed.** State the consequence of the removal instead.
+- **Never drop a runtime dependency or a production capability to make an image fit.** If
+  that is the only way, present it as a behaviour change and let the user decide.
+- **Leave lockfiles and dependency manifests alone.** Dependency management is outside this
+  Skill.
+- **Project values are asked, not assumed.** Registry, pull secret, image repository path,
+  `partOf`, component and subComponent come from the repository or from the user: suggest a
+  value from the evidence, use it only when confirmed, otherwise use what the user says. Ask
+  once per run and do not re-ask what was answered. Use the user's literal values, but fix a
+  real typo (a wrong values key, an unquoted `{{ }}`) and say so.
+- **Say before starting anything slow** — a long local image build, an index refresh, a
+  background watcher.
 
 ## Make the change
 
 Inspect existing CI, Docker, chart, environment, and test assets before writing. For
 onboard, classify the repository shape, choose only executable workflows and modules,
-and preserve discovered ports, settings, mounts, and runtime behavior. Add a chart's
-optional jobs, cronjobs, metrics, or persistence only when the workload needs them; pair
-each enabled value with its required tpl entrypoint. For a new chart, let the Helm
-library derive the main image repository from partOf/component/subComponent when
-image.repository is empty. Keep explicit repository values for images that need a
-different path.
+and preserve discovered ports, settings, mounts, and runtime behavior. Take the chart
+description from the project manifest or README, and ask when it is missing or generic. Ask
+whether the application reads a configuration file; declare it as a file mount. Jobs, cronjobs,
+persistence, metrics and `global.tracing` are optional: add each only when the workload
+needs it, pair it with its tpl entrypoint and schema property, and otherwise leave it out of
+`values.yaml` and `values.schema.json`.
+
+The image the chart deploys must be the image CI pushes: set the registry, pull secret and
+`image.repository` to the CI push path (ask when unknown). Choose the base image as the CI
+library's docs describe, and ask for the registry before building a project base image. Fix runtime
+permission problems (a cache, lock or pid path) with a chart mount, not in the image.
+Comments in CI files are one line that says why something differs from the library default.
+
+AI/agent tooling in the target repository (`.claude/`, `.agents/`, `.codex/`, `.gemini/`,
+`.cursor/`, `AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `GEMINI.md`, `skills-lock.json`, nested
+copies included) must never be committed. Warn about what is present — the audit lists it —
+and ask the user whether to delete it. Delete nothing on your own.
 
 ### Phase 2b: interactive choices before scaffolding
 
@@ -93,6 +121,10 @@ optional resource choice without asking it again.
 
 | Present | Ask | If enabled |
 | --- | --- | --- |
+| Chart | Product (`partOf`), component, subComponent — suggest each from the evidence | Use the confirmed values; subComponent may stay empty for a single-mode chart and is required per mode for a multi-mode one. |
+| Dockerfile or chart | Image registry, pull secret and repository path, when the repository does not already state them | Set them so the chart pulls exactly what CI pushes. |
+| Chart with routes | Route host and paths — suggest the library's pattern | Use what the user chooses. |
+| Chart | Does the application read a configuration file? | Declare it as a file mount, following the Helm library docs. |
 | Dockerfile | Smoke-test the built image? | Wire the GitHub `docker.yml`/`buildah.yml` `test: true` and `test-script` (default `ci_image_test.sh`), or GitLab `.Image:Test`. |
 | Chart | Unit-test the chart? | Wire GitHub `chart.yml` `run-unittest: true` with `tests/*_test.yaml` suites, or the selected GitLab chart test job. |
 | Chart | Does the workload require persistent storage (PVC)? | Add `persistence:` and `tpl.pvc`; otherwise omit both. |
@@ -104,25 +136,38 @@ application's actual contract. Do not declare a test job without a runnable
 fixture. Questions about optional chart resources are unnecessary when the
 workload evidence or explicit request already answers them.
 
-For update, compare the current consumer with the selected library versions and
-intermediate migration notes. Change only required refs, schemas, wiring, and verified
-defects. Preserve intentional cache keys, custom jobs, values, annotations, probes, and
-formatting. Ask only when a genuine ambiguity or a conflicting customization cannot
-be resolved from the repository. Do not reset files to starter templates.
+For update, resolve each target library and run `core/scripts/audit.py` against the
+consumer with the same sources: its `migrations[]` output lists the release sections between
+the consumer's pin and the target. Work through every intermediate release in order (a branch
+or SHA pin may not give a complete chain; report that) and compare each step with the actual
+templates, schema and consumer files. Change only required refs, schemas, wiring, and
+verified defects. Preserve intentional cache keys, custom jobs, values, annotations, probes,
+mounts and formatting; present a customization that conflicts with a required step for a
+decision. An update edits existing files; never reset them to starter templates.
 
 For ship, prepare wiring for the requested environment and validate it. Do not infer
 a production target, credential, or cluster. A local change does not authorize a
 deployment, commit, or push.
 
-For audit, run the engine and review what it cannot establish: secret handling,
-token scope, rendered chart security, untrusted input paths, and unsupported library
-options. Label findings as engine results or manual judgments and give file evidence.
-Do not edit the audited target.
+For audit, run the engine, then review what it cannot establish against the libraries'
+security guides and the chart security posture: secrets by value, token scope, rendered
+chart grants, untrusted input paths, and unsupported library options. Tag each finding
+`[engine]` or `[judged]` with file evidence; a judged finding says what you saw and why it
+concerns you, and is never presented as the engine's. Do not edit the audited target.
+
+```text
+[P0] [judged]  Embedded credential   chart/values.yaml:42
+     -> DATABASE_URL value carries user:password@ before the host. Move it to the secret store.
+```
 
 ## Validate and report
 
 Run core/scripts/audit.py with --strict and the same local paths or refs used for the
-change. Check rendered Helm output and schema when a chart changed, and the selected
-platform's native lint or CI checks when a pipeline changed. Report exact library
-provenance, commands and outcomes, remaining risks, and any publishing prerequisite.
-Do not claim a local library change is present in a remote workflow or chart release.
+change. When a chart changed, run `core/scripts/chart-lint.sh <chart>` (lint and render
+`values.yaml` alone and with each overlay), regenerate the README with
+`core/scripts/chart-docs.sh <chart>`, and run `core/scripts/verify_siblings.py` across the
+product's charts after a rename or a mode split; `core/scripts/names.py` prints every name a
+release derives. Run the selected platform's native lint or CI checks when a pipeline
+changed. Report exact library provenance, commands and outcomes, remaining risks, and any
+publishing prerequisite. Do not claim a local library change is present in a remote
+workflow or chart release.
