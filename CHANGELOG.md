@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-07
+
+### Changed
+
+- Updated [`grootan-devops/github-ci-library`](https://github.com/grootan-devops/github-ci-library) from [`1.3.1` to `1.5.0`](https://app.renovatebot.com/package-diff?name=grootan-devops%2Fgithub-ci-library&from=1.3.1&to=1.5.0)
+
 ## [1.4.0] - 2026-10-01
 
 ### Added
