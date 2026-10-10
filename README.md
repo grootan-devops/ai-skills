@@ -1,6 +1,6 @@
 # AI Agent Skills
 
-Release `1.4.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.5.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 This directory contains reusable, production-hardened **AI Agent Skills**. Skills are modular packages of procedures, automated validation scripts, reference baselines, and architectural contracts that transform AI coding assistants into specialized platform engineers.
 
@@ -14,6 +14,7 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 | [`terraform-module-consumer`](./terraform-module-consumer/) | Terraform, Terragrunt, provider-agnostic modules | Compose existing versioned modules into environment infrastructure configurations, with state-safe validation and no direct managed resources or apply. |
 | [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters. Strict 3-job separation, packaging-only Dockerfiles, Nginx frontend standard, least-privilege `GITHUB_TOKEN` permissions, SHA-pinned actions, breaking-change migrations, and minimal YAML footprints. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
 | [`gitops-manager`](./gitops-manager/) | Argo CD, Helm, Git | Focused Argo CD environment bootstrap: authenticated preflight, cluster metadata discovery, standard root/extras charts, validation, and root Application creation. |
+| [`observability-builder`](./observability-builder/) | Any language or framework, OpenTelemetry, OTLP backends (OneUptime, Grafana, Dynatrace, New Relic), Langfuse | End-to-end observability from one `observability.yml`: access and application logs, traces with function spans, ops metrics on `/metrics`, errors, profiling, RUM and session replay, and GenAI telemetry with Langfuse. Instruments services and frontends, verifies against a local receiver, and audits telemetry for leaked secrets and prompts. |
 
 Maintainer regression checks for the platform checker live in
 [`platform-builder`](./platform-builder/README.md#maintainer-regression-checks).
@@ -40,8 +41,8 @@ npx skills add https://github.com/grootan-devops/ai-skills \
 ```
 
 Swap `--skill` for any supported skill in the catalog above — `terraform-module-builder`,
-`terraform-module-consumer`, `platform-builder` or `gitops-manager`. Repeat the command to
-install more than one.
+`terraform-module-consumer`, `platform-builder`, `gitops-manager` or `observability-builder`.
+Repeat the command to install more than one.
 
 Each skill is self-contained: the CLI copies that directory and nothing else, so a skill
 never reaches outside its own folder for a reference.
@@ -55,7 +56,7 @@ instruction below points at that clone, and none of them copies a skill into you
 
 ```bash
 git clone https://github.com/grootan-devops/ai-skills.git ~/.ai-skills
-git -C ~/.ai-skills checkout 1.1.0
+git -C ~/.ai-skills checkout 1.5.0
 ```
 
 Pin a tag rather than tracking a branch: a branch moves, and a skill that changes underneath
@@ -68,7 +69,7 @@ the same skill:
 
 ```bash
 git submodule add https://github.com/grootan-devops/ai-skills.git .ai-skills
-git -C .ai-skills checkout 1.1.0
+git -C .ai-skills checkout 1.5.0
 ```
 
 The examples below use `~/.ai-skills` and name `terraform-module-builder`. Substitute the
@@ -226,7 +227,8 @@ Standards, contracts and starter templates are not copied into a skill. They liv
 library repositories (`gitlab-ci-library`, `github-ci-library`, `helm-tpl-library`,
 `argocd-gitops-tpl-library`, `terraform-modules`), and a skill reads them from the library's
 README index at the resolved branch, tag or local checkout — so a documentation change needs
-no skill release.
+no skill release. `observability-builder` is the exception: no library holds its standard, so
+the skill bundles it in its own `references/` and `assets/`.
 
 Each skill resolves its library sources the same way: an explicit source in the request wins,
 and the public repository at `main` is the default.
@@ -237,6 +239,7 @@ and the public repository at `main` is the default.
 | `gitops-manager` | `argocd-gitops-tpl-library` | a checkout or repository/ref in the request, then `https://github.com/grootan-devops/argocd-gitops-tpl-library` |
 | `terraform-module-builder` | `terraform-modules` (edited in a local checkout) | a path or repository/ref in the request, the current repository, `$TERRAFORM_MODULES_REPO`, a sibling checkout, then `https://github.com/grootan-devops/terraform-modules` |
 | `terraform-module-consumer` | `terraform-modules` | the request, `$TERRAFORM_MODULES_REPO`, the stack's pinned module source, a sibling checkout, then `https://github.com/grootan-devops/terraform-modules` |
+| `observability-builder` | none | the standard is bundled in the skill |
 
 ### Progressive Disclosure
 

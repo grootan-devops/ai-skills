@@ -7,6 +7,35 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 1.5.0
+
+### Required
+
+No migration required. This release adds the `observability-builder` skill; no existing skill
+changed, and the reusable workflow pin moves to `github-ci-library` `1.5.0`, whose inputs,
+outputs and behaviour are unchanged.
+
+### Recommended
+
+- Install the new skill where services need observability work:
+
+  ```bash
+  npx skills add https://github.com/grootan-devops/ai-skills \
+    --skill observability-builder
+  ```
+
+- Its scripts need Python 3.10 or newer with PyYAML. The local receiver also needs grpcio,
+  protobuf and opentelemetry-proto, which `uv run --no-project --with …` supplies, as the
+  skill's README shows.
+- `observability-builder` bundles its standard in its own `references/` and `assets/`; it reads
+  no library and needs no entry in `.platform-builder.json`.
+
+### Verify
+
+- `python3 -m unittest discover -s observability-builder/scripts/tests` passes (the receiver
+  tests skip themselves without grpcio).
+- The pull request pipeline passes with the `1.5.0` library pin.
+
 ## 1.4.0
 
 ### Required
