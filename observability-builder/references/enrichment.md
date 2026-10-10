@@ -8,7 +8,7 @@ attributes each kind of function gets.
 ## Placement
 
 | What | Where | Examples |
-|---|---|---|
+| --- | --- | --- |
 | Per-process identity | **resource**: the standard's eight attributes, plus `k8s.cluster.name` where several clusters send to one backend ([data model](data-model.md#resource)); nothing else is added there | service name, namespace, version and environment; the pod's namespace, name, UID and node; the cluster's name |
 | Per-request context | attributes on **each service's entry span** and its access log only; an allow-listed subset travels as **baggage**, so the next service can set it on its own entry span | user, tenant, session, client app and version, locale, experiment variant |
 | Per-operation facts | attributes on **that operation's span** | order ID, cart size, payment method |
@@ -63,7 +63,7 @@ Span attributes go on the function's own span; events are log records with `even
 metrics, added only when the team asks for them, list their bounded labels in braces.
 
 | Function | Span attributes | Events (log records) | Companion metric, on request (bounded labels) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Login or authentication | `user.id`, `user.roles`, `app.auth.method` (password, oauth, sso), `app.auth.result`, `app.auth.mfa` | `auth.failed` (reason) | `app_auth_attempts_total{method,result}` |
 | Checkout or order | `app.order.id`, `app.cart.items_count`, `app.order.total`, `app.currency`, `app.payment.method`, `app.coupon.applied` | `payment.declined` (provider code) | `app_orders_placed_total{payment_method}`, an order value histogram |
 | Payment provider call | `app.payment.provider`, `app.payment.status`, `app.idempotency_key`, `app.retry.attempt` | `retry.scheduled` | `app_payment_duration_seconds{provider,status}` |

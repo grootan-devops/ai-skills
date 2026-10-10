@@ -21,7 +21,7 @@ This skill instruments applications against one observability standard and check
 Everything it needs is in this folder:
 
 | Folder | What it holds |
-|---|---|
+| --- | --- |
 | `references/` | The standard (what every service emits and how it must behave) and the two workflows. [references/README.md](./references/README.md) is the index. |
 | `assets/` | `observability.schema.json`, the JSON Schema for `observability.yml`; `java/PprofExporter.java`, a template that uploads the Java profiler's JFR as pprof ([sdk-notes](references/sdk-notes.md#java)) |
 | `scripts/` | Stack detection, yml validation, the safety audit, API contract comparison, port holding, a local telemetry receiver (with a Langfuse stand-in) and a model-provider stub |
@@ -33,7 +33,7 @@ official docs and package registries, and make the *output* match the standard.
 ## Route the request
 
 | Request | Action |
-|---|---|
+| --- | --- |
 | `observability instrument [path]`: add or fix observability in a project | follow [the instrument steps](./references/instrument.md) |
 | `observability audit [path]`: check existing telemetry and instrumentation | follow [the audit steps](./references/audit.md) |
 | A question about the standard | answer from `references/`; change nothing |

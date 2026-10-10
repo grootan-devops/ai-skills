@@ -9,11 +9,11 @@ it doesn't ([backends/langfuse.md](../../../references/backends/langfuse.md#app-
 - the score calls kept out of request traces.
 
 | File | What it gives the module |
-|---|---|
+| --- | --- |
 | `scope.ts` | `exportScope(scope, { isDefaultExportSpan })`, the processor's `shouldExportSpan` and the `otel` exporter's filter. The SDK asks it at span start too, to mark the app root, so at start it counts every span that could still join a feature; at the end the stamp decides. Also `isAiSpan`. |
 | `content.ts` | `newContentGuard(decide, maxChars)` from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `cap` (characters), `failedStatus`; `guardedCopy`, which fails closed (a guard that throws keeps no content), and `copySpan` |
 | `processor.ts` | `guarded(inner, guard)`: wraps `LangfuseSpanProcessor` so it exports the guard's copy of each ended span. The SDK's `mask` sees only `langfuse.*` keys and edits the live span the ops exporter shares. |
-| `exporter.ts` | Two transports on `createOtlpHttpExportDelegate`, both reading no `OTEL_EXPORTER_OTLP_*` variable:<br>• `sdkTransport(config, { name, version })`, the `exporter` option of `LangfuseSpanProcessor` in `hybrid` and `sdk`;<br>• `LangfuseExporter`, for `otel`, with Basic auth, the ingestion header, gzip, the scope and the guard.<br>`OTLPTraceExporter` merges the header variables into its own and takes the TLS files and compression, and can't be made to read none. |
+| `exporter.ts` | Two transports on `createOtlpHttpExportDelegate`, both reading no `OTEL_EXPORTER_OTLP_*` variable: `sdkTransport(config, { name, version })`, the `exporter` option of `LangfuseSpanProcessor` in `hybrid` and `sdk`; `LangfuseExporter`, for `otel`, with Basic auth, the ingestion header, gzip, the scope and the guard. `OTLPTraceExporter` merges the header variables into its own and takes the TLS files and compression, and can't be made to read none. |
 | `client.ts` | `createClient` (the process's one `LangfuseClient`), `sendScore` and `closeClient`. Both run under `suppressTracing(ROOT_CONTEXT)`: the SDK's batch timer would otherwise inherit a request's context, and its call would show up as a CLIENT span of that request. |
 
 Copy the files into the observability module (e.g. `src/observability/langfuse/`). Then:

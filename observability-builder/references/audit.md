@@ -15,7 +15,7 @@ The script flags patterns it can see in source code. A value read into a variabl
 through its block, and a call spread over several lines is read as one statement:
 
 | Rule | Severity | What it catches |
-|---|---|---|
+| --- | --- | --- |
 | `secret-capture` | P0 | Span attributes, log or print calls, or baggage carrying authorization, cookies, passwords, tokens, secrets or API keys. Caught directly, or through a variable read earlier in the same block (`const h = req.get('authorization')` then `console.log(h)`). Includes framework-injected header parameters such as FastAPI `Header()`, `@RequestHeader`, `@HeaderParam`, NestJS `@Headers()`, Django `request.META`, Gin `GetHeader`. |
 | `body-in-span` | P1 | Request or response bodies (or stringified payloads) set as span attributes. |
 | `body-logged` | P1 | A raw request body logged: directly (`body: req.body`), or through a variable that holds the whole body or its serialization. Single fields, sizes and validation errors are not flagged. |

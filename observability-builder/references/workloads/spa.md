@@ -16,7 +16,7 @@ nginx default.conf                   # JSON access log with $http_traceparent; /
 ## What differs from a fullstack app
 
 | Concern | Single-page app |
-|---|---|
+| --- | --- |
 | Start-up | the bundle's entry imports `src/observability/rum` first, before the router and the app, and runs it synchronously |
 | Runtime configuration | `observability.json`, fetched once at start-up, mounted by the chart per environment, never baked into the bundle. Until it arrives, the page buffers nothing and exports nothing, so the RUM code can be a lazily loaded chunk the bundle imports only when the file switches RUM on. Ship a default with RUM off. nginx serves it from an exact location with `try_files $uri =404`: under the SPA fallback a missing file answers `index.html` with 200, so the page also checks the content type and keeps RUM off on anything that isn't JSON |
 | Route changes | the router's navigation events (React Router, Vue Router, Angular Router) start the `route.change` span. `app.route` is the router's own pattern for the matched route |

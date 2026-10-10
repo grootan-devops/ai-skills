@@ -11,7 +11,7 @@ Importable modules for `import.git`, pinned to a library tag, will be published 
 ## The application contract
 
 | The application provides | How | Collector side |
-|---|---|---|
+| --- | --- | --- |
 | OTLP traces, metrics and logs | gRPC on 4317 (HTTP on 4318) | `otelcol.receiver.otlp` |
 | Prometheus `/metrics` | a named metrics port, for example `http-metrics` on 9464 | `prometheus.scrape` through a ServiceMonitor, PodMonitor or pod discovery, unless the cluster's Prometheus scrapes it |
 | Logs on stdout | one `json` or `plain` record per line; stack traces may span lines | pod log tailing and parsing |
@@ -41,7 +41,7 @@ node CPU (eBPF)        ─► pyroscope.ebpf ─────────┴─�
 ### OTLP pipeline
 
 | Stage | Component | Rule |
-|---|---|---|
+| --- | --- | --- |
 | Receive | `otelcol.receiver.otlp` | gRPC on 4317 and HTTP on 4318, reachable inside the cluster only |
 | Limit memory | `otelcol.processor.memory_limiter` | the first processor; `limit_percentage` and `spike_limit_percentage` of the container's memory, so it triggers below the container limit; over the limit it refuses data, and senders retry or drop — applications never block |
 | Kubernetes identity | `otelcol.processor.k8sattributes` | `otel_annotations = true` in `extract`, so `resource.opentelemetry.io/*` annotations set `service.*`, `deployment.environment.name` and any extra attribute the chart annotates, such as a backend's label attributes (without it, a well-known label such as `app.kubernetes.io/instance` can win for `service.name`); extracts only `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid` and `k8s.node.name`; pods matched by `k8s.pod.uid`, then by the connection's IP. It can't provide `k8s.cluster.name`: where several clusters send to one backend, that comes from the app's env, set by the chart per cluster, and each cluster's collector adds it to what it collects itself (scraped metrics, file logs) with a `resource` processor (`action: upsert`) set from the same per-cluster value. Browser RUM bypasses it: a frontend's same-origin proxy forwards browser OTLP, so the connection's IP is the proxy pod's and would stamp that pod onto every browser; route resources with `browser.*` attributes around this processor |
@@ -113,7 +113,7 @@ otelcol.processor.k8sattributes "default" {
 ### Pod logs
 
 | Step | Rule |
-|---|---|
+| --- | --- |
 | Source | container stdout and stderr: `loki.source.kubernetes` through the Kubernetes API, or node log files (`loki.source.file`, `otelcol.receiver.filelog`) from an instance on every node |
 | Exclude | pods that send their logs over OTLP, and the collector's own pods |
 | Parse | `json`: decode the line; `plain`: the standard's fixed prefix pattern ([line formats](../signals/app-logs.md#line-formats)); strip any colour codes |
@@ -412,7 +412,7 @@ their user and session, and traces without an AI feature were dropped.
 ## Deduplication
 
 | Overlap | Rule |
-|---|---|
+| --- | --- |
 | SDK and eBPF traces | a workload is traced by its SDK or by `beyla.ebpf`, never both |
 | SDK and eBPF profiles | pods that profile themselves are excluded from `pyroscope.ebpf`, or don't run SDK CPU profiling where eBPF covers it |
 | Push and scrape | an instrument is either scraped from `/metrics` or pushed over OTLP, never both; one scraper per target |

@@ -4,7 +4,7 @@ Java has no Langfuse SDK, so these classes are the module's Langfuse side
 ([backends/langfuse.md](../../../references/backends/langfuse.md#app-route-default)).
 
 | File | What it gives the module |
-|---|---|
+| --- | --- |
 | `LangfuseExporter.java` | `LangfuseExporter.create(config, guard)`: an `OtlpHttpSpanExporter` to `{base_url}/api/public/otel/v1/traces` with Basic auth from the keys, `x-langfuse-ingestion-version: 4` and gzip; the export scope and the content guard work on a copy of each span. A guard that throws keeps the span out (fail closed). `withTranslation` adds the module's Langfuse-only keys to that copy. |
 | `ExportScope.java` | `shouldExport` (`ai_context`, `ai_only`) and `isAiSpan` |
 | `ContentGuard.java` | `ContentGuard.of(decide, maxChars)`, built from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `cap` and `failedStatus` |

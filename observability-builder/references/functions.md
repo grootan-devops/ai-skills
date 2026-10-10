@@ -185,7 +185,7 @@ the volume: `debug` shows every function step, `info` (the default) what happene
 what went wrong or slow.
 
 | Level | For | Examples |
-|---|---|---|
+| --- | --- | --- |
 | DEBUG | function steps: started, finished or failed, with the duration | `OrderService.create started` with `app.cart.items_count=3`; `OrderService.create finished` with `app.function.duration` |
 | INFO | completed requests (the access log for 2xx and 3xx), job runs, WebSocket connects and disconnects, business milestones | `request completed`, `job invoice-export completed`, `websocket connected`, `order created` |
 | WARN | 4xx responses, steps slower than `logging.application.slow_threshold`, retries, rejected connections | `request completed` with status 404, `OrderService.create slower than threshold`, retry 2 of 3, `websocket rejected` |

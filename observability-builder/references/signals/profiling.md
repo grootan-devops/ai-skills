@@ -26,7 +26,7 @@ Pyroscope protocol or as OTLP profiles, through the collector by default.
    run time:
 
    | Runtime | Typical profile types |
-   |---|---|
+   | --- | --- |
    | Go | CPU, allocated and in-use memory, goroutines, mutex and block contention |
    | Java | CPU or wall clock, allocations, lock contention |
    | Python | CPU |
@@ -55,7 +55,7 @@ Pyroscope protocol or as OTLP profiles, through the collector by default.
 A `controller` label is useful only where it lands on the samples of the work it names.
 
 | Runtime | How a label attaches | What to label |
-|---|---|---|
+| --- | --- | --- |
 | Node.js (`@pyroscope/nodejs` 0.6) | `wrapWithLabels` sets the label, runs the call and resets the label when the call returns. It has no async context, so a label doesn't cross `await`: samples taken after an `await` inside the labelled function carry no `controller`. | The CPU-heavy synchronous sections: parsing and conversion, regex redaction, serialisation. Never a whole async function or an async job body: an I/O-bound async function gains nothing from a label, because its samples are idle time. |
 | Go | pprof labels carried by the context | Check the SDK. |
 | Java, Python | the agent's labels, kept per thread | Check the SDK. |
@@ -66,7 +66,7 @@ Samples get the `span_id` and `trace_id` of the span they ran under (an integrat
 `span_name`); the backend turns the ids into links from the trace to its profile.
 
 | Runtime | Integration | Where it fits |
-|---|---|---|
+| --- | --- | --- |
 | Go | `otel-profiling-go`: wrap the SDK tracer provider | every server |
 | Python, threaded | `pyroscope-otel`: a span processor that tags the thread with the local root span | servers that run one request per thread at a time (gunicorn sync and gthread workers) |
 | Python, asyncio | the module's labels: its heavy-section helper adds the current span's ids to the thread tags around the synchronous call | the labelled heavy sections; the rest of the request isn't linked. `pyroscope-otel` (Grafana's Python span profiles) tags the thread for the whole root span, so on asyncio a request that awaits hands its tag to the next one |
@@ -100,7 +100,7 @@ Details per backend: [backends](../backends/README.md).
 Profile labels, static and dynamic, are defined in [data-model.md](../data-model.md):
 
 | Label | Source |
-|---|---|
+| --- | --- |
 | application name | `service.name` |
 | `service_namespace`, `service_version`, `deployment_environment_name`, `k8s_namespace_name`, `k8s_pod_name`, `k8s_pod_uid`, `k8s_node_name`, and `k8s_cluster_name` when set | the resource, set once as static labels when the profiler starts |
 | `controller`, `operation` | the labels wrapper on heavy code |
@@ -110,7 +110,7 @@ Profile labels, static and dynamic, are defined in [data-model.md](../data-model
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `profiling.enabled` | `false` | |
 | `profiling.exporter.endpoint` | `http://localhost:4040` | the collector's profile receiver, or a backend in direct mode |
 | `profiling.exporter.protocol` | `pyroscope` | `pyroscope` or `otlp` |

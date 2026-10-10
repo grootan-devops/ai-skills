@@ -29,7 +29,7 @@ LLM and agent telemetry on top of `tracing` and `metrics`.
 ## File location
 
 | Context | Where the loader looks |
-|---|---|
+| --- | --- |
 | `OBSERVABILITY_CONFIG` is set | that path |
 | Local run | `observability.yml` in the working directory, the repository root |
 | Kubernetes | a ConfigMap mounted at `/etc/observability/observability.yml`, with `OBSERVABILITY_CONFIG` pointing at it; secrets are files from a mounted Secret, read through `${file:...}` ([charts.md](charts.md)) |
@@ -185,7 +185,7 @@ Each section is described on its signal page: [traces](signals/traces.md),
 `tracing.exporter`, `metrics.otlp.exporter` and `logging.exporter` share one shape:
 
 | Key | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `endpoint` | `http://localhost:4317` for `grpc`, `http://localhost:4318` for `http/protobuf` | Collector or backend. gRPC takes `scheme://host:port`; `http/protobuf` takes the base URL and the loader appends `/v1/traces`, `/v1/metrics` or `/v1/logs`. |
 | `protocol` | `grpc` | `grpc` or `http/protobuf`; some backends accept only one (e.g. Dynatrace takes `http/protobuf`). |
 | `compression` | `gzip` | `gzip` or `none`. |
@@ -234,7 +234,7 @@ some also need delta temporality, set with `metrics.otlp.temporality: delta`
 `logging.access_log.exclude_paths` are separate lists with the same matching:
 
 | Entry | Matches |
-|---|---|
+| --- | --- |
 | `/health` | that exact path, query string ignored; `/health/live` and `/api/healthcare` are other paths |
 | `/api-docs/*` | every path below `/api-docs/`; list `/api-docs` as well for the page itself |
 
@@ -313,7 +313,7 @@ baseline in [acceptance.md](acceptance.md) uses it).
 ## What the loader writes
 
 | yml | Standard setting |
-|---|---|
+| --- | --- |
 | `resource.service.name` | `OTEL_SERVICE_NAME` |
 | `resource.service.namespace`, `resource.service.version`, `resource.environment`, `resource.attributes` | `OTEL_RESOURCE_ATTRIBUTES` with `service.namespace`, `service.version`, `deployment.environment.name` and each attribute; values percent-encoded, empty ones dropped |
 | `tracing.enabled` | `OTEL_TRACES_EXPORTER`: `otlp` or `none` |
@@ -360,7 +360,7 @@ read differently, pass the value as an exporter option in the SDK's unit and lea
 variable unset.
 
 | SDK | Difference | What the loader does |
-|---|---|---|
+| --- | --- | --- |
 | Python OTLP exporters (gRPC and HTTP) | read `_TIMEOUT` in seconds, while the specification says milliseconds | passes `timeout` in seconds as an exporter option |
 | Python OTLP gRPC exporter | an explicit `_INSECURE=false` makes an `http://` endpoint use TLS | leaves `_INSECURE` unset for endpoints with a scheme |
 
@@ -408,7 +408,7 @@ These are code, written safe by construction and checked by the audit, so the fi
 section for them:
 
 | Concern | Where it lives |
-|---|---|
+| --- | --- |
 | Span and log attributes, request context, business enrichment | code, [enrichment.md](enrichment.md) |
 | Function wrappers, step logs, profiling labels | code, [functions.md](functions.md); only the slow-step threshold is in the yml |
 | Metric names, labels and buckets | fixed by the standard, [signals/metrics.md](signals/metrics.md) |

@@ -131,7 +131,7 @@ nginx default.conf                   # JSON access log with $http_traceparent; /
 Each workload adds to the language module above.
 
 | Workload | Addition |
-|---|---|
+| --- | --- |
 | API backend | `adapters/<framework>` only |
 | WebSocket endpoints | `adapters/websocket` — connection and message root spans, lifecycle records, `websocket_*` metrics |
 | Async workers and messaging | `adapters/consumer` — context from message headers, per-message job log, span links, lag and job metrics |

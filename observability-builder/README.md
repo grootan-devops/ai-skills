@@ -12,7 +12,7 @@ It is self-contained: the workflow, the observability standard it applies, the
 ## Commands
 
 | Command | What it does |
-|---|---|
+| --- | --- |
 | `observability instrument [path]` | Detects the stack, asks the deployment questions, researches current libraries, plans, implements and verifies against a real receiver |
 | `observability audit [path]` | Finds secrets, bodies, unbounded labels and misplaced setup in instrumentation; changes nothing unless asked |
 
@@ -31,7 +31,7 @@ ln -s "$(pwd)/observability-builder" ~/.claude/skills/observability-builder
 ## Layout
 
 | Path | Purpose |
-|---|---|
+| --- | --- |
 | `SKILL.md` | Entry point: routing, working rules, commands |
 | `references/README.md` | Index of the standard: principles, data model, config, layout, hooks, signals (GenAI included), workloads (AI features and agents included), backends (Langfuse included), collector, charts, acceptance, SDK notes |
 | `references/instrument.md`, `references/audit.md` | The two workflows |
@@ -46,7 +46,7 @@ ln -s "$(pwd)/observability-builder" ~/.claude/skills/observability-builder
 Python 3.10+ with PyYAML; `jsonschema` is used when installed.
 
 | Script | Purpose |
-|---|---|
+| --- | --- |
 | `scripts/detect.py <project>` | Stack, entrypoints, workload type, existing telemetry, and AI use (model providers, AI frameworks, vector stores, LLM-observability tools) as JSON |
 | `scripts/validate.py <observability.yml>` | Schema check against the bundled schema and an interpolation dry run; never prints secret values |
 | `scripts/audit.py <project> --module <path>` | Static findings with severities: safe capture, layout, logging that bypasses the app's logger, schedulers without a job span, patched SDK internals, AI content outside the content policy, capture switches, Langfuse keys; `--strict` exits 1 on any finding, a P0 always exits 2 |

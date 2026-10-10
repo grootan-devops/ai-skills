@@ -18,7 +18,7 @@ verification.
 ## Ingestion
 
 | What | Endpoint | Protocol | Auth |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Traces | `{base_url}/api/public/otel/v1/traces` | OTLP over HTTP (protobuf or JSON); no gRPC; traces only | Basic auth from `public_key:secret_key`, plus `x-langfuse-ingestion-version: 4` |
 | Scores | `POST {base_url}/api/public/scores`; the JS client (5.11) batches them into `POST /api/public/ingestion` instead | JSON | Basic auth |
 | Prompts | `GET {base_url}/api/public/v2/prompts/{name}?label={label}` (or `?version=`) | JSON | Basic auth |
@@ -47,7 +47,7 @@ route decides who sends them. `sdk` goes with the app route only.
 ops exporter and Langfuse see the same spans and trace ids. Per stack and mode:
 
 | Stack | `hybrid` | `sdk` | `otel` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Python (`langfuse` 4.7.0 or later; `span_exporter` seen with 4.15) | `Langfuse(public_key, secret_key, base_url, tracer_provider=<the module's provider>, should_export_span=<the scope filter>, mask_otel_spans=<the content guard>, span_exporter=<the module's transport>, timeout, flush_interval)`. The transport posts OTLP protobuf with the SDK's own headers (Basic auth, `x-langfuse-sdk-name`, `x-langfuse-sdk-version`, `x-langfuse-public-key`) and reads no `OTEL_EXPORTER_OTLP_*` variable. The SDK's default `OTLPSpanExporter` would merge the ops headers and take the ops TLS files | the same client; the module imports `langfuse.openai` (it patches the OpenAI classes) instead of starting the GenAI instrumentation, and its step helpers use `start_as_current_observation(as_type=…)` | the module's exporter: the same transport, with Basic auth, the ingestion header and gzip, behind the scope filter and the content guard, in a `BatchSpanProcessor` |
 | JS and TS (`@langfuse/otel`, `@langfuse/client`, `@langfuse/tracing`, `@langfuse/openai`, 5.x) | `NodeSDK({ spanProcessors: [stamping, new BatchSpanProcessor(opsGuard(otlpExporter)), guarded(new LangfuseSpanProcessor({ publicKey, secretKey, baseUrl, shouldExportSpan, mediaUploadEnabled, exporter }))] })`. `exporter` is the module's transport: `createOtlpHttpExportDelegate` with `httpAgentFactoryFromOptions` from `@opentelemetry/otlp-exporter-base/node-http` (0.222), with the processor's own headers. The default `OTLPTraceExporter` merges the ops header variables into its own headers, takes the ops TLS files and compression, and can't be made to read none. `guarded` hands the inner processor a copy of each ended span after the content guard (the SDK's `mask` sees only `langfuse.*` keys). No `environment` or `release`: Langfuse reads the environment from the resource and the module stamps the release. Also: an allow-listed baggage propagator, the SDK's logger off (`configureGlobalLogger`), and scores under `suppressTracing` | the same processors. Model calls go through `observeOpenAI(client)`: the module wraps the app's client and taps the client beneath it. The step helpers use `startActiveObservation(name, fn, { asType })`, after `setLangfuseTracerProvider(trace.getTracerProvider())` | `new BatchSpanProcessor(langfuseExporter)`: the same transport, with Basic auth, the ingestion header and gzip, behind the scope filter and the content guard |
 | Go (no Langfuse SDK) | the asset's exporter in a batch processor on the same provider: OTLP/HTTP to `{base_url}/api/public/otel/v1/traces` with Basic auth, the ingestion header and gzip, on a transport of its own (`otlptracehttp` would read the ops exporter's variables). It is wrapped by the scope filter and the content guard, using an embedded `sdktrace.ReadOnlySpan` with its own attributes, status and events. Scores go through the asset's queue; app prompts and datasets through its REST client | not available: `hybrid` or `otel` | the same exporter; no REST client |
@@ -146,7 +146,7 @@ What Langfuse 4 reads from a span (verified with 4.55 self-hosted). `langfuse.*`
 the conventions.
 
 | Langfuse field | Read from |
-|---|---|
+| --- | --- |
 | Trace name | `langfuse.trace.name`, else the root span's name |
 | User, session | `langfuse.user.id` or `user.id`; `langfuse.session.id`, `session.id` or `gen_ai.conversation.id` |
 | Release, version | `langfuse.release`; `langfuse.version`, else `service.version` |
@@ -244,7 +244,7 @@ for the module's side). Verified with Langfuse 4.55: experiments are built from 
 - **Keys on the item's spans** (every span of the item's trace unless marked root):
 
   | Key | Where | Notes |
-  |---|---|---|
+  | --- | --- | --- |
   | `langfuse.experiment.id`, `langfuse.experiment.name` | every span | required, unique per run |
   | `langfuse.experiment.dataset.id` | every span | the dataset's id; for local data, a stable id |
   | `langfuse.experiment.item.id` | every span | the dataset item's id |

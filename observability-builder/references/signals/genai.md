@@ -127,7 +127,7 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
 ## Step kinds
 
 | Step | Kind | Name | Langfuse type | Attributes |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Model call | `CLIENT` | `chat {gen_ai.request.model}` (`generate_content`, `text_completion` likewise) | generation, implied | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and parameters, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, usage, `gen_ai.response.time_to_first_chunk`, `gen_ai.output.type`, `gen_ai.prompt.name`, `app.genai.prompt.version` |
 | Embedding | `CLIENT` | `embeddings {gen_ai.request.model}` | embedding, implied | `gen_ai.request.model`, `gen_ai.usage.input_tokens`; vectors never |
 | Retrieval | `CLIENT` for a remote store, `INTERNAL` in process | `retrieval {gen_ai.data_source.id}` | retriever, set by the module | `gen_ai.data_source.id`, `app.rag.documents_retrieved`, `app.rag.top_score`; the query and the documents are content |
@@ -151,7 +151,7 @@ The module, the receiver and the collector use one list. Anything else an instru
 on an AI span is caught by the [ops allow-list](#the-ops-allow-list), which fails closed.
 
 | Source | Keys |
-|---|---|
+| --- | --- |
 | GenAI conventions | `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.definitions`, `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents`, `gen_ai.memory.query.text`, `gen_ai.memory.records`, `gen_ai.evaluation.explanation`; the legacy `gen_ai.prompt`, `gen_ai.completion`, `gen_ai.prompt.N.*`, `gen_ai.completion.N.*` and `gen_ai.prompt.variable*` |
 | Langfuse | `langfuse.observation.input`, `langfuse.observation.output`, `langfuse.trace.input`, `langfuse.trace.output`, `langfuse.experiment.item.expected_output` |
 | OpenLLMetry | `traceloop.entity.input`, `traceloop.entity.output` |
@@ -165,7 +165,7 @@ on an AI span is caught by the [ops allow-list](#the-ops-allow-list), which fail
 it allows, in the feature registry, and gets the lower of the two:
 
 | Mode | What reaches Langfuse | Where |
-|---|---|---|
+| --- | --- | --- |
 | `off` | no content key; the step's structure, usage, timing and ids only | production by default; any feature that handles data nobody may read |
 | `redacted` | content after the feature's redactor, then the size cap. A feature without a redactor records nothing | production, for a feature whose owner signed off on the redactor |
 | `full` | raw content, size cap only | environments with synthetic or consented data only; the chart sets it ([charts.md](../charts.md)) |
@@ -205,7 +205,7 @@ Every span, AI or not, also loses the content keys and every `langfuse.*` key on
 ## Trace context
 
 | Concept | Langfuse key | Source and rule |
-|---|---|---|
+| --- | --- | --- |
 | Feature | `langfuse.trace.name` | the feature registry: kebab-case, bounded; the only source of trace names |
 | User | `langfuse.user.id` | the verified principal, the same value as `user.id` on the entry span; at most 200 characters |
 | Conversation | `langfuse.session.id`, with `gen_ai.conversation.id` on the AI spans | the app's conversation or thread id; at most 200 US-ASCII characters; never derived from `session.id`, which stays the login or replay session |
@@ -226,7 +226,7 @@ tool arguments and results, usage, cost, model and parameters need no translatio
 reads them from the GenAI conventions ([backends/langfuse.md](../backends/langfuse.md#mapping)).
 
 | From | To | When |
-|---|---|---|
+| --- | --- | --- |
 | feature, user, conversation, release, tags, metadata, version | the [trace-context keys](#trace-context) | every span in the feature context |
 | step kind without an implied type | `langfuse.observation.type`: `retriever`, `chain`, `guardrail`, `evaluator`, `event` | that step's span |
 | `gen_ai.prompt.name`, `app.genai.prompt.version` | `langfuse.observation.prompt.name`, `langfuse.observation.prompt.version` (an integer) | generations that used a managed prompt, never a fallback |
@@ -242,7 +242,7 @@ is the same in all three, so switching is one key (for example
 `mode: "${OBS_LANGFUSE_MODE:-hybrid}"`):
 
 | Mode | AI spans made by | Sent to Langfuse by | Langfuse API (scores) | Stacks |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `hybrid` (default) | the OpenTelemetry GenAI instrumentation and the module's helpers | the Langfuse SDK's span processor on the module's provider (`export: app`), or the collector (`export: collector`) | yes, through the SDK client (a small REST client in Go and Java) | all |
 | `sdk` | the Langfuse SDK: its OpenAI integration for model calls, its observations for the module's steps | the SDK, from the module's provider | yes | Python, TypeScript |
 | `otel` | as in `hybrid` | the module's own OTLP exporter (`export: app`), or the collector | no: reduced features, no feedback or evaluator scores | all |
@@ -286,7 +286,7 @@ What changes and what doesn't:
 Choosing:
 
 | Project context | Mode |
-|---|---|
+| --- | --- |
 | Go, Java and Kotlin, Rust, .NET, Ruby, PHP (no Langfuse tracing SDK) | `hybrid` (OTLP plus a REST client for scores) or `otel` |
 | A framework that already emits GenAI or OpenInference spans (Spring AI, Semantic Kernel, Pydantic AI, Vercel AI SDK, OpenAI Agents SDK, LlamaIndex) | `hybrid` or `otel`, with no second source |
 | Several destinations, or a likely backend change | `hybrid` or `otel` |
@@ -388,7 +388,7 @@ for item in data.items:
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `genai.enabled` | `false` | the GenAI metrics, the feature context and, when configured, Langfuse; off keeps every capture switch off |
 | `genai.content.capture` | `off` | `off`, `redacted` or `full`: the most this environment allows |
 | `genai.content.sample_ratio` | `1.0` | share of traces with content, by trace id |

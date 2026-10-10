@@ -42,7 +42,7 @@ gateway, MCP server, AI agent, batch).
 Suggest an answer for each question from what you found, then use what the user says.
 
 | Question | Why it matters |
-|---|---|
+| --- | --- |
 | Where does each signal go — a collector (endpoint) or directly to a backend (endpoint, auth header, token file path)? Do several clusters send to the same backend? | Sets every `exporter` block; tokens stay in mounted files; a backend shared by clusters needs `k8s.cluster.name` in the resource ([data-model.md](data-model.md#resource)); in OneUptime, profiles can't be told apart by cluster or environment within one project ([oneuptime.md](backends/oneuptime.md#profiles)) |
 | Do logs go to stdout only, OTLP only, or both? | stdout-only needs a collector that ships pod logs; errors are reported from logs |
 | The ops metrics are served on `/metrics` on their own port (default 9464) for Prometheus or the collector to scrape: which port, and who scrapes it? Does the team want app metrics pushed over OTLP as well (off by default)? | The port needs a chart service port and monitor; ops metrics are the default set, app metrics are added only on request |
@@ -328,7 +328,7 @@ End with a telemetry inventory. Build it from what the app really exported in st
 `/metrics` scrape and the receiver's summary, not from the code alone:
 
 | Section | What it lists |
-|---|---|
+| --- | --- |
 | Metrics | every metric family on `/metrics` with its type and label names, each marked as contract ([signals/metrics.md](signals/metrics.md)), library default or added for this app; anything in the contract the stack can't produce, and why |
 | Logging outside the logger | the `logger-bypass` findings that remain (file:line), and why each one stays, for example a CLI script or init code that runs before the logger exists |
 | Work outside the API | scheduled jobs, timers, queue consumers, WebSocket endpoints, background tasks and scripts: for each, what it has now (root span, job log record, metrics, profiling label) and what could still be added |

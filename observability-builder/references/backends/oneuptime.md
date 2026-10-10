@@ -8,7 +8,7 @@ Check OneUptime's current docs at run time — paths, limits and policy options 
 ## Ingestion
 
 | Signal | Endpoint | Protocol | Auth |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Traces, metrics, logs | `<host>/otlp` | OTLP over HTTP, or OTLP/gRPC to the installation's gRPC listener | header `x-oneuptime-token: <ingestion key>` |
 | Profiles | `<host>/pyroscope`; clients append `/ingest` or `/push.v1.PusherService/Push` | Pyroscope protocol | `x-oneuptime-token`, `Authorization: Bearer <key>`, or basic auth with the key as password |
 | Browser traces, metrics, logs | `<host>/otlp/v1/<signal>`, usually through a same-origin proxy | OTLP over HTTP | added server-side by the proxy, or a browser key limited to allowed origins |
@@ -17,7 +17,7 @@ Check OneUptime's current docs at run time — paths, limits and policy options 
 ## Direct or through the collector
 
 | Route | How it works |
-|---|---|
+| --- | --- |
 | Through the collector (default) | Apps send OTLP over gRPC to the collector. Its OneUptime exporter (`otelcol.exporter.otlphttp` with base endpoint `<host>/otlp`, or gRPC) adds `x-oneuptime-token` through `otelcol.auth.headers`, reading the key from a mounted file. The key never reaches the app. |
 | Direct | Each signal's yml exporter points at OneUptime and carries the header from a mounted secret file. |
 
@@ -178,7 +178,7 @@ OneUptime reads it like this:
 ## Session replay
 
 | Piece | Rule |
-|---|---|
+| --- | --- |
 | Loader | `<origin>/telemetry/session-replay/v1/recorder.js` — a small loader that fetches the application's Replay Policy, then loads the recorder |
 | Configuration | `window.__ONEUPTIME_SESSION_REPLAY__`, set before the loader runs (or `data-oneuptime-*` attributes on the script tag): `host`, `token`, `appIdentifier`, and options such as `respectDoNotTrack` and `offlineStorage` |
 | Command queue | `window.OneUptimeReplayQueue` takes commands before the recorder loads: `onSessionChange` keeps `session.id` on spans and logs in step with the recorder's session; `grantConsent` and `revokeConsent` come from the consent tool |

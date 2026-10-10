@@ -10,7 +10,7 @@ capture.
 ## What changes
 
 | Concern | API backend | Job run, CLI |
-|---|---|---|
+| --- | --- | --- |
 | Unit of work | request | run: one execution, one scheduler tick or one manual trigger |
 | Entry span | SERVER span per request | root span `job {name}` per run |
 | Per-unit record | access log | one job log record (`job_run`), or one ERROR record when the run failed |
@@ -77,7 +77,7 @@ and span ids. It is the run's equivalent of the access log and is written whatev
 decision.
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | Severity and event name | INFO with event name `job_run` when the run completed; a failed run writes one ERROR record with event name `exception` instead |
 | Body | a constant message per job: `job {name} completed` or `job {name} failed` |
 | `app.job.name`, `app.job.trigger` | the run's identity |

@@ -23,7 +23,7 @@ function, the observations, the trace context, the content mode, the levels and 
 ## By function
 
 | Function | Observations | Trace context | Production content | Levels and scores | Also |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Chat assistant | `invoke_agent` or `invoke_workflow` → `chat {model}` per turn; input and output guardrails | feature, user, conversation, a channel tag | off; `redacted` only with the owner's sign-off | WARNING on a fallback or a truncated answer; `user_feedback` scores; judges in Langfuse | time to first chunk; profile prompt assembly and tokenisation |
 | Retrieval-augmented answer | `embeddings` (the query) → `retrieval {source}` (counts, top score, document ids as metadata) → `chat` with the prompt link | as above | the retrieved chunks are content | WARNING when no documents were found and the answer fell back; groundedness and relevance through Langfuse evaluators | embedding tokens; a `rag.no_documents` log event |
 | Extraction or OCR | `invoke_workflow` → OCR (ops-only unless a vision model) → `chat` with `gen_ai.output.type=json` → `evaluate schema` | feature, requester, document type as metadata | off; record the extracted fields and confidences instead of the text; media as a reference | WARNING when the output had to be repaired; a `schema_valid` score with the id `{trace id}:schema_valid`; corrections through an annotation queue | the job metrics; profile rasterisation |

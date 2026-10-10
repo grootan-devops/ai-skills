@@ -13,7 +13,7 @@ filter and its error hook; SDK setup, exporters, the logger, metrics and profili
 module, and business code uses only the OpenTelemetry API and the module's helpers.
 
 | Service shape | Adapter additions |
-|---|---|
+| --- | --- |
 | REST or plain HTTP | `adapters/<framework>`: the outermost middleware or filter and the global error hook |
 | GraphQL | the HTTP adapter plus the GraphQL server's execution hooks for operation spans |
 | gRPC | `adapters/grpc`: server interceptors or a stats handler, and the health-service exclusion |
@@ -28,7 +28,7 @@ outbound HTTP, database and cache clients may use official auto-instrumentation.
 the order a request sees; [hooks.md](../hooks.md) has the full rules.
 
 | # | Where | Rule |
-|---|---|---|
+| --- | --- | --- |
 | 1 | Process start | `init` runs before the framework loads; pre-fork and multi-process servers create providers after the fork, in each worker |
 | 2 | Outermost hook | extract W3C `traceparent`, `tracestate` and baggage and start the SERVER span; at a public edge, don't trust the incoming sampling flag |
 | 3 | Request start | accept `x-correlation-id` when valid (length and charset capped), otherwise generate one and log the replacement — never reject the request; bind trace, span and correlation IDs to the logger context |
@@ -66,7 +66,7 @@ Pitfalls the contract guards against:
 ## Signals
 
 | Signal | What the API emits | Standard |
-|---|---|---|
+| --- | --- | --- |
 | Access log | one record per request at response end, on by default; level by status (5xx ERROR, 4xx WARN, otherwise INFO); allow-listed headers, cookies and body fields only; the framework's default access log turned off | [signals/access-log.md](../signals/access-log.md) |
 | Application logs | all logging through the app's logger (the language's standard logger with the OpenTelemetry bridge), `json` or `plain`, native trace and span IDs, step logs for every wrapped function at the policy's levels | [signals/app-logs.md](../signals/app-logs.md) |
 | Traces | a SERVER entry span per request, nested INTERNAL spans for the project's own functions on the request path, a CLIENT span for every outbound call, no framework middleware spans; root spans for job runs and WebSocket traffic; semantic-convention groups chosen from what the code does | [signals/traces.md](../signals/traces.md), [functions.md](../functions.md) |
@@ -93,7 +93,7 @@ on every child span. The middleware sets them. Values are written as they are, e
 which are never captured ([safe-capture.md](../safe-capture.md)).
 
 | Attributes | Source | Rule |
-|---|---|---|
+| --- | --- | --- |
 | `http.request.method`, `url.scheme`, `url.path`, `server.address`, `server.port`, `network.protocol.version`, `user_agent.original` | HTTP instrumentation | semantic conventions |
 | `http.route` | the router, after routing | template; `unmatched` when nothing matched |
 | `url.query` | request URL | values of allow-listed parameters only |
@@ -158,7 +158,7 @@ each of its messages start their own traces, and the connection's lifecycle is l
 counted.
 
 | Unit | Span | Logs | Metrics |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Connection: handshake and authentication | a root `SERVER` span `WS {path}` (the endpoint's route, for example `WS /ws`), ended once the connection is accepted or rejected | INFO `websocket connected`; WARN `websocket rejected` when the server refuses the client; INFO `websocket disconnected` when the connection ends | `websocket_connections`, `websocket_connections_total`, `websocket_disconnections_total` |
 | Message, other than a ping | a root `SERVER` span `WS {type}`, linked to the connection span | the handler's step logs; one ERROR record when handling fails | `websocket_messages_received_total`, `websocket_receive_errors_total` |
 | Ping, pong or heartbeat | none | none | counted in `websocket_messages_received_total` |

@@ -52,7 +52,7 @@ OpenTelemetry metric push over OTLP is off by default.
 ## The default set
 
 | Metric | Type | Labels | Measures |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `http_server_request_duration_seconds` | histogram | `method`, `route`, `status_code` | requests served, from arrival to response end |
 | `http_server_requests_total` | counter | `method`, `route` | requests served |
 | `http_server_active_requests` | gauge | `method` | requests in flight; the route isn't known yet when a request arrives |
@@ -90,7 +90,7 @@ What each stack's library provides, what the contract's names map to, and what h
 equivalent. Check the versions you install; the table records what was found.
 
 | Stack | Library and default runtime metrics | HTTP server and client metrics | Pool metrics | Mapping and gaps |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Node.js | `@prometheus-io/client`, the renamed `prom-client` (deprecated under its old name). `collectDefaultMetrics()` gives the `process_*` and `nodejs_*` series above | None built in. The access-log middleware records the server metrics; Node's diagnostics channels (`http.client.request.*` for `node:http`, `undici:request:*` for `fetch`) record the client ones | `pg` `Pool`: `totalCount`, `idleCount` and `waitingCount`, read at scrape time; active is total minus idle | `pg` has no wait time: time `connect()`, which `pool.query()` also uses ([sdk-notes.md](../sdk-notes.md)) |
 | Python | `prometheus_client`. Its default collectors: process (`process_*`, read from `/proc`, so Linux only), GC (`python_gc_*` counters) and platform (`python_info`) | None built in: an ASGI or WSGI middleware with the short labels; client calls through the client wrappers | SQLAlchemy pool: `size()`, `checkedin()` (idle), `checkedout()` (active), `overflow()`. psycopg_pool `get_stats()`: `pool_size`, `pool_available` (idle), `requests_waiting` | Wait time: time the checkout (psycopg_pool's `requests_wait_ms` is a running total); SQLAlchemy has no waiting count. Pre-fork servers: multiprocess mode serves one `/metrics` for all workers, without the per-process collectors |
 | Go | `client_golang`. `collectors.NewGoCollector()` and `NewProcessCollector()`: `go_goroutines`, `go_threads`, `go_gc_duration_seconds` (a summary), `go_memstats_*`, `process_*` | An `http.Handler` middleware with the short labels (promhttp's instrumenting handlers label `code` and `method`, not the contract's labels); a `RoundTripper` wrapper for client calls | `collectors.NewDBStatsCollector(db, name)` for `database/sql`: `go_sql_open_connections`, `go_sql_in_use_connections`, `go_sql_idle_connections`, labelled `db_name` | Map the `go_sql_*` names in a small collector over `db.Stats()`, or keep them and list the mapping. Waits are running totals (`go_sql_wait_count_total`, `go_sql_wait_duration_seconds_total`): no waiting gauge and no wait histogram |
@@ -108,7 +108,7 @@ LangChain's `on_llm_end`, an AI SDK middleware or a Spring AI observation handle
 from spans, so unsampled requests count too:
 
 | Metric | Type | Labels | Measures |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `gen_ai_client_operation_duration_seconds` | histogram | `provider`, `model`, `operation`, `outcome` | model and embedding calls, from the request to the last chunk; `outcome` is `success`, `error`, `rate_limited` or `timeout` |
 | `gen_ai_client_tokens_total` | counter | `provider`, `model`, `token_type` | tokens the provider reported; `token_type` is `input`, `output`, `cache_read`, `cache_write` or `reasoning` |
 | `gen_ai_client_time_to_first_chunk_seconds` | histogram | `provider`, `model` | streamed calls, from the request to the first chunk |
@@ -154,7 +154,7 @@ The enrichment catalogue lists companion metrics for common functions
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `metrics.enabled` | `true` | `false` turns off `/metrics` and OTLP push |
 | `metrics.prometheus.enabled` | `true` | the `/metrics` server |
 | `metrics.prometheus.host` | `0.0.0.0` | listen address |

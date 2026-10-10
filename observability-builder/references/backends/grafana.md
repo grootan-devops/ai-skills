@@ -9,7 +9,7 @@ protocol, and the collector or Prometheus delivers each signal to its component
 ## Components
 
 | Signal | Component | Ingest | Collector exporter |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Traces | Tempo | OTLP over gRPC (4317) or HTTP (4318) | `otelcol.exporter.otlp` or `otelcol.exporter.otlphttp` |
 | Metrics | Prometheus | its own scrape of `/metrics`; OTLP over HTTP at `/api/v1/otlp/v1/metrics` once its OTLP receiver is switched on; or remote write | `otelcol.exporter.otlphttp`, or `otelcol.exporter.prometheus` → `prometheus.remote_write` |
 | Metrics | Mimir | OTLP over HTTP at `/otlp/v1/metrics`, or remote write | as for Prometheus |
@@ -66,7 +66,7 @@ protocol, and the collector or Prometheus delivers each signal to its component
 ## Authentication
 
 | Installation | Auth | Collector setting |
-|---|---|---|
+| --- | --- | --- |
 | Self-hosted, in-cluster | none, or mTLS | the exporter's `tls` block |
 | Self-hosted, behind a gateway | basic auth or a bearer token | `otelcol.auth.basic` or `otelcol.auth.bearer`; `basic_auth` or `bearer_token_file` in `pyroscope.write` |
 | Multi-tenant | the `X-Scope-OrgID` header, with any of the above | `otelcol.auth.headers`; `headers` in `pyroscope.write` |

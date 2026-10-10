@@ -10,7 +10,7 @@ Read this index first, then only the rows the task needs. Rows marked *planned* 
 yet: say so instead of inferring their content.
 
 | Task | Read | Status |
-|---|---|---|
+| --- | --- | --- |
 | Understand the principles | [principles.md](principles.md) | ready |
 | Know where each field belongs (resource, span, log, metric, native OTLP) | [data-model.md](data-model.md) | ready |
 | Add business attributes per function | [enrichment.md](enrichment.md) | ready |

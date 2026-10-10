@@ -9,7 +9,7 @@ instead of editing the chart.
 ## Requirements
 
 | # | The chart provides | Why |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `observability.yml` from a ConfigMap, mounted at `/etc/observability/observability.yml`, with `OBSERVABILITY_CONFIG` pointing at it | one config file per environment ([config.md](config.md), [layout.md](layout.md)) |
 | 2 | backend tokens from Secrets, mounted as files (for example under `/var/run/secrets/observability/`) and referenced in the yml as `${file:/var/run/secrets/observability/<name>}` | secrets never sit in the ConfigMap or in literal env values |
 | 3 | downward-API env: pod name, pod UID, namespace and node name; where several clusters send to one backend, also the cluster's name (`K8S_CLUSTER_NAME`) from a cluster-level chart value, since the downward API doesn't provide it | the yml adds them to the resource, and the collector matches telemetry to its pod by UID |

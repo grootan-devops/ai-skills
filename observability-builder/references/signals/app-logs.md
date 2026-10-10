@@ -67,7 +67,7 @@ One JSON object per line. The fixed keys map to native fields; every other key i
 with the same name.
 
 | Key | Native field | Value |
-|---|---|---|
+| --- | --- | --- |
 | `time` | `timeUnixNano` | event time |
 | `level` | `severityText`, `severityNumber` | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR` or `FATAL` |
 | `message` | `body` | the constant message |
@@ -134,7 +134,7 @@ the attributes (`code.function.name`, `code.file.path`, `code.line.number`, `thr
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `logging.format` | `json` | `json` or `plain` |
 | `logging.output` | `stdout` | `stdout`, `otlp`, or `[stdout, otlp]` |
 | `logging.exporter.*` | | the OTLP exporter used when the output includes `otlp` ([config.md](../config.md)) |

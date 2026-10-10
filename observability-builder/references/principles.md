@@ -8,7 +8,7 @@ a case, decide it with these principles.
 The standard is rules, never per-framework code:
 
 | Part | What it defines | Read |
-|---|---|---|
+| --- | --- | --- |
 | Telemetry data model | every field a service emits, where it belongs, where its value comes from, and which values never leave the process | [data model](data-model.md), [enrichment](enrichment.md), [functions](functions.md), [safe capture](safe-capture.md) |
 | Config contract | the shape of `observability.yml` and its JSON Schema | [configuration](config.md) |
 | Integration rules | where observability code lives, how it hooks into a framework, how libraries are chosen, how existing monitoring is migrated | [layout](layout.md), [hooks](hooks.md), this page |

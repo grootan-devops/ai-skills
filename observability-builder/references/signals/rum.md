@@ -10,7 +10,7 @@ app's own origin, so the backend key never reaches the page.
 ## What the page emits
 
 | Signal | Source | Content |
-|---|---|---|
+| --- | --- | --- |
 | Page loads | `@opentelemetry/instrumentation-document-load` | one trace per full load, with the resource fetch spans |
 | Route changes | the app's router hook | one span per client-side navigation, named `route.change`, carrying `app.route` |
 | API calls | `@opentelemetry/instrumentation-fetch` (and `-xml-http-request` where XHR is used) | CLIENT spans that send `traceparent` to the API, so the backend `SERVER` span continues the browser trace |
@@ -39,7 +39,7 @@ the same `service.version` and `deployment.environment.name`. OneUptime classifi
 telemetry as RUM by the `browser.*` resource attributes.
 
 | Where | Attributes |
-|---|---|
+| --- | --- |
 | Resource | `service.name`, `service.version`, `deployment.environment.name`, `browser.language`, `browser.platform`, `browser.mobile`, `browser.brands` (where `navigator.userAgentData` exists), `user_agent.original` |
 | Every span and log | `session.id` (the replay session, see below), `app.route` (the route template) |
 | Action spans and their logs | `correlation.id`, also sent to the API as `x-correlation-id` |
@@ -78,7 +78,7 @@ The page sends everything to its own origin. A proxy in the app server (route ha
 fullstack app, nginx for a single-page app) adds the backend key and forwards:
 
 | Browser request | Proxy forwards to |
-|---|---|
+| --- | --- |
 | `POST /telemetry/v1/traces`, `/v1/metrics`, `/v1/logs` | `{rum.exporter.endpoint}/v1/<signal>`, adding `rum.exporter.headers` |
 | `GET /telemetry/session-replay/v1/recorder.js`, `GET …/latest/recorder.js`, `GET …/v1/config`, `POST …/v1/chunk` | `{rum.session_replay.host}/telemetry/session-replay/<version>/<artifact>`, adding the key and `x-oneuptime-app-identifier: {rum.app_identifier}` |
 
@@ -169,7 +169,7 @@ The browser rules from [safe-capture.md](../safe-capture.md), applied in code:
 The `rum` section of `observability.yml` ([config.md](../config.md)):
 
 | Key | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `rum.enabled` | `false` | RUM on or off |
 | `rum.exporter.endpoint` | none | the backend's OTLP base URL the proxy forwards to, e.g. `https://oneuptime.example.com/otlp`; the browser always posts to `/telemetry/v1/<signal>` on its own origin |
 | `rum.exporter.headers` | `{}` | added by the proxy, e.g. `x-oneuptime-token: "${file:/var/run/secrets/observability/oneuptime-token}"` |
@@ -183,7 +183,7 @@ The `rum` section of `observability.yml` ([config.md](../config.md)):
 Seen with OneUptime 14.0.x. Confirm against the version you send to.
 
 | Item | Detail |
-|---|---|
+| --- | --- |
 | OTLP ingest | `POST {host}/otlp/v1/traces`, `/v1/metrics`, `/v1/logs`, header `x-oneuptime-token` |
 | Ingestion keys | Project Settings → Telemetry & APM → Ingestion Keys. **Browser** keys carry an allowed-origins list; **Server** keys don't. Check a key with `GET /telemetry/session-replay/v1/validate` |
 | Recorder | not published on npm; OneUptime serves the loader (`v1/recorder.js`) and the recorder (`latest/recorder.js`, loaded with the integrity hash from the config) |

@@ -23,7 +23,7 @@ access-log allow-lists in `observability.yml` say what to capture, not how to ma
 ## Rules per signal
 
 | Signal | Rule the instrumentation code follows |
-|---|---|
+| --- | --- |
 | Traces | only approved semantic and business attributes ([operations](data-model.md#operations), [enrichment](enrichment.md)) plus body sizes and summaries; never passwords, tokens, API keys, `Authorization` or `Cookie` values, full request or response bodies, or other secrets. Function wrappers included: no raw arguments or payloads as attributes. AI content only on the Langfuse path (row below). |
 | Logs | explicit allow-lists for headers, cookies and body fields (`logging.access_log` in `observability.yml`); full-body logging is off by default and, when switched on, bounded, temporary and logs-only. Messages are constant strings and values go in attributes, because a log sanitiser never sanitises message text: emails, file paths or object keys, original file names, cache keys, search text and upstream response text are never interpolated into a message |
 | Metrics | short, bounded labels only; never user, session, tenant, order or request IDs, raw paths, secrets or other unbounded values |
@@ -154,14 +154,14 @@ Every finding states its severity, location, the rule broken and the fix. A repo
 secret value; it names the field and the pattern that matched.
 
 | Field | Content |
-|---|---|
+| --- | --- |
 | Severity | `P0`, `P1` or `P2` |
 | Location | `file:line` for static findings; for dynamic findings the signal, the field and the request that produced it, plus `file:line` when the source can be traced |
 | Rule | the rule on this page that is broken |
 | Fix | the change that makes the code follow the rule |
 
 | Severity | Meaning | In CI |
-|---|---|---|
+| --- | --- | --- |
 | `P0` | a secret can reach, or did reach, exported telemetry: credentials, tokens, keys, `Authorization` or `Cookie` values, card numbers, sensitive input values (RUM included), session replay without masking, a Langfuse secret key in source or in the page | fails the check |
 | `P1` | content or unbounded values where the rules don't allow them: bodies or raw arguments in span attributes, unsanitised exception messages, URLs or SQL literals, IDs as metric labels or profile labels, baggage outside the allow-list, header or body capture switched on in auto-instrumentation, sanitising that falls back to the raw value, AI content outside the content policy (in logs, on the ops path, set around the helper), AI content capture switched on in code | fails the check |
 | `P2` | a safeguard missing where nothing leaks today: capture settings left at a library's defaults instead of set explicitly, no SDK attribute length limit, no cardinality limit on pushed OpenTelemetry metrics, scores sent from the browser with the public key, one AI library instrumented twice | reported, fixed in the normal flow |

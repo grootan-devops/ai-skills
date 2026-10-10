@@ -68,7 +68,7 @@ separate error SDK.
 Full definitions are in [data-model.md](../data-model.md).
 
 | Where | Fields |
-|---|---|
+| --- | --- |
 | Log record, native | severity ERROR (17) or FATAL (21), event name `exception`, trace id, span id, flags |
 | Log record, attributes | `exception.type`, `exception.message`, `exception.stacktrace`, `code.function.name`, `code.file.path`, `code.line.number`, `thread.name`, `correlation.id` |
 | Span | status ERROR with a sanitised message, `error.type` |
@@ -82,7 +82,7 @@ lines that the collector joins into the same record ([app-logs.md](app-logs.md#p
 Errors have no section of their own; they depend on the application-log settings:
 
 | Key | Requirement |
-|---|---|
+| --- | --- |
 | `logging.application.enabled` | stays `true`: error records are application log records |
 | `logging.application.level` | `error` or lower; `fatal` silences error reporting |
 | `logging.output`, `logging.exporter` | errors travel with the other logs |

@@ -2,7 +2,7 @@
 
 Ready-to-use prompts for the observability-builder skill, one per task. In Claude Code with the
 skill installed, start with `/observability-builder` or name the skill; elsewhere, start with
-"Read <path>/observability-builder/SKILL.md and follow it". Copy a prompt, replace the
+"Read `<path>/observability-builder/SKILL.md` and follow it". Copy a prompt, replace the
 `<placeholders>`, and delete the lines that don't apply. Every answer you give up front is a
 question the skill doesn't have to ask ([instrument step 2](references/instrument.md#2-ask));
 leave a line out and the skill proposes an answer from the code and asks.

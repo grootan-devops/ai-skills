@@ -9,7 +9,7 @@ captured ([safe capture](safe-capture.md)).
 ## Where each field belongs
 
 | Location | What belongs there |
-|---|---|
+| --- | --- |
 | Resource attributes | Identity of the producer: the eight standard attributes [below](#resource), the service and its pod, plus the cluster's name where several clusters send to one backend. Created once per process and shared by its traces, logs, OTLP metrics and profiles. |
 | Span attributes | Details of one operation: an HTTP request, a database query, a message, an RPC, a GenAI or MCP call, an application function, a job run, a WebSocket message. AI content (prompts, completions, tool arguments and results) only on the Langfuse path, through the content policy ([genai](signals/genai.md#content)). |
 | Log attributes | Details of one log event, including exception information. |
@@ -23,7 +23,7 @@ Resource attributes, on every signal. The resource carries the first eight attri
 and the ninth only where several clusters send to one backend:
 
 | Attribute | Example | Source and rule |
-|---|---|---|
+| --- | --- | --- |
 | `service.name` | `checkout-api` | `observability.yml`; stable across releases and replicas, because backends key services on it |
 | `service.namespace` | `commerce` | `observability.yml`; the application group the deployment is part of (its `partOf` name), shared by every service of the application |
 | `service.version` | `1.8.2` | `observability.yml`, filled from the build (the image tag); never a default, which would merge releases |
@@ -114,7 +114,7 @@ service actually do: every operation type found during the audit gets its group'
 only HTTP. How spans are produced per framework: [traces](signals/traces.md).
 
 | Operation | Native fields | Attributes | Result |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | HTTP server | kind `SERVER`, name `{method} {http.route}` | `http.request.method`, `http.route` (the template, or `unmatched`), `url.scheme`, `url.path` (a segment that holds an email masked as `{email}`), `url.query` (allow-listed parameter values only), `server.address`, `server.port`, `client.address` (trusted-proxy resolver), `user_agent.original`, `network.protocol.version`, `http.request.header.<name>` (allow-list), `http.request.body.size` | `http.response.status_code`, `http.response.body.size`, `error.type`; status ERROR on 5xx or an escaped exception |
 | HTTP client | kind `CLIENT`, name `{method} {url.template}` (`{method}` when no template) | `http.request.method`, `url.full` and `url.path` (sanitised: no credentials, allow-listed query values, an email in the path masked as `{email}`, no other content in the path), `url.template`, `server.address`, `server.port`, `service.peer.name`, `http.request.resend_count` | `http.response.status_code`, `error.type`; status ERROR on 4xx and 5xx |
 | Call to another service (client module) ([functions](functions.md#calls-to-other-services)) | kind `CLIENT`, name `{service.peer.name} {operation}` | `service.peer.name`, `server.address`, `server.port`, `network.transport` (non-HTTP), safe operation attributes | `error.type`; status ERROR on failure; the HTTP client span nests under it |
@@ -151,7 +151,7 @@ emit older attribute names, the semantic-convention stability opt-in
 ## Logs, errors and trace correlation
 
 | Location | Field | Rule |
-|---|---|---|
+| --- | --- | --- |
 | Native | `timeUnixNano`, `observedTimeUnixNano` | event time from the application |
 | Native | `severityNumber`, `severityText` | TRACE 1, DEBUG 5, INFO 9, WARN 13, ERROR 17, FATAL 21 |
 | Native | `body` | message text (a constant template, see [functions](functions.md#message-templates)) or a structured map |
@@ -174,7 +174,7 @@ Ops metrics with short, bounded labels, produced by each stack's Prometheus clie
 scraped from `/metrics` ([metrics](signals/metrics.md)).
 
 | Metric | Labels |
-|---|---|
+| --- | --- |
 | `http_server_request_duration_seconds`, `http_server_requests_total`, `http_server_active_requests` | `method`, `route` (the template, or `unmatched`), `status_code`; the counter has no `status_code`, the gauge only `method` |
 | `http_client_request_duration_seconds`, `http_client_active_requests` | `service` (the dependency's name), `method`, `route` (the URL template), `status_code` (not on the gauge) |
 | Process and runtime | the client library's defaults (`process_*`, `nodejs_*`, `python_gc_*`, `go_*`, `jvm_*`) |
@@ -205,7 +205,7 @@ Rules:
 ## RUM and profiling
 
 | Signal | Metadata |
-|---|---|
+| --- | --- |
 | Browser RUM resource | `service.name`, `service.version`, `deployment.environment.name`, `browser.platform`, `browser.language`, `browser.brands`, `browser.mobile`, `user_agent.original` |
 | Browser spans and logs | `app.route` (the route template), `session.id` (the same value as the replay session), `correlation.id`, HTTP client attributes on fetch and XHR spans; exceptions with `exception.*` |
 | Web vitals | `web_vital.lcp`, `web_vital.inp`, `web_vital.cls`, `web_vital.fcp`, `web_vital.ttfb` histograms with explicit buckets; dimensions `web_vital.rating`, `app.route` |

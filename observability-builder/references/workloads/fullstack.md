@@ -27,7 +27,7 @@ backend key fails the build instead of shipping them to the browser.
 ## Server side
 
 | Concern | Next.js hook |
-|---|---|
+| --- | --- |
 | SDK start | `instrumentation.ts` `register()` runs once per server process before requests. Guard it with `process.env.NEXT_RUNTIME === 'nodejs'` and import the server module dynamically, so the Edge runtime never loads it |
 | Start-up work | code in `register()` (a cache warm-up, for example) runs outside any request: it must not start a trace ([traces](../signals/traces.md)) |
 | SERVER spans | Next.js creates its own spans once a tracer provider is registered. Keep one `SERVER` span per request, named `{method} {http.route}` with stable HTTP attributes and the route template (`/api/orders/[id]`). Either use Next's root span and map its attributes, or use the http instrumentation and drop Next's root. Never both. Check the span names and attributes of the installed version first ([sdk-notes.md](../sdk-notes.md)) |
@@ -75,6 +75,7 @@ keys, and chat transcripts carry `oneuptime-block` so replay never records them
 `app/telemetry/v1/[signal]/route.ts` (POST) and
 `app/telemetry/session-replay/[version]/[artifact]/route.ts` (GET, POST) implement the proxy
 rules on [rum.md](../signals/rum.md#transport-the-same-origin-proxy):
+
 - an allow-list of signals and replay artifacts;
 - the same-origin check and the 2 MiB cap;
 - the key and app identifier from the server module, passing on `Origin`;

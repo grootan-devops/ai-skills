@@ -66,7 +66,7 @@ Attributes per operation, request context and native span fields are defined in
 [data-model.md](../data-model.md). Kinds and names in short:
 
 | Operation | Kind | Name |
-|---|---|---|
+| --- | --- | --- |
 | HTTP server | `SERVER` | `{method} {http.route}`; `{method} unmatched` when no route matched |
 | HTTP client | `CLIENT` | `{method} {url.template}` |
 | Call to another service | `CLIENT` | `{service.peer.name} {operation}` |
@@ -90,7 +90,7 @@ The status is UNSET by default. It becomes ERROR only when that span's own opera
 it is never set to OK:
 
 | Span | Status ERROR when | Otherwise |
-|---|---|---|
+| --- | --- | --- |
 | HTTP server | the response is 5xx, or an exception escaped the handler | UNSET, 4xx included |
 | HTTP client | the response is 4xx or 5xx, or no response arrived | UNSET |
 | Database, messaging, RPC, GenAI, MCP | the operation failed | UNSET |
@@ -130,7 +130,7 @@ ERROR log.
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `tracing.enabled` | `true` | `OTEL_TRACES_EXPORTER` `otlp` or `none` |
 | `tracing.exporter.*` | `grpc`, `gzip`, `10s` | the OTLP exporter block ([config.md](../config.md)) |
 | `tracing.sampler.name` | `parentbased_always_on` | any standard or SDK-registered sampler |

@@ -39,7 +39,7 @@ on the way. Run the same requests once through the real collector into a disposa
 the backend (for OneUptime, its community edition with Alloy in front), and check the stored data:
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Metric types | duration histograms are stored as histograms with the standard bounds, and counters as monotonic sums, not as `_bucket`, `_sum` and `_count` gauges ([collector](collector/README.md#scraped-metrics)) |
 | Scraped identity | scraped metrics carry the service's resource, without `service.instance.id` or the scrape's address attributes |
 | Shipped logs | stdout records arrive with native severity, body, trace and span ids that point at stored spans, no unparsed JSON bodies and no collector attributes |
@@ -50,7 +50,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Identity
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Resource present | `service.name`, `service.namespace`, `service.version` and `deployment.environment.name` come from the yml and are never defaulted; in Kubernetes `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid` and `k8s.node.name` come from the downward API, and `k8s.cluster.name`, where several clusters send to one backend, from the chart's per-cluster value ([data-model.md](data-model.md#resource)) |
 | Nothing else in the resource | no `telemetry.sdk.*`, `process.*`, `host.*`, `os.*`, `vcs.*` or `service.instance.id`, except where the SDK can't drop them, which the report names ([sdk-notes.md](sdk-notes.md)) |
 | One resource across signals | traces, OTLP metrics, scraped metrics, OTLP logs, stdout-shipped logs and profiles (as static labels) carry an identical identity, with `k8s.cluster.name` from the app's environment on its own telemetry and added by each cluster's collector to what it collects itself ([collector](collector/README.md)) |
@@ -59,7 +59,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Traces
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Entry span | each request has a SERVER entry span named `{method} {http.route}` with the HTTP attributes; `http.route` is a template, and a 404 has `unmatched` on its span, its metrics and its access log ([hooks.md](hooks.md)) |
 | No middleware spans | the framework's middleware, router and handler layers produce no spans; the module's wrappers span the handlers |
 | Status | spans are UNSET unless their own operation failed; no span has status OK ([signals/traces.md](signals/traces.md#status)) |
@@ -74,7 +74,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Logs
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Native correlation | every record written inside a request, message or run carries native `traceId` and `spanId` — after collector mapping for stdout-shipped logs; a JSON `trace_id` field alone fails |
 | Severity | native severity number and text follow the level policy; the access log uses ERROR for 5xx and WARN for 4xx ([signals/app-logs.md](signals/app-logs.md)) |
 | Step logs | at `debug`, every wrapped call writes `started` and `finished` or `failed` with its duration; at `info` there are none; a call slower than `logging.application.slow_threshold` writes a WARN |
@@ -86,7 +86,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Metrics
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Endpoint | `/metrics` answers on the port the yml declares, never on the application port |
 | Contract | the scrape has the default set with the contract's names, types and labels: `http_server_request_duration_seconds{method,route,status_code}`, `http_server_requests_total{method,route}`, `http_server_active_requests{method}`, the client, pool, WebSocket, probe and job metrics, and the library's process and runtime metrics ([signals/metrics.md](signals/metrics.md#the-default-set)) |
 | Buckets | duration histograms have the `le` bounds `0.005` to `60` of the standard list; `job_duration_seconds` adds `120`, `300`, `600` and `1800` |
@@ -97,7 +97,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Exclusions
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Successful probes | successful calls to `/health`, `/ready`, `/live`, `/metrics` and `/status` produce no spans, metrics or access-log records, honouring each signal's own list |
 | API docs | the docs page and its assets (for example `/api-docs` and everything under `/api-docs/*`) produce no spans, metrics or access-log records |
 | Failed probes | `/ready` returning 503 produces an ERROR `health.probe.failed` record, in place of its access-log record, and increments `app_health_probe_failures_total{probe="/ready"}`; the record and the counter name the failing check as the readiness response names it, or `unknown`; its trace is kept only when `trace_failed_probes` is on ([hooks.md](hooks.md)) |
@@ -107,7 +107,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Safe capture
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Secret canaries | a fake JWT, a bearer token, a test API key, a password field, a session cookie and a test card number — sent through headers, cookies, query strings, bodies, database parameters, exception messages, function arguments, messaging and GenAI attributes, and baggage — never appear in exported OTLP, stdout logs, profiles or the collector's output |
 | Visible fields | client IP, user, tenant and session IDs and the selected body fields do appear, as-is |
 | No bodies on spans | no span attribute contains a request or response body |
@@ -119,7 +119,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## Config wrapper
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Effective config | the loader turns `observability.yml` into the standard `OTEL_*` settings, checked by dumping the SDK's effective configuration ([config.md](config.md)) |
 | Precedence | stray `OTEL_*` values in the environment are overwritten or removed, with one warning that names them but never their values; only `OTEL_SDK_DISABLED` is honoured |
 | Defaults | export is OTLP over gRPC with gzip, batching and retries |
@@ -133,7 +133,7 @@ production with `off` (or `redacted` for the features with a redactor), each wit
 `TRACELOOP_*`, `OPENINFERENCE_*` and `LANGFUSE_*` capture variables set to "on".
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Transport | Langfuse-bound spans use OTLP over HTTP to `/api/public/otel/v1/traces` with Basic auth, and any exporter other than a Langfuse SDK sends `x-langfuse-ingestion-version: 4` |
 | Structure | each AI request is one trace in both destinations, with one root observation in Langfuse (the entry span); the steps have the names, kinds and Langfuse types of the [step kinds](signals/genai.md#step-kinds); with scope `ai_context`, no database, cache, HTTP or queue client span reaches Langfuse |
 | Trace context | every Langfuse-bound observation carries the feature as trace name, the user, the conversation as session and the release; none of them in baggage or on the ops path |
@@ -158,7 +158,7 @@ refused, a slow collector, a TLS failure, backend 429, backend 500, a full expor
 SIGTERM with telemetry still queued.
 
 | Check | Passes when, for every fault |
-|---|---|
+| --- | --- |
 | Service | keeps serving with an unchanged error rate; requests never wait on export |
 | Memory | stays bounded — queues drop instead of growing |
 | Drops | are visible, through SDK self-metrics or a rate-limited warning |
@@ -172,7 +172,7 @@ For apps with web pages ([rum.md](signals/rum.md)), drive the pages in a headles
 receiver started with `--replay-assets <dir>`; its session-replay stand-in speaks OneUptime's protocol:
 
 | Check | Passes when |
-|---|---|
+| --- | --- |
 | Transport | browser telemetry and replay reach the backend through the app's same-origin proxy, which adds the key; the page never holds it |
 | Identity | the browser resource carries the server's service name, version and environment plus the `browser.*` attributes |
 | Pages and routes | page loads and client-side route changes produce spans with `app.route` templates |

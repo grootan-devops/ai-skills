@@ -30,7 +30,7 @@ and only from explicit allow-lists.
    needed, use the first step that is enough:
 
    | Step | Setting | Use |
-   |---|---|---|
+   | --- | --- | --- |
    | 1. Selected fields | `body.fields: [amount, currency]` | the normal case; the named JSON fields are logged as they are, so never name a secret |
    | 2. Small masked capture | `body.full: true` with a small `max_bytes`, e.g. `1024` | when fields aren't enough; the body passes through the module's masking code first |
    | 3. Full body | `body.full: true` with a larger `max_bytes` | last resort: bounded, temporary, switched on explicitly and off again after the investigation |
@@ -47,7 +47,7 @@ and only from explicit allow-lists.
 Native fields and attribute rules are in [data-model.md](../data-model.md); the record holds:
 
 | Group | Fields |
-|---|---|
+| --- | --- |
 | Native | timestamp, severity by status, body (the constant message `request completed`), trace id, span id, trace flags, event name `access_log` |
 | HTTP server | the HTTP server span's attributes: `http.request.method`, `http.route` (template or `unmatched`), `url.scheme`, `url.path`, `url.query` (allow-listed parameter values only), `server.address`, `server.port`, `client.address`, `user_agent.original`, `network.protocol.version`, `http.request.body.size`, `http.response.status_code`, `http.response.body.size`, `error.type` |
 | Duration | `http.server.request.duration`, in seconds like the `http_server_request_duration_seconds` metric |
@@ -62,7 +62,7 @@ is written as `{email}` in `url.path`; ids stay visible ([safe-capture.md](../sa
 ## Configuration
 
 | Key | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `logging.access_log.enabled` | `true` | |
 | `logging.access_log.exclude_paths` | `[/health, /ready, /live, /metrics, /status]` | successful responses only; add the API docs paths; exact paths, or `/path/*` for a subtree |
 | `logging.access_log.request.headers` | `[]` | lowercase header names |
