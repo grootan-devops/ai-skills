@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-10
+
+### Added
+
+- `observability-builder`: instruments any service or frontend for end-to-end observability from one `observability.yml` — access logs, structured application logs, OpenTelemetry traces with nested function spans, ops metrics on a Prometheus `/metrics` port, error logs, Pyroscope profiling, browser RUM and session replay, and LLM and agent telemetry with Langfuse — and audits existing telemetry for unsafe capture. Two workflows: `observability instrument` (detect, ask, audit, research, plan, implement, verify against a real receiver, report) and `observability audit`.
+- `observability-builder`: the observability standard it applies, bundled in `references/` (signals, workloads, backends, collector, data model, safe capture, SDK notes), and the `observability.yml` JSON Schema in `assets/`.
+- `observability-builder`: `detect.py`, `validate.py`, `audit.py`, `contract.py` and `hold_port.py`; `receive.py`, a local OTLP, Pyroscope and session-replay receiver with a Langfuse stand-in and canary tracking; `llm_stub.py`, an OpenAI- and Anthropic-compatible model stub, so verification never calls a real provider.
+- `observability-builder`: Langfuse export, content-guard and score pieces for Node.js, Go and Java, and the Java JFR-to-pprof profile exporter.
+- `observability-builder`: `PROMPT.md` and script regression tests.
+
+### Changed
+
+- Pinned the repository's reusable workflow callers to `github-ci-library` `@1.5.0`.
+- PR verification runs the `observability-builder` script tests.
+- README and COMPATIBILITY list the `1.5.0` release set and the new skill; `observability-builder` bundles its standard instead of reading a library.
+
 ## [1.4.0] - 2026-10-01
 
 ### Added
