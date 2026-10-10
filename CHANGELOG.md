@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-10
+
+### Changed
+
+- Updated [`go.opentelemetry.io/otel`](https://github.com/open-telemetry/opentelemetry-go) from [`v1.46.0` to `v1.47.0`](https://app.renovatebot.com/package-diff?name=go.opentelemetry.io%2Fotel&from=v1.46.0&to=v1.47.0)
+- Updated [`go.opentelemetry.io/otel/exporters/otlp/otlptrace`](https://github.com/open-telemetry/opentelemetry-go) from [`v1.46.0` to `v1.47.0`](https://app.renovatebot.com/package-diff?name=go.opentelemetry.io%2Fotel%2Fexporters%2Fotlp%2Fotlptrace&from=v1.46.0&to=v1.47.0)
+- Updated [`go.opentelemetry.io/otel/sdk`](https://github.com/open-telemetry/opentelemetry-go) from [`v1.46.0` to `v1.47.0`](https://app.renovatebot.com/package-diff?name=go.opentelemetry.io%2Fotel%2Fsdk&from=v1.46.0&to=v1.47.0)
+- Updated [`go.opentelemetry.io/otel/trace`](https://github.com/open-telemetry/opentelemetry-go) from [`v1.46.0` to `v1.47.0`](https://app.renovatebot.com/package-diff?name=go.opentelemetry.io%2Fotel%2Ftrace&from=v1.46.0&to=v1.47.0)
+- Updated [`go.opentelemetry.io/proto/otlp`](https://github.com/open-telemetry/opentelemetry-proto-go) from [`v1.11.0` to `v1.11.1`](https://app.renovatebot.com/package-diff?name=go.opentelemetry.io%2Fproto%2Fotlp&from=v1.11.0&to=v1.11.1)
+
 ## [1.5.0] - 2026-10-10
 
 ### Added
