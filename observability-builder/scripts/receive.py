@@ -4,7 +4,7 @@
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
   scripts/receive.py --out <dir> [--grpc-port N] [--http-port N] [--pyroscope-port N] [--seconds N]
                      [--replay-assets DIR] [--langfuse-keys FILE] [--langfuse-prompts FILE]
-                     [--langfuse-datasets FILE] [--canaries FILE]
+                     [--langfuse-datasets FILE] [--genai-content-destination langfuse|ops] [--canaries FILE]
 
 Starts OTLP/gRPC, OTLP/HTTP and Pyroscope receivers on 127.0.0.1, on free ports unless ports are
 given, and prints their endpoints as one JSON line. The OTLP/HTTP port also serves the
@@ -14,7 +14,9 @@ OBS_RECEIVER_REPLAY_ASSETS) and a Langfuse stand-in (base URL = the OTLP/HTTP en
 legacy batch ingestion; prompts from --langfuse-prompts (a JSON list of prompts); datasets for
 experiment runners from --langfuse-datasets (a JSON list of {"name", "items": [{"input",
 "expectedOutput", "metadata"}]}); auth compared with --langfuse-keys (a file holding
-`pk-lf-...:sk-lf-...`) and recorded as booleans. While it runs it keeps <dir> up to date:
+`pk-lf-...:sk-lf-...`) and recorded as booleans. --genai-content-destination names where the
+service sends AI content (langfuse, the default, or ops), which decides where the summary expects
+it. While it runs it keeps <dir> up to date:
 
   <dir>/otlp/NNNN-<signal>-<transport>.json   every decoded export request
   <dir>/profiles/NNNN.bin, uploads.json       profile uploads and their labels
@@ -182,7 +184,7 @@ def render_replay(chunks: list, requests: list) -> list[str]:
     return lines
 
 
-def render_summary(store: Store, canaries: dict[str, str] | None = None) -> str:
+def render_summary(store: Store, canaries: dict[str, str] | None = None, content_destination: str = "langfuse") -> str:
     with store.lock:
         payloads, profiles, rejected = list(store.otlp), list(store.profiles), list(store.rejected)
         chunks, replay_requests = list(store.replay_chunks), list(store.replay_requests)
@@ -207,7 +209,8 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None) -> str:
     lines += render_traces(ops_spans)
     if langfuse_spans:
         lines += render_traces(langfuse_spans, "Traces sent to Langfuse")
-    lines += genai.summary(langfuse_spans, ops_spans, scores, fetches, media, langfuse, dataset_fetches)
+    lines += genai.summary(langfuse_spans, ops_spans, scores, fetches, media, langfuse, dataset_fetches,
+                           content_destination)
     lines += render_metrics(tm.metric_points(payloads))
     lines += render_logs(tm.otlp_records(payloads))
     lines += [f"## Profiles ({len(profiles)} uploads)", ""]
@@ -230,8 +233,9 @@ class Receiver:
     def __init__(self, out: Path, grpc_port: int = 0, http_port: int = 0, pyroscope_port: int = 0,
                  replay_assets: Path | None = None, langfuse_keys: Path | None = None,
                  langfuse_prompts: Path | None = None, langfuse_datasets: Path | None = None,
-                 canaries: Path | None = None):
+                 canaries: Path | None = None, content_destination: str = "langfuse"):
         self.out = out
+        self.content_destination = content_destination  # the service's genai.content.destination
         self.store = Store()
         self.canaries = cn.load(canaries) if canaries else {}  # label -> value; values never leave memory
         if langfuse_keys:  # read once; only its base64 form is kept, for comparison
@@ -308,7 +312,8 @@ class Receiver:
         self._rejected = rejected
         if self.canaries:
             _write_json(self.out / "canaries.json", cn.scan(self.store, self.canaries))
-        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries), encoding="utf-8")
+        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries, self.content_destination),
+                                             encoding="utf-8")
         return True
 
     def stop(self) -> None:
@@ -331,12 +336,15 @@ def main(argv=None) -> int:
     parser.add_argument("--langfuse-prompts", type=Path, help="JSON list of prompts the Langfuse stand-in serves")
     parser.add_argument("--langfuse-datasets", type=Path,
                         help="JSON list of datasets (name, items with input, expectedOutput, metadata) for experiment runners")
+    parser.add_argument("--genai-content-destination", choices=genai.DESTINATIONS, default="langfuse",
+                        help="the service's genai.content.destination: where content may appear (default: langfuse)")
     parser.add_argument("--canaries", type=Path,
                         help="JSON {label: value} (or a list) of test values that must reach no stream; "
                              "the summary and canaries.json name the labels and streams, never the values")
     args = parser.parse_args(argv)
     receiver = Receiver(args.out.resolve(), args.grpc_port, args.http_port, args.pyroscope_port, args.replay_assets,
-                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries)
+                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries,
+                        args.genai_content_destination)
     try:
         endpoints = receiver.start()
     except PortBusyError as exc:

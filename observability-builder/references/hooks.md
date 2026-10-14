@@ -15,7 +15,7 @@ request
 observability middleware (outermost)
   ├─ extract trace context and allow-listed baggage
   ├─ accept or replace the correlation id; bind ids to the logger context
-  ├─ start the entry span (excluded paths: rule 12)
+  ├─ start the entry span (every path: exclusions are decided at response end, rule 12)
   ├─ tee the request body (only when enabled, capped, stream untouched)
   ▼
 framework: routing ─► auth ─► handler (nested function spans) ─► global error handler

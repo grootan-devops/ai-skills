@@ -12,7 +12,12 @@ function, the observations, the trace context, the content mode, the levels and 
   once, after authentication (`genai.feature(name, user, conversation)`), and every span inside
   carries the trace context.
 - **Content:** `full` outside production, `off` in production; `redacted` only for a feature
-  with a redactor and the owner's sign-off ([modes](../signals/genai.md#modes)).
+  with a redactor and the owner's sign-off ([modes](../signals/genai.md#modes)). It goes to one
+  tool, Langfuse or OneUptime's AI views, never both
+  ([destination](../signals/genai.md#destination)).
+- **Who spent what:** the spender, the team and the conversation come from the app's own
+  verified context, decided per entry point while planning
+  ([who spent what](../signals/genai.md#who-spent-what)); AI spans carry them to both tools.
 - **The usual signals stay:** the access log, step logs, one ERROR record per failure, the job
   helper for jobs ([batch.md](batch.md)), and the GenAI metrics on `/metrics`
   ([metrics](../signals/metrics.md#genai-metrics)).
@@ -25,11 +30,11 @@ function, the observations, the trace context, the content mode, the levels and 
 | Function | Observations | Trace context | Production content | Levels and scores | Also |
 | --- | --- | --- | --- | --- | --- |
 | Chat assistant | `invoke_agent` or `invoke_workflow` → `chat {model}` per turn; input and output guardrails | feature, user, conversation, a channel tag | off; `redacted` only with the owner's sign-off | WARNING on a fallback or a truncated answer; `user_feedback` scores; judges in Langfuse | time to first chunk; profile prompt assembly and tokenisation |
-| Retrieval-augmented answer | `embeddings` (the query) → `retrieval {source}` (counts, top score, document ids as metadata) → `chat` with the prompt link | as above | the retrieved chunks are content | WARNING when no documents were found and the answer fell back; groundedness and relevance through Langfuse evaluators | embedding tokens; a `rag.no_documents` log event |
+| Retrieval-augmented answer | `embeddings` (the query) → `retrieval {source}` (`gen_ai.operation.name=retrieval`, `top_k`, counts, top score, document ids as metadata) → `chat` with the prompt link | as above | the retrieved chunks are content | WARNING when no documents were found and the answer fell back; groundedness and relevance through Langfuse evaluators | embedding tokens; a `rag.no_documents` log event |
 | Extraction or OCR | `invoke_workflow` → OCR (ops-only unless a vision model) → `chat` with `gen_ai.output.type=json` → `evaluate schema` | feature, requester, document type as metadata | off; record the extracted fields and confidences instead of the text; media as a reference | WARNING when the output had to be repaired; a `schema_valid` score with the id `{trace id}:schema_valid`; corrections through an annotation queue | the job metrics; profile rasterisation |
 | Classification or routing | one `chat`; the label as bounded metadata | feature, user | input off | WARNING for a label outside the set (`other`); a categorical score | on request `app_genai_classifications_total{feature,label}` |
 | Agent with tools | `invoke_agent` → `chat` per turn → `execute_tool {tool}`, whose own calls stay ops-only; a guardrail before risky tools | feature, user, conversation | tool arguments and results are content | a failed tool is ERROR, and the agent WARNING when it recovers; the step limit reached is WARNING; a task-success score | on request: tool-call and agent-step counters |
-| Several agents | a nested `invoke_agent` per agent; across services, W3C context and each service stamps its own feature context | the same conversation id everywhere | as above | per agent | the collector gateway when Langfuse must show the upstream services too ([collector](../collector/README.md#genai-routing)) |
+| Several agents | a nested `invoke_agent` per agent, one span per sub-agent call even when it's offered to the model as a tool; across services, W3C context and each service stamps its own feature context | the same conversation id everywhere | as above | per agent | the collector gateway when Langfuse must show the upstream services too ([collector](../collector/README.md#genai-routing)) |
 | Batch AI job | a `job {name}` root (ops) → one AI trace per item, linked to the run; provider batch results as generations with their usage | the run id as the session, job metadata, a `batch` tag | off; `sample_ratio` for spot checks | a failed item is ERROR and the run `partial`; offline evaluation with Langfuse datasets | the job metrics and job log |
 | Embedding and indexing | one `embeddings` per batch call; vectors never captured | index name and version as metadata | off | ERROR on a failed batch | scope `ai_only`, or Langfuse off; embedding tokens; profile chunking |
 | Guardrail | `guardrail {name}` with the result (`pass`, `block`, `flag`) as metadata | inherited | the flagged text is content | a block is WARNING; a `guardrail.blocked` log event | on request a decision counter |
@@ -123,7 +128,9 @@ and [backends/langfuse.md](../backends/langfuse.md#experiments).
 ## Several agents and services
 
 - **In one process,** each agent is a nested `invoke_agent` under the request's feature
-  context; handoffs between agents are event observations.
+  context, with its own `gen_ai.agent.name`; handoffs between agents are event observations. A
+  sub-agent the orchestrator calls as a tool is that one `invoke_agent` span, never an
+  `execute_tool` span wrapping it, so its steps and cost appear once.
 - **Across services,** the W3C context carries the trace; each service declares its own
   feature context, so each one stamps its own spans, and the conversation id travels in the
   request body or a header the services agree on, never in baggage.
@@ -146,8 +153,8 @@ and [backends/langfuse.md](../backends/langfuse.md#experiments).
 ## Planned
 
 Not written yet; say so instead of inferring: realtime and voice sessions, AI gateways
-(proxies in front of several providers), self-hosted model servers, and MCP servers that expose
-tools.
+(proxies in front of several providers) and self-hosted model servers. MCP servers and clients
+are in [mcp.md](mcp.md).
 
 ## Verification
 
@@ -156,6 +163,9 @@ stub and the Langfuse stand-in. For the functions on this page, also check:
 
 - a chat turn: the feature context on every observation, the prompt link, and WARNING on a
   truncated answer (send a small `max_tokens`);
+- the ops stream: `user.id`, `team.id` (where the app has one) and `gen_ai.conversation.id` on
+  every AI span, the `retrieval` operation on retrieval steps, and no `gen_ai.*`, `llm.*` or
+  `traceloop.*` key on any other span;
 - a tool call: the tool observation with arguments and result only in the non-production run,
   and its outbound calls absent from the Langfuse path;
 - a failed call and a 429 (the stub's `[[fail]]` and `[[ratelimit]]`): ERROR on the

@@ -57,8 +57,9 @@ traces are kept.
 13. **No content on spans.** No request or response bodies, raw arguments or payloads in span
     attributes; sizes and summaries only. A path segment that holds an email is masked as
     `{email}` in `url.path` on `SERVER` spans and in `url.full` and `url.path` on `CLIENT` spans;
-    ids stay visible. AI content (prompts, completions, tool arguments and results) goes to
-    Langfuse only, through the content policy ([genai.md](genai.md#content)).
+    ids stay visible. AI content (prompts, completions, tool arguments and results) goes only to
+    the content destination, Langfuse or the ops backend's AI views, through the content policy
+    ([genai.md](genai.md#content)).
 
 ## Fields
 
@@ -74,8 +75,8 @@ Attributes per operation, request context and native span fields are defined in
 | Messaging | `PRODUCER` to publish, `CONSUMER` to process | per the messaging conventions; batches use links |
 | RPC, gRPC | `SERVER` or `CLIENT` | `{rpc.method}` |
 | GenAI model call or embedding | `CLIENT` | `{gen_ai.operation.name} {gen_ai.request.model}` |
-| GenAI agent, tool, retrieval, workflow, guardrail, evaluation | `INTERNAL` (`CLIENT` for a remote store or agent) | `invoke_agent {agent}`, `execute_tool {tool}`, `retrieval {data source}`, `invoke_workflow {name}`, `guardrail {name}`, `evaluate {name}` ([genai](genai.md#step-kinds)) |
-| MCP | `SERVER` or `CLIENT` | `{mcp.method.name} {target}` |
+| GenAI agent, tool, retrieval, memory, planning, workflow, guardrail, evaluation | `INTERNAL` (`CLIENT` for a remote store or agent) | `invoke_agent {agent}`, `execute_tool {tool}`, `retrieval {data source}`, `{memory operation}`, `plan {agent}`, `invoke_workflow {name}`, `guardrail {name}`, `evaluate {name}` ([genai](genai.md#step-kinds)) |
+| MCP | `CLIENT` on the sender, `SERVER` on the receiver | `{mcp.method.name} {target}`, the target being the tool or prompt name, or the method alone ([mcp](../workloads/mcp.md)) |
 | Application function | `INTERNAL` | `{Class}.{method}` or `{module}.{function}` |
 | Job run | `INTERNAL`, root | `job {name}` |
 | WebSocket connection (handshake and authentication) | `SERVER`, root | `WS {path}`, the endpoint's route (`WS /ws`) |
@@ -93,7 +94,8 @@ it is never set to OK:
 | --- | --- | --- |
 | HTTP server | the response is 5xx, or an exception escaped the handler | UNSET, 4xx included |
 | HTTP client | the response is 4xx or 5xx, or no response arrived | UNSET |
-| Database, messaging, RPC, GenAI, MCP | the operation failed | UNSET |
+| Database, messaging, RPC, GenAI | the operation failed | UNSET |
+| MCP | the client: any JSON-RPC error, a tool result with `isError`, a timeout; the server: its own failure or an `isError` result | UNSET, the caller's errors on the server included (-32700, -32600, -32601, -32602, -32002) |
 | Application function | the function failed: it threw, or returned an error | UNSET |
 | Job run | the run failed: its body threw | UNSET, a run with some failed items included |
 | WebSocket connection | the server failed during the handshake | UNSET, client rejections included (bad origin, failed authentication: a WARN record) |

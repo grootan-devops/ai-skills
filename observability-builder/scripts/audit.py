@@ -10,7 +10,8 @@ sent in outbound query strings, are flagged for review. Application output writt
 app logger, scheduled jobs that start no job root span, and patches of observability SDK internals
 are reported too. For GenAI: prompt and completion content recorded outside the module's content
 policy or written to logs, capture switches turned on in code, Langfuse secret keys in source or in
-the page, AI context in baggage, and two instrumentations of one AI library. Heuristic by design:
+the page, AI context in baggage, two instrumentations of one AI library, and a second sender of spans to
+Langfuse's OTLP endpoint. Heuristic by design:
 the agent judges the rest (see references/audit.md). Add `obs-audit: ignore` to a line to accept it.
 
 Usage: python3 audit.py <project> [--module PATH ...] [--include-tests] [--json] [--strict]
@@ -166,6 +167,9 @@ GENAI_CAPTURE_ON = re.compile(
     re.IGNORECASE,
 )
 SPRING_CONFIG = re.compile(r"(^|/)(?:application|bootstrap)[\w-]*\.(?:properties|ya?ml)$")
+# Langfuse's OTLP endpoint outside the module: a second span sender, in code or in the files that configure the app.
+LANGFUSE_OTLP = re.compile(r"/api/public/otel\b")
+SENDER_CONFIG = re.compile(r"(?:^|/)(?:\.env[^/]*|[^/]+\.env|Dockerfile[^/]*|[^/]+\.(?:ya?ml|json|properties|toml|ini|conf|cfg))$")
 SPRING_AI_CAPTURE = re.compile(r"\b(?:log|include)-(?:prompt|completion|content|query-response)\s*[:=]\s*['\"]?true\b", re.IGNORECASE)
 AI_SDK_TELEMETRY = re.compile(r"\bexperimental_telemetry\s*:\s*\{[^}]*\bisEnabled\s*:\s*true")
 LANGFUSE_OBSERVE_JS = re.compile(r"(?<![\w$.@])observe\s*\(")
@@ -1027,6 +1031,22 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
                              "Spring AI configuration; the loader sets every capture switch from genai.content.capture")
                      for lineno, raw in enumerate(config, 1)
                      if SPRING_AI_CAPTURE.search(raw) and not IGNORE_RE.search(raw) and not raw.lstrip().startswith(("#", "!"))]
+    for path, rel in files:
+        # The collector's own configuration (.alloy) is the collector route's sender and isn't read here.
+        if _in_module(rel, modules) or (not include_tests and TEST_RE.search(rel)):
+            continue
+        if path.suffix not in SOURCE_SUFFIXES and not SENDER_CONFIG.search(rel):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        findings += [Finding("P2", "genai-langfuse-two-senders", f"{rel}:{lineno}", "Langfuse's OTLP endpoint configured "
+                             "outside the observability module; the module already sends each span to Langfuse once, so "
+                             "a second exporter sends every observation twice")
+                     for lineno, raw in enumerate(text, 1)
+                     if LANGFUSE_OTLP.search(raw) and not IGNORE_RE.search(raw)
+                     and not raw.lstrip().startswith(("#", "//", "!", "*"))]
     findings.extend(project.finish())
     if not modules:
         findings.append(Finding("P2", "no-module", ".", "no --module given; SDK setup location was not checked against a module"))

@@ -120,14 +120,31 @@ from spans, so unsampled requests count too:
 - **`model`** is the requested model from a fixed list in code, anything else `other`; a dated
   response model never makes new series. `provider` is the `gen_ai.provider.name` value;
   `operation` the `gen_ai.operation.name` value.
-- **No feature, user or conversation label.** Cost and quality per feature are questions for
-  Langfuse, where each observation carries the feature.
+- **No feature, user, team or conversation label.** Cost and quality per feature, user or team
+  are questions for the LLM tool, which reads them off each AI span: Langfuse, or OneUptime's
+  AI views ([genai.md](genai.md#who-spent-what)).
 - **One path per series.** With OTLP push on, the instrumentations' own `gen_ai.client.*`
   metrics are dropped with a view.
 - **App metrics on request:** feedback, guardrail decisions, tool calls, agent steps, approvals
   and classifications, with the [rules below](#app-metrics). The approval wait histogram,
   `app_genai_approval_wait_seconds`, uses buckets from `60` seconds to one day (`86400`), a
   documented exception for waits on people ([ai-agent.md](../workloads/ai-agent.md#human-in-the-loop-approval)).
+
+## MCP metrics
+
+An MCP server or client adds one duration histogram per side, recorded where each message
+completes, so unsampled traffic counts too ([mcp.md](../workloads/mcp.md#metrics)):
+
+| Metric | Type | Labels | Measures |
+| --- | --- | --- | --- |
+| `mcp_server_operation_duration_seconds` | histogram | `method`, `target`, `outcome` | each request or notification the server handles |
+| `mcp_client_operation_duration_seconds` | histogram | `server`, `method`, `target`, `outcome` | each request the client sends, until its response |
+
+- **`target`** is a tool or prompt name from the server's registered list, `other` beyond it,
+  and empty for other methods; never a resource URI or an argument.
+- **`outcome`** is `success`, `error`, `rejected` (the caller's JSON-RPC errors) or `timeout`
+  (client only); **`server`** is the configured server name, from a fixed list.
+- **Buckets:** the standard list, plus `120` and `300` for long tool calls.
 
 ## App metrics
 

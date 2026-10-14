@@ -1,7 +1,8 @@
 # Langfuse
 
 Langfuse is the standard's LLM-observability destination: it receives the AI part of each
-trace, with content where the [content policy](../signals/genai.md#content) allows it, and holds
+trace, with content where the [content policy](../signals/genai.md#content) allows it and the
+content destination is `langfuse` ([destination](../signals/genai.md#destination)), and holds
 prompts and scores. It takes traces only; metrics, logs, profiles and the content-free copy of
 every trace go to the ops backend as usual. What to emit is in
 [signals/genai.md](../signals/genai.md); this page covers ingestion, the routes, what Langfuse
@@ -39,7 +40,9 @@ verification.
 ## Routes
 
 The mode ([signals/genai.md](../signals/genai.md#modes)) decides who makes the AI spans; the
-route decides who sends them. `sdk` goes with the app route only.
+route decides who sends them. `sdk` goes with the app route only. Either way each span reaches
+Langfuse once, from one sender: the SDK's span processor or plain OTLP, never both
+([one span sender](../signals/genai.md#modes)).
 
 ### App route (default)
 
@@ -155,6 +158,7 @@ the conventions.
 | Type | `langfuse.observation.type`, else `gen_ai.operation.name`: `chat` → generation, `embeddings` → embedding, `invoke_agent` → agent, `execute_tool` → tool (renamed to `gen_ai.tool.name`); `retrieval` and `invoke_workflow` stay plain spans; any model attribute → generation |
 | Input | `langfuse.observation.input`, else `gen_ai.input.messages` with `gen_ai.system_instructions` prepended as a system message, `gen_ai.prompt`, `input.value`, and on tool spans `gen_ai.tool.call.arguments` |
 | Output | `langfuse.observation.output`, else `gen_ai.output.messages`, `gen_ai.completion`, `output.value`, and on tool spans `gen_ai.tool.call.result` |
+| Trace input, output | the root observation's input and output (`langfuse.observation.input` and `langfuse.observation.output` on the root span), which the trace list and the session view show; `langfuse.trace.input` and `langfuse.trace.output` are dropped (seen with 4.58) |
 | Model, parameters | `langfuse.observation.model.name`, else `gen_ai.response.model`, then `gen_ai.request.model`; `gen_ai.request.*` |
 | Usage | `gen_ai.usage.*` (below) |
 | Cost | `langfuse.observation.cost_details`, `gen_ai.usage.cost` as the total, else the model's prices |
@@ -184,8 +188,8 @@ session from the stamped observations.
   read 30, cache write 10; output 40 with 15 reasoning tokens as output 25, reasoning 15; the
   total stays 140.
 - Cost comes from Langfuse's model definitions, matched by a regex on the model name (the
-  response model first), unless the span carries a cost. Self-hosted and custom models need
-  their own definitions with prices: a platform handoff.
+  response model first), unless the span carries a cost; a reported cost, 0 included, wins.
+  Self-hosted and custom models need their own definitions with prices: a platform handoff.
 
 ## Prompt links
 
@@ -272,8 +276,19 @@ for the module's side). Verified with Langfuse 4.55: experiments are built from 
 
 Base64 images, audio and files in observations are uploaded to Langfuse's media store and
 replaced by reference strings when the SDK handles them. Under the standard, media is a
-reference (type, size, hash) unless `genai.content.media: upload` and the feature's mode is
-`full` ([signals/genai.md](../signals/genai.md#modes)).
+reference (type, size, hash) unless `genai.content.media: upload`, the feature's mode is
+`full` and the destination is `langfuse` ([signals/genai.md](../signals/genai.md#modes)).
+
+## Without content
+
+With `genai.content.destination: ops`, content goes to the ops backend's AI views instead, and
+Langfuse receives the AI steps without it:
+
+- **What arrives:** the structure, types, usage, cost, timing, levels, prompt links and the trace
+  context.
+- **No content:** the module's content guard removes every content key on the Langfuse path, as
+  in mode `off`.
+- **Experiments** need the `langfuse` destination.
 
 ## Environments and projects
 
@@ -301,6 +316,19 @@ reference (type, size, hash) unless `genai.content.media: upload` and the featur
   1.20.1 (2026-10).
 - Langfuse Cloud becomes v4-only on 2026-11-16, when legacy APIs and ingestion are removed;
   self-hosted v3 gets security patches through January 2027.
+
+## Replacing the SDK's own instrumentation
+
+When the module takes over from the SDK's `@observe` decorators and its OpenAI integration (modes
+`hybrid` and `otel`), what people already use in Langfuse moves too:
+
+- **Trace names:** name the feature after the existing trace name, so trace-name filters,
+  dashboards and evaluators keep working.
+- **Observation names** become the conventions' (`OpenAI-generation` → `chat {model}`, a tool
+  wrapper → `execute_tool {tool}`, a retriever → `retrieval {source}`). List them in the
+  migration note: evaluators and saved filters keyed on the old names need updating.
+- **Metadata:** the team stamp is `langfuse.trace.metadata.team`. Keep an existing metadata key
+  that people filter on (`org`, for example) as well, or list the change.
 
 ## Platform handoff
 

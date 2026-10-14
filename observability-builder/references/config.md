@@ -153,12 +153,14 @@ rum:                                         # browser RUM and session replay (s
 genai:                                       # LLM and agent telemetry (signals/genai.md)
   enabled: false
   content:                                   # prompts, completions, tool arguments and results,
-                                             #   retrieved documents: sent to Langfuse only
+                                             #   retrieved documents: sent to one destination only
     capture: "${OBS_GENAI_CONTENT:-off}"     # off | redacted | full: the most this environment
                                              #   allows; full only where the data is synthetic
+    destination: langfuse                    # langfuse | ops: the one tool that receives content
+                                             #   (ops: the ops backend's AI views, e.g. OneUptime)
     sample_ratio: 1.0                        # share of traces with content, decided by trace id
     max_chars: 20000                         # per content attribute, after redaction
-    media: reference                         # reference | upload (upload only with full)
+    media: reference                         # reference | upload (upload only with full, to Langfuse)
   metrics:
     enabled: true                            # gen_ai_client_* on /metrics
   langfuse:                                  # backends/langfuse.md
@@ -259,8 +261,11 @@ helpers and the stamping processor.
   environment allows. Each feature gets the lower of the ceiling and its own setting, and
   `redacted` needs the feature's redactor, so a feature without one records nothing under a
   `redacted` ceiling. The chart sets `full` only where the data is synthetic; production takes
-  `off`, or `redacted` when features with a redactor have the owner's sign-off. Content goes to
-  Langfuse only, never to logs, metrics or the ops backend.
+  `off`, or `redacted` when features with a redactor have the owner's sign-off.
+- **`content.destination`** names the one tool that receives content: `langfuse` (the
+  default) or `ops`, the ops backend's AI views (OneUptime's), never both and never logs or
+  metrics ([genai](signals/genai.md#destination)). `ops` needs mode `hybrid` or `otel`, or
+  Langfuse off.
 - **`langfuse.export`** picks who sends the spans. `app`: the SDK's span processor (`hybrid`,
   `sdk`) or the module's OTLP exporter (`otel`) on the module's own tracer provider, so both
   backends see the same trace ids. `collector`: the collector's Langfuse branch sends the AI spans
@@ -384,8 +389,10 @@ With GenAI on it also checks the settings against each other: literal Langfuse k
 for the secret key, a warning for the public key); the collector route with mode `sdk`, with
 tracing off or with exporter headers (direct export); scores on with mode `otel`, which sends
 none; an environment name Langfuse rejects; `full`
-content in a production-named environment; `media: upload` without `full`; AI-looking fields
-or full bodies in the access log; and a `base_url` with a path or plain http to a remote host.
+content in a production-named environment; `media: upload` without `full`; the `ops`
+content destination with mode `sdk`, and the `langfuse` destination with content on and
+Langfuse off; AI-looking fields or full bodies in the access log; and a `base_url` with a path or
+plain http to a remote host.
 
 At runtime a bad configuration never stops the service. If the file is missing, unreadable or
 invalid, or a required key doesn't resolve, the loader logs one ERROR on stderr naming the

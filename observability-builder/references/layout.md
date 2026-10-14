@@ -137,7 +137,7 @@ Each workload adds to the language module above.
 | Async workers and messaging | `adapters/consumer` — context from message headers, per-message job log, span links, lag and job metrics |
 | BFF / integration service | `adapters/clients` — outbound client setup, propagation allow-list, retry and timeout attributes |
 | Gateway (APISIX, Envoy Gateway, Traefik, Kong) | no application code; plugin and values snippets in the gateway's configuration repository |
-| MCP server | `adapters/mcp` — `params._meta` trace propagation, tool spans, stdio logs to stderr |
+| MCP server or client | `adapters/mcp` — `params._meta` trace propagation, `SERVER` and `CLIENT` spans per message (none where the SDK traces MCP itself), the MCP duration metrics, stdio logs to stderr ([mcp](workloads/mcp.md)) |
 | AI features and agents | the genai files: the feature registry and `genai.feature()`, the stamping processor, the content helper and redactors, the ops guard, the GenAI metrics hook, the GenAI instrumentations, and, when Langfuse is on, its processor or exporter, the one Langfuse client app code takes for its prompts and datasets, and the score client |
 | Batch job, cron job, scheduled job, CLI | `job` helper — `job {name}` root span, job log, job metrics, flush before a process exits |
 

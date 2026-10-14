@@ -45,11 +45,12 @@ Goal: end-to-end observability for every part of this project that runs in produ
   sensitive fields masked
 - AI features, if the project calls a model:
   - a span for every model call, tool, retrieval and agent step, with token usage, and the GenAI
-    metrics;
-  - each AI feature declared once with its user and conversation;
+    metrics; MCP servers and clients with their spans and duration metrics;
+  - each AI feature declared once with who it runs for (user and team, from the app's own
+    verified context) and its conversation, so the LLM tools show who spent what;
   - prompts, completions and tool data only through the content policy (full outside production,
-    off in production), and only to the LLM-observability backend, never to logs or the ops
-    backend;
+    off in production), and only to one LLM tool, the LLM-observability backend or the ops
+    backend's AI views, never to logs and never to both;
   - the backend's mode (hybrid, sdk or otel) switchable by configuration; its exporter takes
     nothing from the ops exporter's settings;
   - prompt versions linked (fetching prompts and datasets stays the app's own); feedback and
@@ -78,8 +79,11 @@ Answers I already have (delete what doesn't apply; the skill asks about the rest
   LLM-observability backend <URL> with keys in <mounted files>, route <app | collector>; mode
   <hybrid | sdk | otel>, or switchable per environment (no sdk mode where the backend has no SDK
   for the language); content per environment <full in non-production | redacted in production
-  for <features> | off>; prompts managed in <the backend, label <label> | code>; scores
-  <feedback | approvals | evaluations | none>
+  for <features> | off>, sent to <the LLM-observability backend | the ops backend's AI views>;
+  spend owner <where the verified user comes from>, team <tenant | workspace | team | cost
+  centre | none>; models the tools can't price <models | none>; prompts managed in <the
+  backend, label <label> | code>; scores <feedback | approvals | evaluations | none>
+- MCP: <server | client | both | none> over <stdio | Streamable HTTP>
 - breaking changes allowed now: <access-log format | log format | metric names | removing a
   vendor SDK | none>
 
@@ -150,8 +154,11 @@ The observability module is <module path, or "find it">; observability.yml is <p
      - model, tool, retrieval and agent spans with the conventions' names and usage;
      - the feature context on every AI span and never in baggage, with baggage allow-listed on
        extract and inject;
-     - content only through the content policy and only on the LLM-observability path, with no
+     - content only through the content policy and only at the content destination, with no
        prompts or completions in logs, and a span attribute limit no smaller than the content cap;
+     - AI spans carrying the user, team and conversation, no AI keys on other spans, retrieval
+       steps with their operation, and one span sender to the LLM-observability backend;
+     - MCP spans, context through `_meta` and the MCP metrics, if the project serves or calls MCP;
      - capture switches set by the configuration loader, never left at a library's defaults;
      - one instrumentation per AI library;
      - the mode wired as configured, with an exporter that reads none of the ops exporter's
@@ -233,20 +240,22 @@ Change application code only to fix what the checks find, and tell me before you
    trace shape, span status, log records and their trace ids, the /metrics scrape, profiles and
    their labels, exceptions, correlation between signals, and the last telemetry flushed at stop.
    For AI features, run twice against scripts/llm_stub.py and the receiver's LLM-observability
-   stand-in, as a non-production environment with full content and as production with content
-   off: content appears only on the LLM-observability path of the first run. Where environments
-   switch modes, repeat the full-content run in each mode.
+   stand-in (told the service's content destination), as a non-production environment with full
+   content and as production with content off: content appears only at the content destination
+   of the first run, and every AI span carries the user, team and conversation. Where
+   environments switch modes, repeat the full-content run in each mode.
 5. Failure behaviour, the app serving through each: the collector down, the SDK disabled, a
    missing or broken observability.yml, the metrics port already taken.
 6. If <backend URL> is available, run the same traffic through the collector into it and confirm
    traces, logs, metrics, profiles and exceptions arrive, linked to each other.
 7. Grep everything captured, stdout and stderr for the test secrets and personal values sent,
-   and for the prompt canaries outside the LLM-observability path.
+   and for the prompt canaries outside the content destination.
 
 Report: the checks with their results and evidence; files changed; dependencies with versions
 and sources; the platform handoff list (chart values, environment, metrics port and monitor,
 pod annotations, mounted secrets, collector settings) as an exact list; the migration note;
 open observability risks; and the telemetry inventory: metrics with types and labels, logging
 that bypasses the logger and why, work outside the API with its coverage, the attributes per
-kind of span, and the AI features with their content modes and the mode in use.
+kind of span, and the AI features with their content modes, content destination, who-spent-what
+sources and the mode in use.
 ```

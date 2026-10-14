@@ -7,6 +7,39 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 1.6.0
+
+### Required
+
+No migration required. `genai.content.destination` defaults to `langfuse`, the 1.5.0 behaviour,
+so existing `observability.yml` files validate and behave unchanged.
+
+### Recommended
+
+- Re-run `observability instrument` on services that call a model, to add the user, team and
+  conversation to their AI spans (OneUptime's Usage shows their spend as Unattributed without
+  them), the retrieval operation, the new allow-list keys, and the removal of AI keys from spans
+  that aren't AI calls.
+- Where prompts and answers should be read in OneUptime instead of Langfuse, set
+  `genai.content.destination: ops`, with Langfuse mode `hybrid` or `otel`, or Langfuse off.
+- Instrument MCP servers and clients with `references/workloads/mcp.md`, including the server
+  and client MCP metrics.
+- Collectors with GenAI routing: update the ops branch from `references/collector/README.md`
+  (identity on AI spans, AI keys off other spans, the new allow-list) and list the services whose
+  content destination is `ops` in both branches (`^$` while there are none).
+- Services exporting straight to OneUptime: add `deployment.environment: "${OBS_ENVIRONMENT}"`
+  under `resource.attributes`, arrange a scraper for `/metrics`, and add OneUptime prices for
+  self-hosted or aliased models.
+
+### Verify
+
+- `python3 -m unittest discover -s observability-builder/scripts/tests` passes, and the receiver
+  tests pass with `uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf
+  --with pyyaml python -m unittest discover -s scripts/tests -p "test_receive.py"` from
+  `observability-builder/`.
+- A re-instrumented AI service's receiver summary shows the user, team and conversation on its AI
+  calls and no `AI KEYS ON OTHER SPANS` alarm.
+
 ## 1.5.0
 
 ### Required

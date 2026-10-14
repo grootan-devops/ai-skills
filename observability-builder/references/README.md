@@ -4,7 +4,7 @@ What every service, frontend, gateway, MCP server or AI agent emits, how `observ
 shaped, where observability code lives in a project, how telemetry stays safe, and how
 conformance is proven. The standard speaks OTLP, the Prometheus exposition format, the
 Pyroscope protocol and OpenTelemetry semantic conventions and is backend-neutral; RUM and
-session replay currently target OneUptime, and LLM observability targets Langfuse.
+session replay currently target OneUptime, and LLM observability targets Langfuse or OneUptime's AI views.
 
 Read this index first, then only the rows the task needs. Rows marked *planned* are not written
 yet: say so instead of inferring their content.
@@ -24,8 +24,9 @@ yet: say so instead of inferring their content.
 | Instrument browser RUM and session replay (OneUptime) | [signals/rum.md](signals/rum.md) | ready |
 | Instrument a workload type: [API service, WebSocket included](workloads/api.md), [scheduled job, batch job, cron job, CLI](workloads/batch.md) | `workloads/` | ready |
 | Instrument a fullstack app or a single-page app | [workloads/fullstack.md](workloads/fullstack.md), [workloads/spa.md](workloads/spa.md) | ready |
-| Instrument LLM calls, agents, tools, RAG and other AI features; prompts, completions and token usage; Langfuse | [signals/genai.md](signals/genai.md), [workloads/ai-agent.md](workloads/ai-agent.md), [backends/langfuse.md](backends/langfuse.md) | ready |
-| Instrument a worker, gateway or MCP server | `workloads/` | planned |
+| Instrument LLM calls, agents, tools, RAG and other AI features; prompts, completions, token usage, cost and who spent it; Langfuse or OneUptime's AI views | [signals/genai.md](signals/genai.md), [workloads/ai-agent.md](workloads/ai-agent.md), [backends/langfuse.md](backends/langfuse.md), [backends/oneuptime.md](backends/oneuptime.md#ai--llm-monitoring) | ready |
+| Instrument an MCP server or client: spans, `_meta` context, errors, metrics | [workloads/mcp.md](workloads/mcp.md) | ready |
+| Instrument a worker or gateway | `workloads/` | planned |
 | Point telemetry at a backend: [overview](backends/README.md), [OneUptime](backends/oneuptime.md), [Grafana stack](backends/grafana.md), [Langfuse](backends/langfuse.md) (AI traces) | `backends/` | ready |
 | Run the collector | [collector/README.md](collector/README.md) | ready |
 | Import ready-made Grafana Alloy modules for the collector | — | planned |

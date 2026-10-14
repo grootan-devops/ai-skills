@@ -48,8 +48,8 @@ trace and span ids, and go to stdout by default, where the collector ships them.
    cookies and body fields through the same allow-lists as the access log
    ([safe-capture.md](../safe-capture.md)). AI content (prompts, completions, tool arguments
    and results, retrieved documents) never reaches a log either: AI steps log ids, counts,
-   sizes and token usage, the GenAI instrumentations' log events are off, and content goes to
-   Langfuse only ([genai.md](genai.md#content)).
+   sizes and token usage, the GenAI instrumentations' log events are off, and content goes only
+   to the content destination ([genai.md](genai.md#content)).
 9. **Errors** are ERROR records with `exception.*` attributes ([errors.md](errors.md)).
 10. **stdio servers** (an MCP server on stdio, for example) write logs to stderr and keep stdout
     for the protocol.

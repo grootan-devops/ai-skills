@@ -355,6 +355,19 @@ class AuditTests(unittest.TestCase):
             ("P1", "sdk-outside-module", "src/main.py:3"), ("P2", "otel-env-outside-loader", "src/main.py:4"),
             ("P1", "sdk-outside-module", "src/otel.ts:1"), ("P1", "sdk-outside-module", "src/otel.ts:2")]))
 
+    def test_second_langfuse_span_sender(self):
+        write(self.root, ".env", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces\n")
+        write(self.root, "deploy/values.yaml", "env:\n  LANGFUSE_OTLP: https://langfuse.internal/api/public/otel\n"
+                                               "  # https://cloud.langfuse.com/api/public/otel stays a comment\n")
+        write(self.root, "src/tracing.go", 'exp, _ := otlptracehttp.New(ctx, otlptracehttp.WithURLPath("/api/public/otel/v1/traces"))\n')
+        write(self.root, "src/observability/langfuse.go", 'const tracesPath = "/api/public/otel/v1/traces"\n')
+        write(self.root, "collector/config.alloy", 'endpoint = "https://langfuse.internal/api/public/otel"\n')
+        write(self.root, "docs/setup.md", "Langfuse takes OTLP at /api/public/otel.\n")
+        write(self.root, "observability.yml", "genai:\n  langfuse:\n    base_url: https://cloud.langfuse.com\n")
+        found = sorted(f.location for f in audit.audit(self.root, ["src/observability"])
+                       if f.rule == "genai-langfuse-two-senders")
+        self.assertEqual(found, [".env:1", "deploy/values.yaml:2", "src/tracing.go:1"])
+
     def test_sdk_and_env_outside_module(self):
         write(self.root, "src/server.ts", "const sdk = new NodeSDK({});\nconst e = process.env.OTEL_SERVICE_NAME;\n")
         write(self.root, "src/observability/register.ts", "const sdk = new NodeSDK({});\nprocess.env.OTEL_SERVICE_NAME = 'x';\n")

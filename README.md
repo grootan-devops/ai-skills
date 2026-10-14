@@ -1,6 +1,6 @@
 # AI Agent Skills
 
-Release `1.5.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.6.0` · [Compatibility](./COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 This directory contains reusable, production-hardened **AI Agent Skills**. Skills are modular packages of procedures, automated validation scripts, reference baselines, and architectural contracts that transform AI coding assistants into specialized platform engineers.
 
@@ -14,7 +14,7 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 | [`terraform-module-consumer`](./terraform-module-consumer/) | Terraform, Terragrunt, provider-agnostic modules | Compose existing versioned modules into environment infrastructure configurations, with state-safe validation and no direct managed resources or apply. |
 | [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters. Strict 3-job separation, packaging-only Dockerfiles, Nginx frontend standard, least-privilege `GITHUB_TOKEN` permissions, SHA-pinned actions, breaking-change migrations, and minimal YAML footprints. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
 | [`gitops-manager`](./gitops-manager/) | Argo CD, Helm, Git | Focused Argo CD environment bootstrap: authenticated preflight, cluster metadata discovery, standard root/extras charts, validation, and root Application creation. |
-| [`observability-builder`](./observability-builder/) | Any language or framework, OpenTelemetry, OTLP backends (OneUptime, Grafana, Dynatrace, New Relic), Langfuse | End-to-end observability from one `observability.yml`: access and application logs, traces with function spans, ops metrics on `/metrics`, errors, profiling, RUM and session replay, and GenAI telemetry with Langfuse. Instruments services and frontends, verifies against a local receiver, and audits telemetry for leaked secrets and prompts. |
+| [`observability-builder`](./observability-builder/) | Any language or framework, OpenTelemetry, OTLP backends (OneUptime, Grafana, Dynatrace, New Relic), Langfuse | End-to-end observability from one `observability.yml`: access and application logs, traces with function spans, ops metrics on `/metrics`, errors, profiling, RUM and session replay, and LLM, agent, RAG and MCP telemetry for Langfuse or OneUptime's AI views, with spend per user and team. Instruments services and frontends, verifies against a local receiver, and audits telemetry for leaked secrets and prompts. |
 
 Maintainer regression checks for the platform checker live in
 [`platform-builder`](./platform-builder/README.md#maintainer-regression-checks).
@@ -56,7 +56,7 @@ instruction below points at that clone, and none of them copies a skill into you
 
 ```bash
 git clone https://github.com/grootan-devops/ai-skills.git ~/.ai-skills
-git -C ~/.ai-skills checkout 1.5.0
+git -C ~/.ai-skills checkout 1.6.0
 ```
 
 Pin a tag rather than tracking a branch: a branch moves, and a skill that changes underneath
@@ -69,7 +69,7 @@ the same skill:
 
 ```bash
 git submodule add https://github.com/grootan-devops/ai-skills.git .ai-skills
-git -C .ai-skills checkout 1.5.0
+git -C .ai-skills checkout 1.6.0
 ```
 
 The examples below use `~/.ai-skills` and name `terraform-module-builder`. Substitute the
