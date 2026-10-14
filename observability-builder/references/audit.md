@@ -43,6 +43,7 @@ through its block, and a call spread over several lines is read as one statement
 | `genai-capture-default` | P2 | Capture left at a library's default where no variable governs it: the AI SDK's `experimental_telemetry` on without `recordInputs` and `recordOutputs`, Langfuse's JS `observe()` without `captureInput` and `captureOutput`. |
 | `genai-context-outside-module` | P2 | `propagate_attributes`, `propagateAttributes`, `update_current_trace` or `updateActiveTrace` outside the module, in a file that imports a Langfuse SDK. The trace context comes from `genai.feature()`, which writes neither `session.id` nor baggage. |
 | `genai-browser-score` | P2 | Langfuse's browser SDK (`@langfuse/browser`, `new LangfuseWeb(`) or a score call in code that runs in the page: the public key lets anyone score any trace. Score through the app's API ([workloads/ai-agent.md](workloads/ai-agent.md#user-feedback)). |
+| `genai-langfuse-two-senders` | P2 | Langfuse's OTLP endpoint (`/api/public/otel`) configured outside the module: in code, env and compose files, chart values or app configuration. The module already sends each span once; a second exporter sends every observation twice ([signals/genai.md](signals/genai.md#modes)). |
 | `genai-duplicate-instrumentation` | P2 | One AI library (OpenAI, Anthropic, LangChain, LlamaIndex) instrumented by two families, from the manifests and imports: OpenTelemetry's GenAI packages, OpenLLMetry (its packages or `traceloop-sdk`), OpenInference, Langfuse's OpenAI wrapper or LangChain callback handler. Every call is recorded twice. |
 | `secret-in-query` | P2 | An API key, token, password or signature sent as a URL query parameter. `url.full`, `url.query` and access logs carry it unless the instrumentation redacts query values. Check that it does, and check whether the URL is logged anywhere. |
 
@@ -58,7 +59,10 @@ into a function that logs it in another file, AI content in `app.*` attributes (
 allow-list keeps them), AI entry points without a feature declaration, a feature allowed
 `redacted` without a redactor, streamed model calls without usage, generations of a managed
 prompt that don't pass the prompt it used to the model-call helper, a Langfuse client built
-outside the module, and scores without stable ids. Tag these findings `[judged]`.
+outside the module, scores without stable ids, AI entry points whose user or team comes from
+request input rather than the verified context, a sub-agent wrapped in both a tool span and an
+agent span, and an MCP tool call traced twice (by the SDK and the module, or by the agent's
+framework and the MCP client). Tag these findings `[judged]`.
 
 ## 2. Dynamic scan (when telemetry is available)
 
@@ -67,8 +71,10 @@ When the app runs, capture its telemetry with the local receiver, `scripts/recei
 and the app's stdout and stderr, for secret patterns (JWT, bearer tokens, API keys, card numbers, private keys,
 `Authorization` / `Cookie` values), bodies in span attributes, unbounded metric label values
 (in the `/metrics` scrape too), unexpected baggage and raw input values from the browser. For
-AI services, the receiver's summary lists the content keys per destination and flags any in
-the ops stream; content in stdout or a production run's Langfuse stream is a finding too.
+AI services, the receiver's summary lists the content keys per destination and flags any
+outside the service's content destination, AI keys on spans that aren't AI calls, AI spans
+without the user, team or conversation, and a second Langfuse span sender; content in stdout
+or in a production run's streams is a finding too.
 
 ## 3. Report
 

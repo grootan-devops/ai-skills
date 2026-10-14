@@ -33,7 +33,7 @@ ln -s "$(pwd)/observability-builder" ~/.claude/skills/observability-builder
 | Path | Purpose |
 | --- | --- |
 | `SKILL.md` | Entry point: routing, working rules, commands |
-| `references/README.md` | Index of the standard: principles, data model, config, layout, hooks, signals (GenAI included), workloads (AI features and agents included), backends (Langfuse included), collector, charts, acceptance, SDK notes |
+| `references/README.md` | Index of the standard: principles, data model, config, layout, hooks, signals (GenAI included), workloads (AI features, agents and MCP included), backends (Langfuse and OneUptime's AI views included), collector, charts, acceptance, SDK notes |
 | `references/instrument.md`, `references/audit.md` | The two workflows |
 | `assets/observability.schema.json` | JSON Schema for `observability.yml` |
 | `assets/java/PprofExporter.java` | Template: the Java profiler's JFR snapshots as pprof, for backends without JFR |
@@ -57,6 +57,43 @@ Python 3.10+ with PyYAML; `jsonschema` is used when installed.
 
 ## Changes
 
+- 2026-10-14, OneUptime's AI / LLM views, MCP servers and clients, and who spent what.
+  - **Content destination:** `genai.content.destination` (`langfuse` or `ops`) sends content to one
+    tool per service, Langfuse or OneUptime's AI views, never both.
+  - **Who spent what:** the spender, the team and the conversation come from the app's own
+    verified context, decided per entry point; on the ops path AI spans carry `user.id`,
+    `team.id` and `gen_ai.conversation.id`, where OneUptime reads them.
+  - **OneUptime:** `backends/oneuptime.md` lists what its AI views read, the call kinds, the
+    problems it finds, conversations, pricing, and the counting rule: no AI keys on other spans.
+  - **RAG and agents:** retrieval steps carry `gen_ai.operation.name=retrieval`; memory, planning
+    and agent-creation steps; a sub-agent call is one `invoke_agent` span; OpenInference and
+    OpenLLMetry spans keep their model and usage keys on the ops path.
+  - **MCP:** `workloads/mcp.md`: spans per side, context through `params._meta`, the error rules,
+    one span per tool call, and the server and client duration metrics.
+  - **One Langfuse span sender:** the rule, the `genai-langfuse-two-senders` audit rule and a
+    receiver alarm.
+  - **Collector:** the GenAI routing's ops branch adds the identity to AI spans, strips AI keys from
+    other spans and keeps content for `ops` services; checked on Alloy 1.20.1.
+  - **Receiver:** `--genai-content-destination`, and summary lines for content per destination,
+    who spent what, AI keys on other spans, retrieval steps, MCP and span senders.
+  - **Verification:** three evals, each run with this skill and with 1.5.0:
+    - a RAG chat monitored in OneUptime only;
+    - an MCP server in TypeScript with a Python agent;
+    - an agent already on Langfuse that also exports to OneUptime.
+
+    This skill passed 33/33 checks against 25/33, at the same time and tokens. Its three apps
+    were also checked in a local OneUptime 14.0.50 and Langfuse 4.58.
+  - **What the runs taught the skill:**
+    - SDK notes for `openai` 3 and `mcp` 2 over `httpx2`, the MCP Python SDK's client spans and
+      protocol probe, exporter errors fed back into the log export, `ExceptionGroup` on FastAPI
+      SERVER spans, and the JavaScript exporters' warning on JSON replies;
+    - direct export to OneUptime: ops metrics need a scraper, and the yml adds
+      `deployment.environment` for exceptions;
+    - path exclusions are decided when the response ends;
+    - conversation ids are scoped the way the app keys its history;
+    - migration advice for apps moving off the Langfuse SDK's decorators;
+    - Langfuse 4.58 drops `langfuse.trace.input` and `output`, so the turn's input and output
+      go on the trace's root observation, checked against the live Langfuse.
 - 2026-10-09, Langfuse for TypeScript, Go and Java, in every mode they support.
   - **Assets:**
     - `assets/js/langfuse`: the export scope, the content guard, the guarded processor proxy,

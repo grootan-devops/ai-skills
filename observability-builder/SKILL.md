@@ -4,11 +4,12 @@ description: >-
   Add end-to-end observability to any service or frontend — access logs, structured
   application logs, OpenTelemetry traces with nested function spans, ops metrics on a
   Prometheus /metrics port, error logs, Pyroscope profiling, browser RUM and session replay,
-  and LLM and agent telemetry (GenAI spans, token metrics, Langfuse) — driven by one
-  observability.yml, for any language, framework or OTLP backend, and audit existing
-  telemetry for unsafe capture. Use whenever someone asks to add, fix or standardise
-  observability, OpenTelemetry, tracing, logging, metrics, profiling, RUM, APM or LLM
-  observability in an application, to trace LLM calls, agents or RAG, to send
+  and LLM, agent, RAG and MCP telemetry (GenAI spans, token and cost data, who spent what,
+  Langfuse or OneUptime's AI / LLM views) — driven by one observability.yml, for any language,
+  framework or OTLP backend, and audit existing telemetry for unsafe capture. Use whenever
+  someone asks to add, fix or standardise observability, OpenTelemetry, tracing, logging,
+  metrics, profiling, RUM, APM or LLM monitoring in an application, to trace LLM calls,
+  agents, RAG or MCP servers and clients, to see LLM spend per user or team, to send
   telemetry to OneUptime, Grafana/Tempo, Dynatrace, New Relic or Langfuse, to replace vendor
   APM SDKs with OpenTelemetry, or to check telemetry for leaked secrets or prompts; not for
   Helm charts, Dockerfiles or CI pipelines (platform-builder), dashboards and alerts,
@@ -58,10 +59,12 @@ project's package manager before adding anything.
   baggage ([references/safe-capture.md](./references/safe-capture.md)). There is no redactor to
   clean up afterwards; the audit will flag what slips through.
 - **AI content is the riskiest telemetry.** Prompts, completions, tool arguments and
-  retrieved documents go to Langfuse only, through the module's content policy: `full` only
-  where the data is synthetic, `off` in production unless a feature's redactor is signed off;
-  never in logs, metrics or the ops backend
-  ([references/signals/genai.md](./references/signals/genai.md)). Never call a real model
+  retrieved documents go to one tool only, Langfuse or OneUptime's AI views
+  (`genai.content.destination`), through the module's content policy: `full` only where the
+  data is synthetic, `off` in production unless a feature's redactor is signed off; never in
+  logs or metrics ([references/signals/genai.md](./references/signals/genai.md)). Who spent
+  what (user, team, conversation) comes from the app's own verified context, decided per entry
+  point, and AI spans carry it to both tools. Never call a real model
   provider while verifying: point the client at `scripts/llm_stub.py` with a dummy key.
   Platform work in Langfuse (prompts, datasets, evaluators, score configs) follows Langfuse's
   own agent skill and live docs ([references/backends/langfuse.md](./references/backends/langfuse.md)).

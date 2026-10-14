@@ -261,6 +261,7 @@ def check_genai(doc, schema: dict | None, env: dict, use_jsonschema: bool = True
         return [_finding("warning", "$.genai.langfuse.enabled", "on while genai.enabled is off, so Langfuse stays off")] \
             if _is_on(langfuse.get("enabled")) else []
     findings = _genai_content(resolved, _mapping(genai, "content"))
+    findings += _content_destination(_mapping(genai, "content"), langfuse)
     if _is_on(langfuse.get("enabled")):
         findings += _langfuse_mode(langfuse)
         findings += _langfuse_route(resolved, langfuse)
@@ -301,12 +302,34 @@ def _genai_content(doc: dict, content: dict) -> list[dict]:
         body, base = _mapping(_mapping(access, side), "body"), f"$.logging.access_log.{side}.body"
         if _is_on(body.get("full")):
             findings.append(_finding("warning", f"{base}.full",
-                                     "full bodies of AI routes hold prompts and completions; content goes only to Langfuse"))
+                                     "full bodies of AI routes hold prompts and completions; content goes only to the "
+                                     "content destination (genai.content.destination)"))
         fields = body.get("fields") if isinstance(body.get("fields"), list) else []
         findings += [_finding("warning", f"{base}.fields[{index}]",
-                              "looks like AI content (prompts, messages, completions); content goes only to Langfuse")
+                              "looks like AI content (prompts, messages, completions); content goes only to the "
+                              "content destination (genai.content.destination)")
                      for index, field in enumerate(fields) if isinstance(field, str) and CONTENT_FIELD.search(field)]
     return findings
+
+
+def _content_destination(content: dict, langfuse: dict) -> list[dict]:
+    """The one content destination against Langfuse: ops needs the conventions' content keys, which the sdk mode
+    doesn't write, and langfuse needs Langfuse on, or the content is recorded nowhere."""
+    destination, capture = content.get("destination", "langfuse"), content.get("capture", "off")
+    langfuse_on = _is_on(langfuse.get("enabled"))
+    if destination == "ops" and langfuse_on and langfuse.get("mode", "hybrid") == "sdk":
+        return [_finding("error", "$.genai.content.destination",
+                         "ops with Langfuse mode sdk, whose spans keep content in Langfuse's own keys; the ops destination "
+                         "needs mode hybrid or otel, or Langfuse off")]
+    if destination == "ops" and content.get("media") == "upload":
+        return [_finding("warning", "$.genai.content.media",
+                         "upload goes to Langfuse's media store, which gets no content with the ops destination; media is "
+                         "recorded as a reference")]
+    if destination == "langfuse" and not langfuse_on and capture != "off":
+        return [_finding("warning", "$.genai.content.capture",
+                         "on with the langfuse destination while Langfuse is off, so content is recorded nowhere; turn "
+                         "Langfuse on, or set genai.content.destination to ops for an ops backend with AI views")]
+    return []
 
 
 def _langfuse_route(doc: dict, langfuse: dict) -> list[dict]:

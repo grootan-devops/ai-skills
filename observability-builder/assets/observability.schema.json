@@ -475,7 +475,7 @@
       }
     },
     "genai": {
-      "description": "LLM and agent telemetry: the GenAI client metrics, the content policy and Langfuse as a second trace destination. Off by default; see references/signals/genai.md.",
+      "description": "LLM and agent telemetry: the GenAI client metrics, the AI feature context, the content policy and Langfuse as a second trace destination; OneUptime's AI views read the same spans. Off by default; see references/signals/genai.md.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -485,7 +485,7 @@
           "default": false
         },
         "content": {
-          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on spans bound for Langfuse, never in logs, metrics or the ops backend.",
+          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on spans bound for the one content destination, never in logs or metrics.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -506,6 +506,22 @@
               ],
               "default": "off"
             },
+            "destination": {
+              "description": "The one tool that receives content: langfuse (Langfuse-bound spans; the ops path carries none) or ops (AI spans on the ops path, for an ops backend with AI views such as OneUptime's; Langfuse, when on, gets no content). ops needs Langfuse mode hybrid or otel, or Langfuse off.",
+              "type": "string",
+              "anyOf": [
+                {
+                  "enum": [
+                    "langfuse",
+                    "ops"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/interpolated"
+                }
+              ],
+              "default": "langfuse"
+            },
             "sample_ratio": {
               "description": "Share of traces that carry content, decided from the trace id.",
               "$ref": "#/$defs/ratio",
@@ -517,7 +533,7 @@
               "default": 20000
             },
             "media": {
-              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full).",
+              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full and the langfuse destination).",
               "type": "string",
               "anyOf": [
                 {

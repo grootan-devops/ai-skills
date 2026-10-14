@@ -280,15 +280,24 @@ as orphans unless they match too, so excluding at the source is preferred.
 For services that send their AI spans to Langfuse through the collector
 (`genai.langfuse.export: collector`, with mode `hybrid` or `otel`; [signals/genai.md](../signals/genai.md),
 [backends/langfuse.md](../backends/langfuse.md)). The app exports as usual, content and the
-feature stamps included; the collector splits each trace into a content-free ops copy and the
-AI part for Langfuse. Raise the receiver's gRPC `max_recv_msg_size` (default 4 MiB) when the
-spans carry content. Content crosses the cluster in clear between the app and the collector.
+feature stamps included; the collector splits each trace into an ops copy, with content only
+for the services whose content destination is `ops`, and the AI part for Langfuse. Raise the
+receiver's gRPC `max_recv_msg_size` (default 4 MiB) when the spans carry content. Content
+crosses the cluster in clear between the app and the collector.
 
 **Option A, stateless (the default).** The traces leaving the normalise step feed two branches.
-The ops branch drops Langfuse event spans, experiment runs and `gen_ai.*` span events, gives AI
-spans their error type as the status description, keeps only the allow-list on AI spans and
-deletes every `langfuse.*` and content key; the Langfuse branch keeps the stamped spans of AI
-features and the spans of experiment items, minus non-AI client and producer spans:
+The ops branch:
+
+- drops Langfuse event spans, experiment runs and `gen_ai.*` span events;
+- gives AI spans their user, team and conversation from the stamps, and their error type as the
+  status description;
+- keeps only the allow-list on AI spans, and removes the AI keys from every other span;
+- deletes every `langfuse.*` key, and every content key except on the AI spans of the services
+  whose content destination is `ops` ([genai](../signals/genai.md#destination)).
+
+The Langfuse branch keeps the stamped spans of AI features and the spans of experiment items,
+minus non-AI client and producer spans, and drops the content of the `ops` services. Both
+branches list those services by `service.name`, in the same regex (`^$` while there are none):
 
 ```alloy
 // Ops branch. The transform's traces output replaces the ops path's batch input.
@@ -309,15 +318,26 @@ otelcol.processor.transform "ops_genai" {
   trace_statements {
     context    = "span"
     statements = [
+      // Mark AI spans for the statements below; the mark goes again at the end.
+      `set(span.attributes["observability.ai_span"], true) where span.attributes["gen_ai.operation.name"] != nil or span.attributes["langfuse.observation.type"] != nil or span.attributes["openinference.span.kind"] != nil or span.attributes["llm.request.type"] != nil or span.attributes["traceloop.span.kind"] != nil`,
       // AI spans: the error type replaces the status description, where instrumentations put the
       // provider's message (it can quote the input). Before the allow-list, which drops the type keys.
-      `set(span.status.message, span.attributes["error.type"]) where span.status.message != "" and span.attributes["error.type"] != nil and (span.attributes["gen_ai.operation.name"] != nil or span.attributes["langfuse.observation.type"] != nil or span.attributes["openinference.span.kind"] != nil)`,
-      `set(span.status.message, "") where span.status.message != "" and span.attributes["error.type"] == nil and (span.attributes["gen_ai.operation.name"] != nil or span.attributes["langfuse.observation.type"] != nil or span.attributes["openinference.span.kind"] != nil)`,
-      // AI spans keep only the allow-list, so an unknown content key can't pass.
-      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|call\\.id)|conversation\\.id|data_source\\.id|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+)$") where span.attributes["gen_ai.operation.name"] != nil or span.attributes["langfuse.observation.type"] != nil or span.attributes["openinference.span.kind"] != nil`,
-      // Every span: no stamps, no content.
+      `set(span.status.message, span.attributes["error.type"]) where span.status.message != "" and span.attributes["error.type"] != nil and span.attributes["observability.ai_span"] == true`,
+      `set(span.status.message, "") where span.status.message != "" and span.attributes["error.type"] == nil and span.attributes["observability.ai_span"] == true`,
+      // AI spans: the spender, team and conversation from the stamps, where LLM views read them.
+      `set(span.attributes["user.id"], span.attributes["langfuse.user.id"]) where span.attributes["observability.ai_span"] == true and span.attributes["langfuse.user.id"] != nil`,
+      `set(span.attributes["team.id"], span.attributes["langfuse.trace.metadata.team"]) where span.attributes["observability.ai_span"] == true and span.attributes["langfuse.trace.metadata.team"] != nil`,
+      `set(span.attributes["gen_ai.conversation.id"], span.attributes["langfuse.session.id"]) where span.attributes["observability.ai_span"] == true and span.attributes["gen_ai.conversation.id"] == nil and span.attributes["langfuse.session.id"] != nil`,
+      // AI spans keep only the allow-list and the GenAI conventions' content keys, so an unknown
+      // content key can't pass; the content keys go again below unless the destination is ops.
+      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|definitions|call\\.(id|arguments|result))|conversation\\.id|data_source\\.id|retrieval\\.(top_k|documents|query\\.text)|memory\\.(store\\.id|record\\.(id|count)|query\\.text|records)|input\\.messages|output\\.messages|system_instructions|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|openinference\\.span\\.kind|llm\\.(model_name|provider|system|token_count\\..+|request\\.type|usage\\.total_tokens)|traceloop\\.span\\.kind|mcp\\.(method\\.name|protocol\\.version|session\\.id|resource\\.uri)|jsonrpc\\.(request\\.id|protocol\\.version)|rpc\\.response\\.status_code|network\\.(transport|protocol\\.(name|version))|client\\.(address|port)|user\\.id|team\\.id|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+|observability\\.ai_span)$") where span.attributes["observability.ai_span"] == true`,
+      // Other spans: no AI keys, which would make OneUptime count them as AI calls.
+      `delete_matching_keys(span.attributes, "^(gen_ai|llm|traceloop)\\..*") where span.attributes["observability.ai_span"] == nil`,
+      // Every span: no stamps, and no content except on the AI spans of the services whose
+      // genai.content.destination is ops, matched by service.name ("^$" while there are none).
       `delete_matching_keys(span.attributes, "^langfuse\\..*")`,
-      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$")`,
+      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$") where not (span.attributes["observability.ai_span"] == true and IsMatch(resource.attributes["service.name"], "^$"))`,
+      `delete_key(span.attributes, "observability.ai_span")`,
     ]
   }
   output { traces = [otelcol.processor.batch.default.input] }
@@ -333,6 +353,19 @@ otelcol.processor.filter "langfuse" {
       `attributes["langfuse.trace.name"] == nil and attributes["langfuse.experiment.id"] == nil`,
       // scope ai_context; for ai_only, drop every span without a GenAI operation or type instead.
       `(kind == SPAN_KIND_CLIENT or kind == SPAN_KIND_PRODUCER) and attributes["gen_ai.operation.name"] == nil`,
+    ]
+  }
+  output { traces = [otelcol.processor.transform.langfuse_content.input] }
+}
+
+// The services whose content destination is ops (the same list as the ops branch's) send their
+// AI steps to Langfuse without content.
+otelcol.processor.transform "langfuse_content" {
+  error_mode = "ignore"
+  trace_statements {
+    context    = "span"
+    statements = [
+      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$") where IsMatch(resource.attributes["service.name"], "^$")`,
     ]
   }
   output { traces = [otelcol.processor.batch.langfuse.input] }

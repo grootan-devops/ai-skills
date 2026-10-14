@@ -25,7 +25,9 @@ Copy the `.go` files into the observability module (e.g. `internal/observability
 keep the service's own `go.mod` versions. Then:
 
 - **Build the guard.** Implement `Decide` from the feature registry and the yml's content ceiling.
-  An experiment item may hold content whenever the ceiling is `full`.
+  An experiment item may hold content whenever the ceiling is `full`. With
+  `genai.content.destination: ops`, `Decide` always refuses: content then goes to the ops
+  backend's AI views, and Langfuse gets none.
 - **Wire it per mode** (`genai.langfuse.mode`, export `app`):
   - `hybrid`: the exporter in `sdktrace.NewBatchSpanProcessor` on the module's tracer provider, next
     to the ops processor, plus one `Client` for app prompts and a `Scores` queue for scores.

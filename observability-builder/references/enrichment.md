@@ -12,7 +12,7 @@ attributes each kind of function gets.
 | Per-process identity | **resource**: the standard's eight attributes, plus `k8s.cluster.name` where several clusters send to one backend ([data model](data-model.md#resource)); nothing else is added there | service name, namespace, version and environment; the pod's namespace, name, UID and node; the cluster's name |
 | Per-request context | attributes on **each service's entry span** and its access log only; an allow-listed subset travels as **baggage**, so the next service can set it on its own entry span | user, tenant, session, client app and version, locale, experiment variant |
 | Per-operation facts | attributes on **that operation's span** | order ID, cart size, payment method |
-| AI feature context | stamped by the module on **every span of an AI feature**, for Langfuse only; stripped on the ops path, never baggage ([genai](signals/genai.md#trace-context)) | feature, user, conversation, release, tags |
+| AI feature context | stamped by the module on **every span of an AI feature**, for Langfuse; on the ops path only AI spans keep the user, team and conversation, as `user.id`, `team.id` and `gen_ai.conversation.id`; never baggage ([genai](signals/genai.md#trace-context)) | feature, user, conversation, team, release, tags |
 | Notable moments | **event log records** with `eventName`, correlated to the span | retry, payment declined, cache miss |
 | Aggregates | **metrics** with short, bounded labels only, never IDs; the ops metrics by default, business metrics when the team adds them | plan, payment method, outcome |
 

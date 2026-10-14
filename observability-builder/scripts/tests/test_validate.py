@@ -421,6 +421,10 @@ genai:
 """
 
 
+NOWHERE = ("on with the langfuse destination while Langfuse is off, so content is recorded nowhere; turn Langfuse on, "
+           "or set genai.content.destination to ops for an ops backend with AI views")
+
+
 @unittest.skipUnless(LIBRARY_SCHEMA.exists(), "assets/observability.schema.json is missing")
 class GenAITests(unittest.TestCase):
     @classmethod
@@ -546,7 +550,7 @@ class GenAITests(unittest.TestCase):
                                     + "genai:\n  enabled: true\n"), [])
 
     def test_content_capture_rules(self):
-        ceiling = "  content:\n    capture: \"${OBS_GENAI_CONTENT:-off}\"\n"
+        ceiling = "  content:\n    capture: \"${OBS_GENAI_CONTENT:-off}\"\n    destination: ops\n"
         full = ("warning", "$.genai.content.capture", "full in a production environment; production takes off, or "
                 "redacted for features with a redactor")
         for environment, value, expected in (("production", "full", [full]), ("prod-eu", "full", [full]),
@@ -558,17 +562,42 @@ class GenAITests(unittest.TestCase):
         media = self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    media: upload\n")
         self.assert_both(media, [("warning", "$.genai.content.media",
                                   "upload needs capture full; media is recorded as a reference otherwise")])
-        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n    media: upload\n"), [])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n    media: upload\n"), [
+            ("warning", "$.genai.content.capture", NOWHERE)])
+
+    def test_content_destination_rules(self):
+        base = "    base_url: https://cloud.langfuse.com\n" + self.keys()
+        ops = "  content:\n    capture: full\n    destination: ops\n"
+        sdk_ops = ("error", "$.genai.content.destination", "ops with Langfuse mode sdk, whose spans keep content in "
+                   "Langfuse's own keys; the ops destination needs mode hybrid or otel, or Langfuse off")
+        self.assert_both(self.langfuse(base + "    mode: sdk\n", genai=ops), [sdk_ops])
+        for mode in ("hybrid", "otel"):
+            self.assert_both(self.langfuse(base + f"    mode: {mode}\n", genai=ops), [])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n" + ops), [])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n"),
+                         [("warning", "$.genai.content.capture", NOWHERE)])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: \"off\"\n"), [])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n" + ops + "    media: upload\n"), [(
+            "warning", "$.genai.content.media", "upload goes to Langfuse's media store, which gets no content with the ops "
+            "destination; media is recorded as a reference")])
+        switched = self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n"
+                                         '    destination: "${OBS_GENAI_DESTINATION:-langfuse}"\n')
+        self.assert_both(switched, [], {"OBS_GENAI_DESTINATION": "ops"})
+        self.assert_both(switched, [("warning", "$.genai.content.capture", NOWHERE)])
+        for findings in self.found(self.write(RESOURCE + "genai:\n  content:\n    destination: both\n")):
+            self.assertEqual([p for _, p, _ in findings], ["$.genai.content.destination"])
 
     def test_access_log_content_fields(self):
         logging = ("logging:\n  access_log:\n    request:\n      body:\n        fields: [amount, prompt, order.messages]\n"
                    "    response:\n      body:\n        full: true\n")
-        warning = "looks like AI content (prompts, messages, completions); content goes only to Langfuse"
+        warning = ("looks like AI content (prompts, messages, completions); content goes only to the content "
+                   "destination (genai.content.destination)")
         self.assert_both(self.write(RESOURCE + logging + "genai:\n  enabled: true\n"), [
             ("warning", "$.logging.access_log.request.body.fields[1]", warning),
             ("warning", "$.logging.access_log.request.body.fields[2]", warning),
             ("warning", "$.logging.access_log.response.body.full",
-             "full bodies of AI routes hold prompts and completions; content goes only to Langfuse")])
+             "full bodies of AI routes hold prompts and completions; content goes only to the content destination "
+             "(genai.content.destination)")])
         self.assert_both(self.write(RESOURCE + logging + "genai:\n  enabled: false\n"), [])
         self.assert_both(self.write(RESOURCE + logging.replace("  access_log:\n", "  access_log:\n    enabled: false\n")
                                     + "genai:\n  enabled: true\n"), [])

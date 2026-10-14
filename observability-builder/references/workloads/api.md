@@ -51,9 +51,11 @@ Pitfalls the contract guards against:
   after the route ran — take it when the framework matches the route, and test that
   `http.route` is a template, not a path, on failed requests too ([hooks.md](../hooks.md)).
 - Instrumentation libraries match excluded paths differently (exact, prefix, regex, unanchored
-  search): translate `exclude_paths`, exact entries and `/*` subtrees, per library and signal.
-  Where a tool can't filter by path in code (an agent, for example), use its rule-based
-  sampler, with a collector filter as fallback.
+  search), and their own exclusion lists act when the span starts, before the status is known,
+  so a 404 or a failed probe on a listed path would lose its span too. Leave those lists empty
+  and decide when the response ends: the module drops a successful excluded request's spans in
+  its export filter ([hooks.md](../hooks.md), rule 12). Where a tool can't filter in code (an
+  agent, for example), use its rule-based sampler, with a collector filter as fallback.
 - Preload order matters: ESM loader hooks, `--import` and `-javaagent` run before any
   application code.
 - In containers, bind listeners — `/metrics` included — on all interfaces; some default to

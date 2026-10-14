@@ -330,6 +330,84 @@ class LangfuseStandIn(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DEPS, "needs grpcio, protobuf and opentelemetry-proto (run with uv, see README.md)")
+class OpsDestinationSpendAndMcp(unittest.TestCase):
+    """The ops content destination, who spent what, AI keys on other spans, retrieval, MCP and span senders."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "telemetry"
+        with mock.patch.dict(os.environ, {"OBS_RECEIVER_REPLAY_ASSETS": "", "OBS_HARNESS_REPLAY_ASSETS": ""}):
+            self.receiver = receive.Receiver(self.out, content_destination="ops")
+        self.port = int(self.receiver.start()["otlp_http"].rsplit(":", 1)[1])
+        self.json = {"Content-Type": "application/json"}
+
+    def tearDown(self):
+        self.receiver.stop()
+        self.tmp.cleanup()
+
+    def summary(self) -> str:
+        self.receiver.flush()
+        return (self.out / "summary.md").read_text()
+
+    def test_content_spend_and_stray_keys_in_the_ops_stream(self):
+        canary = "CANARY-OPS-6161"
+        entry = span("POST /api/chat", 2, "00000000000000b1", **{"user.id": "u-1", "gen_ai.conversation.id": "c-1"})
+        chat = span("chat m", 3, "00000000000000b2", "00000000000000b1", **{
+            "gen_ai.operation.name": "chat", "gen_ai.input.messages": f'[{{"role":"user","content":"{canary}"}}]',
+            "user.id": "u-1", "team.id": "t-1", "gen_ai.conversation.id": "c-1"})
+        retrieval = span("retrieval faq", 1, "00000000000000b3", "00000000000000b1", **{"gen_ai.data_source.id": "faq"})
+        tool = span("execute_tool lookup", 1, "00000000000000b4", "00000000000000b1", **{
+            "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "lookup", "input.value": canary,
+            "gen_ai.conversation.id": "c-1"})
+        post(self.port, "/v1/traces", traces(entry, chat, retrieval, tool), self.json)
+        summary = self.summary()
+        self.assertIn("Content on AI calls in the ops stream (the ops destination): gen_ai.input.messages x1", summary)
+        self.assertIn("CONTENT OUTSIDE AI CALLS IN THE OPS STREAM", summary, "input.value isn't the conventions' key")
+        self.assertNotIn("CONTENT IN THE OPS STREAM", summary)
+        self.assertIn("Who spent what on the 2 AI calls in the ops stream: user.id 1/2, team.id 1/2, "
+                      "gen_ai.conversation.id 2/2", summary)
+        self.assertIn("AI keys on spans that aren't AI calls: gen_ai.conversation.id x1, gen_ai.data_source.id x1", summary)
+        self.assertIn("AI KEYS ON OTHER SPANS", summary)
+        self.assertIn("Retrieval steps: 1, with gen_ai.operation.name=retrieval 0", summary)
+        self.assertIn("RETRIEVAL STEPS WITHOUT THEIR OPERATION", summary)
+        self.assertNotIn(canary, summary)
+
+    def test_content_in_langfuse_with_the_ops_destination(self):
+        headers = {**self.json, "Authorization": basic(KEYS), "x-langfuse-ingestion-version": "4"}
+        post(self.port, LANGFUSE, traces(span("chat m", 3, "00000000000000c1", **{
+            "gen_ai.operation.name": "chat", "gen_ai.output.messages": "[]"})), headers)
+        self.assertIn("CONTENT IN THE LANGFUSE STREAM", self.summary())
+
+    def test_two_langfuse_span_senders(self):
+        headers = {**self.json, "Authorization": basic(KEYS)}
+        post(self.port, LANGFUSE, traces(span("chat m", 3, "00000000000000c2", **{"gen_ai.operation.name": "chat"})),
+             {**headers, "x-langfuse-sdk-name": "python"})
+        post(self.port, LANGFUSE, traces(span("chat m", 3, "00000000000000c3", **{"gen_ai.operation.name": "chat"})),
+             {**headers, "x-langfuse-ingestion-version": "4"})
+        post(self.port, LANGFUSE, traces(span("chat m", 3, "00000000000000c4", **{"gen_ai.operation.name": "chat"}),
+                                         service="billing"), {**headers, "x-langfuse-ingestion-version": "4"})
+        summary = self.summary()
+        self.assertIn("TWO LANGFUSE SPAN SENDERS: orders sent spans from a Langfuse SDK and from plain OTLP", summary)
+        self.assertNotIn("billing sent", summary)
+
+    def test_mcp_spans(self):
+        tool = {"mcp.method.name": "tools/call", "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "search"}
+        agent_tool = span("execute_tool search", 1, "00000000000000d1", **{
+            "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "search"})
+        client = span("tools/call search", 3, "00000000000000d2", "00000000000000d1", **tool)
+        server = span("tools/call search", 2, "00000000000000d3", "00000000000000d2", **tool)
+        rejected = {**span("tools/call nope", 2, "00000000000000d4", **{
+            "mcp.method.name": "tools/call", "rpc.response.status_code": "-32602"}), "status": {"code": 2}}
+        listing = span("tools/list", 2, "00000000000000d5", **{"mcp.method.name": "tools/list"})
+        post(self.port, "/v1/traces", traces(agent_tool, client, server, rejected, listing), self.json)
+        summary = self.summary()
+        self.assertIn("MCP spans: CLIENT tools/call 1, SERVER tools/call 2, SERVER tools/list 1", summary)
+        self.assertIn("MCP tool calls: 3, with execute_tool and the tool name 2; server spans parented by the caller's "
+                      "MCP span 1/3; caller errors on the server 1, of which ERROR 1", summary)
+        self.assertIn("MCP TOOL CALLS TRACED TWICE: 1 tools/call client spans under an execute_tool span", summary)
+
+
+@unittest.skipUnless(HAVE_DEPS, "needs grpcio, protobuf and opentelemetry-proto (run with uv, see README.md)")
 class Cli(unittest.TestCase):
     def test_prints_endpoints_and_stops_after_seconds(self):
         with tempfile.TemporaryDirectory() as tmp:

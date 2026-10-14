@@ -128,7 +128,8 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## GenAI
 
 For services that call a model ([signals/genai.md](signals/genai.md)), run twice against the
-model stub and the Langfuse stand-in: a non-production environment with `full` content, and
+model stub and the Langfuse stand-in, with the receiver told the service's content destination
+(`--genai-content-destination`): a non-production environment with `full` content, and
 production with `off` (or `redacted` for the features with a redactor), each with stray
 `TRACELOOP_*`, `OPENINFERENCE_*` and `LANGFUSE_*` capture variables set to "on".
 
@@ -136,13 +137,15 @@ production with `off` (or `redacted` for the features with a redactor), each wit
 | --- | --- |
 | Transport | Langfuse-bound spans use OTLP over HTTP to `/api/public/otel/v1/traces` with Basic auth, and any exporter other than a Langfuse SDK sends `x-langfuse-ingestion-version: 4` |
 | Structure | each AI request is one trace in both destinations, with one root observation in Langfuse (the entry span); the steps have the names, kinds and Langfuse types of the [step kinds](signals/genai.md#step-kinds); with scope `ai_context`, no database, cache, HTTP or queue client span reaches Langfuse |
-| Trace context | every Langfuse-bound observation carries the feature as trace name, the user, the conversation as session and the release; none of them in baggage or on the ops path |
+| Trace context | every Langfuse-bound observation carries the feature as trace name, the user, the conversation as session and the release; none of them in baggage; on the ops path no `langfuse.*` key |
+| Who spent what | every AI span on the ops path carries `user.id`, `team.id` (where the app has a team) and `gen_ai.conversation.id`, with the values the plan agreed; no other span carries a `gen_ai.*`, `llm.*` or `traceloop.*` key |
+| Steps | retrieval steps carry `gen_ai.operation.name=retrieval`; a sub-agent call is one `invoke_agent` span; MCP calls follow [workloads/mcp.md](workloads/mcp.md#verification) |
 | Model and usage | generations and embeddings carry the response model and usage, streams included; streamed generations have a time to first chunk |
 | Status and level | the failing step is ERROR with `error.type`, and its status description on the ops path is that type, never the provider's message; degraded steps are WARNING with a constant status message; no span is OK; a streamed answer adds no ERROR record |
-| Content | the `full` run has content on the Langfuse path only, within `max_chars`; the production run has no content key anywhere and only redacted values for redacting features; the stray variables change nothing; logs, metrics, span events and the ops stream never hold content, not even from a provider error that quotes the input (the stub's errors do) |
+| Content | the `full` run has content at the destination only, within `max_chars`: the Langfuse path with `langfuse`, AI spans of the ops stream with `ops` (the conventions' keys only, never on other spans); the production run has no content key anywhere and only redacted values for redacting features; the stray variables change nothing; logs, metrics, span events and the other destination never hold content, not even from a provider error that quotes the input (the stub's errors do) |
 | Prompt links | generations that used a managed prompt (fetched by the app's own code through the module's client) link to its version; a fallback is WARNING and unlinked |
 | Scores | in `hybrid` and `sdk`, feedback sent twice for one message is one score, sent by the server, with the resource's environment; in `otel`, no request reaches Langfuse's API |
-| Modes | the same app, switched by `genai.langfuse.mode` alone, passes every row above in `hybrid`, `sdk` (generations from the Langfuse SDK, no GenAI instrumentation span) and `otel` (exports with the ingestion header, no Langfuse SDK loaded) |
+| Modes | the same app, switched by `genai.langfuse.mode` alone, passes every row above in `hybrid`, `sdk` (generations from the Langfuse SDK, no GenAI instrumentation span) and `otel` (exports with the ingestion header, no Langfuse SDK loaded); each run has one span sender |
 | Experiments | a runner over a two-item dataset leaves two traces with one root each, the experiment and item keys on their spans (none in the requests to the model provider), input, output and expected output on each root, the evaluator scores on the roots, environment `experiment`, and no span on the ops path; it refuses to start where content isn't `full` |
 | Metrics | the GenAI metrics are on `/metrics` with bounded labels and the extended buckets; a 429 counts as `rate_limited` |
 | Failure | with Langfuse down or slow, requests and the ops export are unaffected and one rate-limited WARN appears; shutdown flushes both within the grace period |

@@ -21,6 +21,12 @@ Check OneUptime's current docs at run time — paths, limits and policy options 
 | Through the collector (default) | Apps send OTLP over gRPC to the collector. Its OneUptime exporter (`otelcol.exporter.otlphttp` with base endpoint `<host>/otlp`, or gRPC) adds `x-oneuptime-token` through `otelcol.auth.headers`, reading the key from a mounted file. The key never reaches the app. |
 | Direct | Each signal's yml exporter points at OneUptime and carries the header from a mounted secret file. |
 
+**Ops metrics in direct mode.** They stay on the service's `/metrics` port either way, and
+OneUptime gets them only through something that scrapes and forwards them: the collector's
+scrape, or a Prometheus that remote-writes. Without one, the platform handoff lists the
+scraper, and OneUptime has traces and logs only. Its AI views don't depend on it: they read
+spans.
+
 In direct mode with `http/protobuf`, the endpoint is the base URL `<host>/otlp` and the loader
 appends `/v1/<signal>` ([config.md](../config.md#exporter-blocks)):
 
@@ -119,7 +125,10 @@ shows one exception, not two.
 
 An exception's environment comes from the older `deployment.environment` resource attribute
 only (OneUptime 14), not from `deployment.environment.name`. The applications keep sending the
-current name; the collector's OneUptime branch copies it for this destination:
+current name. In direct mode the yml adds the older one beside it,
+`deployment.environment: "${OBS_ENVIRONMENT}"` under `resource.attributes`, the one backend
+exception to the resource rule ([data-model.md](../data-model.md#resource)). Through the
+collector, its OneUptime branch copies it for this destination:
 
 ```alloy
 otelcol.processor.transform "oneuptime" {
@@ -139,13 +148,80 @@ otelcol.processor.transform "oneuptime" {
 }
 ```
 
-## AI spans
+## AI / LLM monitoring
 
-OneUptime receives AI spans like any others: model, embedding and tool calls with the GenAI
-conventions' operation, model, usage and finish reasons, and the GenAI metrics with the scrape.
-Content and the `langfuse.*` keys never arrive: the ops path removes them
-([signals/genai.md](../signals/genai.md#the-ops-allow-list)). Prompts, completions and scores
-live in Langfuse, under the same trace id.
+OneUptime's AI / LLM product (Conversations, Calls, Usage, Pricing, and an LLM tab on each
+trace) is built from the OpenTelemetry GenAI spans the standard already sends
+([signals/genai.md](../signals/genai.md)); the app installs nothing for it. Checked with
+OneUptime 14.0.50; 14.0.11 has neither Conversations nor the AI alert types.
+
+**Ingestion.** AI spans arrive with all other traces, on the same endpoint, key and route, and
+the GenAI metrics come with the scrape. At ingest OneUptime copies a few values off each AI span
+into columns:
+
+| Column | Read from (first match) | What the standard sends |
+| --- | --- | --- |
+| AI call or not | a provider, an operation, a model, an agent or tool name, or a total token count; as a last resort, any key starting with `gen_ai.`, `llm.` or `traceloop.` | those keys on AI spans only: the ops path removes them from every other span |
+| Provider, operation | `gen_ai.provider.name` or `gen_ai.system`; `gen_ai.operation.name`, `llm.request.type` or `openinference.span.kind` | both, on every AI span |
+| Models | `gen_ai.request.model`; `gen_ai.response.model` | both |
+| Agent, tool | `gen_ai.agent.name`; `gen_ai.tool.name` | on agent and tool steps |
+| Tokens | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens` | as the provider reports them |
+| Cost | `gen_ai.usage.cost` when present (a 0 included), else an estimate from its price list | the provider's own cost only |
+| Conversation | `gen_ai.conversation.id`, then `session.id`, then `langfuse.session.id` | `gen_ai.conversation.id`; AI spans never carry `session.id` |
+| User, team | `user.id` or `enduser.id`; `user.email`; `team.id`, `team`, `cost_center` or `department`; on AI spans only | `user.id` and `team.id` on AI spans ([who spent what](../signals/genai.md#who-spent-what)), never an email |
+
+- **Call kinds,** by operation:
+  - answer: `chat`, `text_completion`, `generate_content`;
+  - agent: `invoke_agent`, `create_agent`, `invoke_workflow`, `plan`;
+  - tool: `execute_tool`, MCP `tools/call` included;
+  - embedding: `embeddings`;
+  - retrieval: `retrieval`, `search_memory`.
+
+  Anything else is "other", a retrieval step without its operation name included.
+- **Problems,** found at ingest from the call alone:
+  - failed: an ERROR status or `error.type`;
+  - refused: a refusal or safety finish reason, or, with content, a stock refusal answer;
+  - cut off: `length`, `max_tokens`;
+  - empty: no output tokens and no tool call.
+
+  Flagged needs `gen_ai.evaluation.result` events, which the ops path doesn't carry.
+- **Usage:**
+  - Employee lists `user.id` values. OneUptime built it for staff using AI tools; for a
+    customer-facing app it lists the app's users.
+  - Team lists `team.id`.
+  - Model, Provider and App (the service) need nothing more.
+
+  Spend counts only the spans OneUptime received, so every entry point that can reach a model is
+  always sampled ([genai.md](../signals/genai.md#required-behaviour)).
+
+**Conversations and content.** A conversation groups AI spans by `gen_ai.conversation.id`,
+across traces. Its title, search and replay text come from content: the newest user message in
+`gen_ai.input.messages`, the answer in `gen_ai.output.messages`, tool arguments and results.
+These arrive only with the `ops` content destination
+([genai.md](../signals/genai.md#destination)). With `langfuse`, OneUptime lists conversations
+with timing, models, tokens, cost and problems, but no text. With `ops`:
+
+- **Scrub rules:** OneUptime runs the project's scrub rules and pipelines before it stores a span
+  or builds a preview. They are a second layer after the module's redaction, never a replacement
+  for it.
+- **Access and retention:** content is readable by everyone with access to the project, and kept
+  for the project's trace retention. Give AI services that send content a project of their own,
+  or restrict access, and set retention there.
+- **Size:** large prompts make large spans. `genai.content.max_chars` bounds each attribute, and
+  the ingress and collector limits must allow the result.
+
+**Pricing.** The price list covers the large providers' public models, with cache rates.
+
+- **Unpriced models:** a self-hosted, fine-tuned or aliased model (a gateway alias, a deployment
+  name) costs 0 until the project adds a custom price on the Pricing tab:
+  - a model-id prefix, with input and output prices per million tokens;
+  - no cache rate;
+  - it applies to calls that arrive after it is saved.
+- **Handoff:** the report lists such models for the platform team. Where Langfuse prices the same
+  models, its model definitions need them too.
+
+**Correlation.** Each AI call opens the trace it belongs to, with an LLM tab for the call; logs,
+metrics and profiles join as everywhere.
 
 ## RUM
 

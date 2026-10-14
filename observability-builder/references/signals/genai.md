@@ -1,11 +1,13 @@
 # GenAI
 
 Model calls, agents, tools and retrieval produce two kinds of telemetry. **Ops telemetry**
-(latency, errors, tokens, which dependency failed) is the same as for any other dependency and
-goes where all ops telemetry goes. **AI-quality telemetry** (prompts, completions, tool
-arguments, retrieved documents, prompt versions, scores) needs an LLM-observability backend,
-Langfuse in this standard ([backends/langfuse.md](../backends/langfuse.md)), as a second
-destination of the same traces. Content never travels on the ops path.
+(latency, errors, tokens, cost, which dependency failed) is the same as for any other dependency
+and goes where all ops telemetry goes. **AI-quality telemetry** (prompts, completions, tool
+arguments, retrieved documents, prompt versions, scores) needs an LLM-monitoring tool:
+Langfuse ([backends/langfuse.md](../backends/langfuse.md)) as a second destination of the same
+traces, or the ops backend's own AI views where it has them (OneUptime's AI / LLM product,
+[backends/oneuptime.md](../backends/oneuptime.md#ai--llm-monitoring)). Both read the same
+GenAI spans. Content goes to one of them per service, never both ([destination](#destination)).
 
 This standard covers telemetry only. Langfuse features an application *uses* (prompt management,
 datasets, evaluators, score configs, annotation queues) belong to the application and its
@@ -48,10 +50,11 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
    The module's helpers set the Langfuse observation type where the operation doesn't imply it
    (retriever, workflow, guardrail, evaluator, event).
 3. **The AI feature context.** Each AI entry point (a route, a WebSocket message type, a job
-   item) declares its feature once, after authentication:
-   `genai.feature(name, user, conversation)`, in the language's own form:
+   item, an MCP tool handler) declares its feature once, after authentication:
+   `genai.feature(name, user, conversation, team)`, with the values the app's own code has
+   ([who spent what](#who-spent-what)), in the language's own form:
    - **Python:** it sets the context for the rest of the request.
-   - **Node:** a callback, `feature(name, { user, conversation }, fn)`, because
+   - **Node:** a callback, `feature(name, { user, conversation, team }, fn)`, because
      `AsyncLocalStorage.enterWith` is experimental.
    - **Go:** it returns the context that the handler passes on; spans started from the old one miss
      the stamps.
@@ -59,28 +62,38 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
 
    It also stamps the entry span, which started before it (the module keeps it in the request
    state). The module's stamping processor copies the
-   [trace context](#trace-context) (feature as trace name, user, conversation as session,
+   [trace context](#trace-context) (feature as trace name, user, conversation as session, team,
    release, tags, bounded metadata) onto every span started inside it, third-party spans
-   included, because Langfuse filters and groups per observation. The context lives in a key
-   the propagators never send: never baggage, which every outbound call carries, the model
-   provider included. This is the one scoped exception to "request context on the entry span
-   only" ([data-model.md](../data-model.md#resource-vs-request-attributes)), and the ops path
-   strips these keys.
+   included, because Langfuse filters and groups per observation. It stamps whenever
+   `genai.enabled` is on, with or without Langfuse. The context lives in a key the propagators
+   never send: never baggage, which every outbound call carries, the model provider included.
+   This is the one scoped exception to "request context on the entry span only"
+   ([data-model.md](../data-model.md#resource-vs-request-attributes)). The ops path turns the
+   user, team and conversation stamps into `user.id`, `team.id` and `gen_ai.conversation.id` on
+   AI spans only, where OneUptime reads them, and strips the stamps from every span.
 4. **Content follows the [content policy](#content).** Prompts, completions, system
    instructions, tool definitions, arguments and results, retrieval queries and retrieved
    documents are content. The module's content helper (`genai.content`) records them: it
    applies the feature's mode, the content sample, redaction and the size cap. Instrumentation
    libraries capture under the switches the loader writes
-   ([config.md](../config.md#what-the-loader-writes)). Content goes to Langfuse only, never to
-   logs, metrics, span events or the ops backend.
-5. **The ops path carries no content.** On the app route the module's ops guard wraps the ops
-   exporter: AI spans keep only the [allow-list](#the-ops-allow-list) and their error type as the
-   status description (instrumentations put the provider's error message there, and providers
-   and gateways can quote the input in it), every span loses the content keys and every
-   `langfuse.*` key, and Langfuse event observations and [experiment](#experiments) runs are
-   dropped (an event's log record is the ops copy). AI instrumentation scopes lose their
-   attributes too: Langfuse's Python SDK puts its public key there. On the collector route the
-   collector's ops branch does the same.
+   ([config.md](../config.md#what-the-loader-writes)). Content goes to the one
+   [destination](#destination) `genai.content.destination` names, Langfuse or the ops backend's
+   AI views: never to logs, metrics or span events, and never to the other destination.
+5. **The ops path carries only what the ops backend may read.** On the app route the module's
+   ops guard wraps the ops exporter:
+   - **AI spans** get `user.id`, `team.id` and `gen_ai.conversation.id` from the stamps, then
+     keep only the [allow-list](#the-ops-allow-list), plus the content keys when the destination
+     is `ops`. Their status description becomes their error type: instrumentations put the
+     provider's error message there, and providers and gateways can quote the input in it.
+   - **Other spans** lose the content keys and every `gen_ai.*`, `llm.*` and `traceloop.*` key:
+     OneUptime counts any span carrying one as an AI call.
+   - **Every span** loses every `langfuse.*` key.
+   - **Dropped:** Langfuse event observations and [experiment](#experiments) runs (an event's
+     log record is the ops copy).
+   - **Scopes:** AI instrumentation scopes lose their attributes too: Langfuse's Python SDK puts
+     its public key there.
+
+   On the collector route the collector's ops branch does the same.
 6. **Status and level.** A step's status is ERROR only when its own work failed: a provider
    error or timeout, a tool that threw, a refused tool call. Success is UNSET, never OK. A
    step that succeeded in a degraded way keeps UNSET and gets
@@ -93,7 +106,9 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
    `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens` and
    `gen_ai.usage.reasoning.output_tokens` when reported. Never subtract them yourself; Langfuse
    does. Streamed calls record `gen_ai.response.time_to_first_chunk`. Provider-reported cost,
-   when there is one, goes in `gen_ai.usage.cost`.
+   when there is one, goes in `gen_ai.usage.cost` (USD). Never write a cost the provider didn't
+   report, and never a 0 for a price nobody knows: Langfuse and OneUptime take a reported cost as
+   final and skip their own estimate from the model's price.
 8. **Prompt links.** The app fetches its prompts itself (fetching, caching, labels and fallbacks
    are the app's own) and hands the model-call helper what it used: name, version, and whether
    it was the fallback kept in code. A generation that used a managed prompt carries
@@ -112,8 +127,11 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
     bounded values only: `genai.approval.requested`, `genai.approval.decided`,
     `genai.feedback.received`, `guardrail.blocked`, `rag.no_documents`.
 11. **AI entry points are always sampled.** Feedback, approvals and evaluations need the trace,
-    so the module's rule sampler keeps the entry points the feature registry lists; everything
-    else follows `tracing.sampler`. Langfuse never samples on its own.
+    and OneUptime builds spend, usage and conversations from the spans it receives, so an
+    unsampled model call is missing from them. The module's rule sampler keeps the entry points
+    the feature registry lists; everything else follows `tracing.sampler`. The registry lists
+    every entry point that can reach a model: routes, WebSocket message types, job items, queue
+    consumers and MCP tool handlers. Langfuse never samples on its own.
 12. **Langfuse never sits on the request path for telemetry.** Spans and scores leave in the
     background. A prompt fetch is the app's own call; the report notes it as a dependency, and
     the handoff list asks for a cache, a bounded timeout and a fallback in code
@@ -130,9 +148,13 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
 | --- | --- | --- | --- | --- |
 | Model call | `CLIENT` | `chat {gen_ai.request.model}` (`generate_content`, `text_completion` likewise) | generation, implied | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and parameters, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, usage, `gen_ai.response.time_to_first_chunk`, `gen_ai.output.type`, `gen_ai.prompt.name`, `app.genai.prompt.version` |
 | Embedding | `CLIENT` | `embeddings {gen_ai.request.model}` | embedding, implied | `gen_ai.request.model`, `gen_ai.usage.input_tokens`; vectors never |
-| Retrieval | `CLIENT` for a remote store, `INTERNAL` in process | `retrieval {gen_ai.data_source.id}` | retriever, set by the module | `gen_ai.data_source.id`, `app.rag.documents_retrieved`, `app.rag.top_score`; the query and the documents are content |
+| Retrieval | `CLIENT` for a remote store, `INTERNAL` in process | `retrieval {gen_ai.data_source.id}` | retriever, set by the module | `gen_ai.operation.name=retrieval`, `gen_ai.data_source.id`, `gen_ai.retrieval.top_k`, `app.rag.documents_retrieved`, `app.rag.top_score`; the query and the documents are content |
+| Memory | `CLIENT` for a remote store, `INTERNAL` in process | `{gen_ai.operation.name}`: `search_memory`, `create_memory`, `update_memory`, `upsert_memory`, `delete_memory` | retriever for `search_memory`, set by the module; otherwise a plain span | `gen_ai.operation.name`, `gen_ai.memory.store.id`, `gen_ai.memory.record.id` for one record, `gen_ai.memory.record.count`; the query and the records are content |
 | Tool execution | `INTERNAL` | `execute_tool {gen_ai.tool.name}` | tool, implied | `gen_ai.tool.name`, `gen_ai.tool.type`, `gen_ai.tool.call.id`; arguments and result are content. The tool's own outbound calls are `CLIENT` children that stay ops-only |
+| MCP call | `CLIENT` on the caller, `SERVER` on the server | `{mcp.method.name} {tool or prompt name}` | tool for `tools/call`, implied | `mcp.method.name`, and on `tools/call` `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`; one span when the agent's framework already made the tool span ([workloads/mcp.md](../workloads/mcp.md)) |
 | Agent run | `INTERNAL` (`CLIENT` for a remote agent) | `invoke_agent {gen_ai.agent.name}` | agent, implied | `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.conversation.id`, `app.genai.agent.steps`, `app.genai.agent.outcome` |
+| Planning | `INTERNAL` | `plan {gen_ai.agent.name}` | a plain span | `gen_ai.operation.name=plan`, `gen_ai.agent.name`; the model call that writes the plan is its child. Only where the framework keeps planning apart from the other steps |
+| Agent creation | `CLIENT` | `create_agent {gen_ai.agent.name}` | a plain span | `gen_ai.operation.name=create_agent`, `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.provider.name`; for an agent service that creates agents remotely |
 | Workflow | `INTERNAL` | `invoke_workflow {gen_ai.workflow.name}` | chain, set by the module | `gen_ai.workflow.name` |
 | Guardrail | `INTERNAL` | `guardrail {name}` | guardrail, set by the module | `app.genai.guardrail.name`, `app.genai.guardrail.result` (`pass`, `block`, `flag`); a guardrail that calls a model has that generation as its child |
 | In-app evaluation | `INTERNAL` | `evaluate {gen_ai.evaluation.name}` | evaluator, set by the module | `gen_ai.evaluation.name`, `gen_ai.evaluation.score.value`, `gen_ai.evaluation.score.label`; the explanation is content |
@@ -140,6 +162,11 @@ Langfuse-specific key in the module's one translation table ([below](#translatio
 
 Names never carry ids, user text or prompt content. A guardrail is never typed as a generation
 and a model call never as anything else: the prompt link and the cost belong to generations.
+
+A sub-agent is one `invoke_agent` span under its caller, also when the app hands it to the
+model as a tool: never an `execute_tool` span with an `invoke_agent` span inside it for the same
+call. Each agent has its own `gen_ai.agent.name`, so its steps, cost and errors stay apart in
+both tools.
 The `app.*` attributes above are the module's own, in the project's namespace
 ([enrichment.md](../enrichment.md)); content never goes in an `app.*` attribute.
 
@@ -159,12 +186,38 @@ on an AI span is caught by the [ops allow-list](#the-ops-allow-list), which fail
 | Vercel AI SDK | `ai.prompt*`, `ai.response.text`, `ai.response.object`, `ai.response.toolCalls`, `ai.toolCall.args`, `ai.toolCall.result` |
 | Span events | every event named `gen_ai.*` |
 
+### Destination
+
+`genai.content.destination` names the one tool that receives content, per service:
+
+| Destination | Content goes to | The other path |
+| --- | --- | --- |
+| `langfuse` (default) | Langfuse-bound spans | the ops path carries none |
+| `ops` | AI spans on the ops path, for an ops backend with AI views whose access fits content: OneUptime's AI / LLM product, whose conversation titles, search and replay read it ([oneuptime.md](../backends/oneuptime.md#ai--llm-monitoring)) | Langfuse, when it's on, gets structure, usage and ids without content; experiments need `langfuse` |
+
+- **One content guard, applied where content leaves:** the same modes, sample, redaction and
+  size cap for either destination.
+- **AI spans only, in the conventions' keys.** With `ops`, content stays on AI spans in the
+  GenAI conventions' own keys (`gen_ai.input.messages`, `gen_ai.output.messages`,
+  `gen_ai.system_instructions`, the tool, retrieval and memory keys); other spans never carry
+  it, span events stay off the ops path, and other conventions' content keys (OpenInference,
+  the Vercel AI SDK) never pass. A framework that writes content only in those keys shows no
+  text in the ops backend's AI views.
+- **`ops` needs the conventions' own keys:** Langfuse mode `hybrid` or `otel`, or Langfuse off.
+  In `sdk` mode the model observations hold content in Langfuse's keys, which other tools don't
+  read.
+- **Any other ops backend keeps `langfuse`:** a trace store without AI views shows prompts to
+  everyone who reads traces.
+- **Through a collector** with [GenAI routing](../collector/README.md#genai-routing), the
+  collector lists the `ops` services, so its ops branch keeps their content and its Langfuse
+  branch drops it.
+
 ### Modes
 
 `genai.content.capture` is the most an environment allows; each feature also declares the most
 it allows, in the feature registry, and gets the lower of the two:
 
-| Mode | What reaches Langfuse | Where |
+| Mode | What reaches the destination | Where |
 | --- | --- | --- |
 | `off` | no content key; the step's structure, usage, timing and ids only | production by default; any feature that handles data nobody may read |
 | `redacted` | content after the feature's redactor, then the size cap. A feature without a redactor records nothing | production, for a feature whose owner signed off on the redactor |
@@ -179,15 +232,16 @@ it allows, in the feature registry, and gets the lower of the two:
   feature, never the value: content fails closed. `redacted` is not anonymisation; structured
   capture (extracted fields and confidences instead of the text) is often the better choice.
 - **Media** (images, audio, files): `reference` records type, size and a hash; `upload` sends
-  the file to Langfuse's media store and is allowed only with `full`. Identity documents are
-  never uploaded.
+  the file to Langfuse's media store and is allowed only with `full` and the `langfuse`
+  destination. Identity documents are never uploaded.
 - **Content is never logged**, never a metric label and never a span event; compiled prompts
   hold user input, so prompt variables are content too.
 
 ### The ops allow-list
 
-An AI span (one with `gen_ai.operation.name`, `langfuse.observation.type` or
-`openinference.span.kind`) keeps only these keys on the ops path:
+An AI span (one with `gen_ai.operation.name`, `langfuse.observation.type`,
+`openinference.span.kind`, `llm.request.type` or `traceloop.span.kind`) keeps only these keys
+on the ops path:
 
 - `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.*` except
   `gen_ai.request.stop_sequences`, `gen_ai.response.id`, `gen_ai.response.model`,
@@ -195,29 +249,71 @@ An AI span (one with `gen_ai.operation.name`, `langfuse.observation.type` or
   `gen_ai.output.type`;
 - `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.tool.name`, `gen_ai.tool.type`,
   `gen_ai.tool.call.id`, `gen_ai.conversation.id`, `gen_ai.data_source.id`,
-  `gen_ai.workflow.name`, `gen_ai.prompt.name`, `gen_ai.evaluation.name`,
-  `gen_ai.evaluation.score.*`;
+  `gen_ai.retrieval.top_k`, `gen_ai.memory.store.id`, `gen_ai.memory.record.id`,
+  `gen_ai.memory.record.count`, `gen_ai.workflow.name`, `gen_ai.prompt.name`,
+  `gen_ai.evaluation.name`, `gen_ai.evaluation.score.*`;
+- the model, usage and kind keys of the other conventions, for spans a framework makes in them:
+  `openinference.span.kind`, `llm.model_name`, `llm.provider`, `llm.system`,
+  `llm.token_count.*`, `llm.request.type`, `llm.usage.total_tokens`, `traceloop.span.kind`;
+- on MCP spans: `mcp.method.name`, `mcp.protocol.version`, `mcp.session.id`,
+  `mcp.resource.uri`, `jsonrpc.request.id`, `jsonrpc.protocol.version`,
+  `rpc.response.status_code`, `network.transport`, `network.protocol.name`,
+  `network.protocol.version`, `client.address`, `client.port`;
+- `user.id` and `team.id`, set from the stamps ([who spent what](#who-spent-what));
 - `error.type`, `server.*`, `service.peer.name`, `code.*`, `thread.name` and the project's
-  `app.*` attributes.
+  `app.*` attributes;
+- with the `ops` [destination](#destination), the GenAI conventions' content keys, after the
+  content guard.
 
-Every span, AI or not, also loses the content keys and every `langfuse.*` key on that path.
+Every span loses every `langfuse.*` key on that path. Other spans also lose the content keys and
+every `gen_ai.*`, `llm.*` and `traceloop.*` key, and an AI span loses `session.id`: OneUptime
+reads it as a conversation id, and it stays the login or replay session on the entry span.
 
 ## Trace context
 
-| Concept | Langfuse key | Source and rule |
-| --- | --- | --- |
-| Feature | `langfuse.trace.name` | the feature registry: kebab-case, bounded; the only source of trace names |
-| User | `langfuse.user.id` | the verified principal, the same value as `user.id` on the entry span; at most 200 characters |
-| Conversation | `langfuse.session.id`, with `gen_ai.conversation.id` on the AI spans | the app's conversation or thread id; at most 200 US-ASCII characters; never derived from `session.id`, which stays the login or replay session |
-| Release | `langfuse.release` | `service.version` |
-| Version | `langfuse.version` | the feature's or agent's configuration version, when it has one |
-| Tags | `langfuse.trace.tags` | a few bounded values: channel, variant, `resumed`, `batch` |
-| Metadata | `langfuse.trace.metadata.<key>` | bounded values such as tenant tier, document type or job run; alphanumeric keys, string values up to 200 characters; filterable only at the top level |
-| Environment | none | the resource's `deployment.environment.name`, which Langfuse reads and lowercases |
+| Concept | Langfuse key | On AI spans, ops path | Source and rule |
+| --- | --- | --- | --- |
+| Feature | `langfuse.trace.name` | none | the feature registry: kebab-case, bounded; the only source of trace names |
+| User | `langfuse.user.id` | `user.id` | the principal the AI work runs for ([who spent what](#who-spent-what)), usually the same value as `user.id` on the entry span; an id, never an email or a name; at most 200 characters |
+| Conversation | `langfuse.session.id` | `gen_ai.conversation.id` | the app's conversation or thread id; at most 200 US-ASCII characters; never derived from `session.id`, which stays the login or replay session |
+| Team | `langfuse.trace.metadata.team` | `team.id` | the group the spend belongs to, when the app has one ([who spent what](#who-spent-what)); an id |
+| Release | `langfuse.release` | none | `service.version` |
+| Version | `langfuse.version` | none | the feature's or agent's configuration version, when it has one |
+| Tags | `langfuse.trace.tags` | none | a few bounded values: channel, variant, `resumed`, `batch` |
+| Metadata | `langfuse.trace.metadata.<key>` | none | bounded values such as tenant tier, document type or job run; alphanumeric keys, string values up to 200 characters; filterable only at the top level |
+| Environment | none | none | the resource's `deployment.environment.name`, which Langfuse reads and lowercases |
 
 Never personal data in tags or metadata, and never `langfuse.trace.public`. On the ops path the
-same trace already carries `user.id` and `session.id` on its entry span, so the stamps are
-stripped there.
+stamps are stripped from every span, after the ops guard copied the user, conversation and team
+onto the AI spans. OneUptime attributes spend and groups conversations per AI span and reads
+identity on nothing else; the entry span keeps its own request context.
+
+### Who spent what
+
+Both tools answer "who spent what" from the same three values, so the instrument workflow
+decides them once per AI entry point, from the app's own code, and the plan states them for
+confirmation. Nothing about them is fixed by this standard; they follow what the app is and
+how it works:
+
+- **The spender:** the principal the AI work runs for, from the verified context the app already
+  has. Examples:
+  - the signed-in user;
+  - the API client or service account a token belongs to;
+  - the user who started a job, carried in the job's payload;
+  - an MCP client's authenticated subject.
+
+  Work that runs for nobody has no user.
+- **The team:** what the app bills, limits or reports AI use by: a tenant, workspace,
+  organisation, team, project or cost centre, from the same verified context. `team.id` holds one
+  value, so pick the group that owns the spend; an app without one sends none.
+- **The conversation:** the app's chat or thread id; for a batch job, the run id. Scope it the
+  way the app keys its history: where ids are unique only within a tenant, use
+  `{tenant}:{id}`, or two tenants' `c-1` merge into one conversation.
+
+The values come from verified context, never from request input the caller controls, and are
+ids, never emails or names: an id that holds an email address is left out. The
+module takes them as `genai.feature()` arguments and derives nothing itself, so its code is the
+same in every app.
 
 ## Translation to Langfuse
 
@@ -227,7 +323,8 @@ reads them from the GenAI conventions ([backends/langfuse.md](../backends/langfu
 
 | From | To | When |
 | --- | --- | --- |
-| feature, user, conversation, release, tags, metadata, version | the [trace-context keys](#trace-context) | every span in the feature context |
+| feature, user, conversation, team, release, tags, metadata, version | the [trace-context keys](#trace-context) | every span in the feature context |
+| the turn's input and output (the user's message and the final answer), handed to the content helper | `langfuse.observation.input`, `langfuse.observation.output` | the trace's root observation, under the content policy: the feature's entry span, or with scope `ai_only` the span that starts the feature's AI work. Langfuse 4 shows the root observation's input and output as the trace's, in the trace list and the session view; it drops `langfuse.trace.input` and `langfuse.trace.output` (seen with 4.58) |
 | step kind without an implied type | `langfuse.observation.type`: `retriever`, `chain`, `guardrail`, `evaluator`, `event` | that step's span |
 | `gen_ai.prompt.name`, `app.genai.prompt.version` | `langfuse.observation.prompt.name`, `langfuse.observation.prompt.version` (an integer) | generations that used a managed prompt, never a fallback |
 | `gen_ai.response.time_to_first_chunk` | `langfuse.observation.completion_start_time` (start time plus the delay, ISO 8601) | streamed generations |
@@ -246,6 +343,18 @@ is the same in all three, so switching is one key (for example
 | `hybrid` (default) | the OpenTelemetry GenAI instrumentation and the module's helpers | the Langfuse SDK's span processor on the module's provider (`export: app`), or the collector (`export: collector`) | yes, through the SDK client (a small REST client in Go and Java) | all |
 | `sdk` | the Langfuse SDK: its OpenAI integration for model calls, its observations for the module's steps | the SDK, from the module's provider | yes | Python, TypeScript |
 | `otel` | as in `hybrid` | the module's own OTLP exporter (`export: app`), or the collector | no: reduced features, no feedback or evaluator scores | all |
+
+**One span sender.** Each span reaches Langfuse once, from the Langfuse SDK's span processor
+(`hybrid` in Python and TypeScript, `sdk`) or from plain OTLP (`otel`, `hybrid` in Go and Java,
+the collector route), never both:
+
+- no second exporter to Langfuse's OTLP endpoint;
+- no Langfuse client of the app's own that traces;
+- no collector branch for a service that already sends from the app.
+
+Scores, prompt fetches and media uploads are API calls, not spans, and don't count. The audit
+reports a Langfuse OTLP endpoint configured outside the module (`genai-langfuse-two-senders`),
+and the receiver reports a run whose Langfuse exports came from both an SDK and plain OTLP.
 
 What changes and what doesn't:
 
@@ -359,8 +468,8 @@ for item in data.items:
   `langfuse.experiment.metadata.*`, item metadata in `langfuse.experiment.item.metadata.*`.
 - **Content.** The item's input and output on the root, and the expected output, are content:
   an experiment runs only where the feature's mode is `full` (`genai.content.capture: full`,
-  synthetic or curated data), unsampled, and the runner refuses to start otherwise, because an
-  item without its input and output can't be compared.
+  synthetic or curated data) and the destination is `langfuse`, unsampled, and the runner
+  refuses to start otherwise, because an item without its input and output can't be compared.
 - **Environment `experiment`** on the Langfuse path (`langfuse.environment`), so runs stay out
   of the service's dashboards; Langfuse's Python and TypeScript runners use `sdk-experiment`.
 - **Off the ops path.** Experiment spans are evaluation data: the ops guard (or the collector's
@@ -377,9 +486,13 @@ for item in data.items:
 
 ## Correlation
 
-- **One trace id in both tools.** The ops backend shows the trace without content; Langfuse
-  shows the AI steps with content. Langfuse's trace URL is
-  `{base_url}/project/{project id}/traces/{trace id}`, for runbooks and internal tools.
+- **One trace id in both tools.** The ops backend shows the whole trace; with the `langfuse`
+  [destination](#destination) Langfuse shows the AI steps with content, with `ops` OneUptime's
+  AI views do. Langfuse's trace URL is `{base_url}/project/{project id}/traces/{trace id}`, for
+  runbooks and internal tools.
+- **OneUptime's AI views** (Conversations, Calls, Usage) list AI spans and open the trace they
+  belong to, where the LLM tab shows the call; conversations join on `gen_ai.conversation.id`,
+  spend on `user.id` and `team.id` ([oneuptime.md](../backends/oneuptime.md#ai--llm-monitoring)).
 - **Ids with the results.** The service stores the trace and observation ids next to each AI
   result it returns (a message id), so feedback, approvals and support requests find the trace.
 - **Logs** carry native trace ids as everywhere; **metrics** join by service, model and time;
@@ -391,6 +504,7 @@ for item in data.items:
 | --- | --- | --- |
 | `genai.enabled` | `false` | the GenAI metrics, the feature context and, when configured, Langfuse; off keeps every capture switch off |
 | `genai.content.capture` | `off` | `off`, `redacted` or `full`: the most this environment allows |
+| `genai.content.destination` | `langfuse` | `langfuse` or `ops`: the one tool that receives content ([above](#destination)) |
 | `genai.content.sample_ratio` | `1.0` | share of traces with content, by trace id |
 | `genai.content.max_chars` | `20000` | per content attribute, after redaction |
 | `genai.content.media` | `reference` | `upload` only with `full` |
@@ -431,7 +545,8 @@ python3 scripts/llm_stub.py    # prints {"openai": ".../v1", "anthropic": "..."}
 ```
 
 Point the app's provider client at the stub with a dummy key, and `genai.langfuse.base_url` at
-the receiver's OTLP/HTTP endpoint (the stand-in serves Langfuse's paths there). Run twice, with
+the receiver's OTLP/HTTP endpoint (the stand-in serves Langfuse's paths there). Start the
+receiver with `--genai-content-destination` set to the service's destination. Run twice, with
 scratch copies of the yml: once as a non-production environment with `full`, once as production
 with `off` (or `redacted` for the features that have a redactor), each time with the
 `TRACELOOP_*`, `OPENINFERENCE_*` and `LANGFUSE_*` capture variables set to "on" in the
@@ -450,10 +565,15 @@ shows who sent the spans:
 - generations carry the model, usage and, for streams, the time to first chunk; prompt links
   only where a managed prompt was used;
 - the failed call is ERROR with `error.type`; degraded steps are WARNING; nothing is OK;
-- the `full` run has content on the Langfuse path only; the production run has none anywhere,
-  redacted values only for redacting features, and the stray variables changed nothing;
-- the ops stream has no content key, no `langfuse.*` key and no `gen_ai.*` span event, and the
-  log records carry ids only;
+- the `full` run has content only at the destination: on the Langfuse path with `langfuse`, on
+  AI spans of the ops stream with `ops`; the production run has none anywhere, redacted values
+  only for redacting features, and the stray variables changed nothing;
+- the ops stream has no `langfuse.*` key, no `gen_ai.*` span event and no content outside AI
+  spans, and the log records carry ids only;
+- AI spans in the ops stream carry `user.id`, `team.id` (where the app has a team) and
+  `gen_ai.conversation.id`, retrieval steps their `retrieval` operation, and no other span
+  carries a `gen_ai.*`, `llm.*` or `traceloop.*` key;
+- one span sender per service on the Langfuse path;
 - the feedback score was sent once per id, by the server; `gen_ai_client_*` series are on
   `/metrics` with bounded labels;
 - an experiment runner, started once with the receiver's `--langfuse-datasets` serving a small

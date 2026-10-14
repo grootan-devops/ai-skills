@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-14
+
+### Added
+
+- `observability-builder`: OneUptime's AI / LLM views as an LLM-monitoring destination. `genai.content.destination` (`langfuse` or `ops`) sends prompts and answers to one tool per service, never both, and `backends/oneuptime.md` describes what the views read: call kinds, problems, conversations, usage and pricing.
+- `observability-builder`: who spent what. The spender, the team and the conversation come from the app's own verified context, decided per entry point; on the ops path AI spans carry `user.id`, `team.id` and `gen_ai.conversation.id`, where OneUptime attributes spend.
+- `observability-builder`: MCP servers and clients (`workloads/mcp.md`): a span per message on each side, context through `params._meta`, the JSON-RPC status rules, one span per tool call, and the `mcp_server_operation_duration_seconds` and `mcp_client_operation_duration_seconds` metrics.
+- `observability-builder`: the `genai-langfuse-two-senders` audit rule; validate checks for the content destination; the receiver's `--genai-content-destination` flag and summary lines for who spent what, AI keys on other spans, retrieval steps, MCP and Langfuse span senders.
+
+### Changed
+
+- `observability-builder`: retrieval steps carry `gen_ai.operation.name=retrieval` and `gen_ai.retrieval.top_k`; memory, planning and agent-creation step kinds are added; a sub-agent call is one `invoke_agent` span; the turn's input and output go on the Langfuse trace; no cost is written unless the provider reports one.
+- `observability-builder`: the ops allow-list keeps the MCP keys, the OpenInference and OpenLLMetry model and usage keys, and `user.id` and `team.id`; spans that aren't AI calls lose their `gen_ai.*`, `llm.*` and `traceloop.*` keys, which OneUptime would count as AI calls. The collector's GenAI routing does the same.
+- `observability-builder`: one span sender to Langfuse per service is a stated rule; all three Langfuse modes stay, with `hybrid` the default.
+- `observability-builder`: SDK notes for `openai` 3 and `mcp` 2 over `httpx2`, the MCP Python SDK 2.x client spans and protocol probe, OTLP exporter errors fed back into the log export, `ExceptionGroup` on FastAPI SERVER spans and the JavaScript exporters' warning on JSON replies. Direct export to OneUptime: ops metrics need a scraper, and the yml adds `deployment.environment` for exceptions. Path exclusions are decided when the response ends.
+- README and COMPATIBILITY list the `1.6.0` release.
+
 ## [1.5.0] - 2026-10-10
 
 ### Added
