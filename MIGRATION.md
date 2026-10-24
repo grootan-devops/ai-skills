@@ -21,7 +21,10 @@ workflow file of the `terraform` shape (`pr.yml`, `release.yml`, `check.yml`, `l
 - **GitLab Terraform repositories.** Drop `build` from the `WORKFLOW` options if it was declared
   to silence the audit. The options are `full-pipeline`, `check`, `lint` and `secret-scanning`.
 - **GitHub Terraform repositories.** Add the missing workflow files from the github-ci-library
-  Terraform example, `sonarqube.yml` among them.
+  Terraform example, `sonarqube.yml` among them. From github-ci-library `1.7.0`, call
+  `terraform.yml`, which replaces `terraform-lint.yml` and `terraform-test.yml`: with
+  `state-name` for the checks, and with `lint: false` and `test: true` from the module-test
+  workflow.
 
 ### Verify
 

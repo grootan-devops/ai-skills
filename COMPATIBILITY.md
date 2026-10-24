@@ -11,7 +11,7 @@ one lacks guidance the skills follow.
 | Component | Compatible release |
 | --- | ---: |
 | AI agent skills | `1.8.0` |
-| GitHub CI/CD library | `1.5.0` |
+| GitHub CI/CD library | `1.7.0` |
 | GitLab CI/CD library | `1.9.0` |
 | Helm template library | `1.4.0` |
 | ArgoCD GitOps template library | `1.4.0` |

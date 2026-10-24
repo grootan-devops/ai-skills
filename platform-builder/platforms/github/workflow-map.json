@@ -137,10 +137,9 @@
         "sonarqube.yml"
       ],
       "calls_extra": [
-        "terraform-lint",
-        "terraform-test"
+        "terraform"
       ],
-      "note": "terraform-test runs from its own terraform-test.yml (cancel-in-progress: false, so a superseded run cannot kill the teardown), and the Terraform config scan from config-scan.yml; neither is a shape-checked scenario file."
+      "note": "terraform.yml runs the checks from pr.yml and lint.yml. The module test runs from its own terraform-test.yml, which calls terraform.yml with lint: false and test: true (cancel-in-progress: false, so a superseded run cannot kill the teardown), and the Terraform config scan from config-scan.yml; neither is a shape-checked scenario file."
     }
   }
 }

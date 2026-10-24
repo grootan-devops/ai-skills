@@ -14,7 +14,8 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `platform-builder`: the GitHub `terraform` shape expects `sonarqube.yml`, as the github-ci-library Terraform example has, and calls `terraform-lint` and `terraform-test`.
+- `platform-builder`: the GitHub `terraform` shape expects `sonarqube.yml`, as the github-ci-library Terraform example has, and calls `terraform.yml`, which replaces `terraform-lint.yml` and `terraform-test.yml` in github-ci-library `1.7.0`.
+- `COMPATIBILITY.md`: GitHub CI/CD library `1.7.0`, the first release with `terraform.yml`.
 
 ### Fixed
 
