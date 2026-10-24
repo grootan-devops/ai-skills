@@ -7,6 +7,29 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 1.8.0
+
+### Required
+
+No migration required for repositories other than Terraform, which audit as before. A GitHub
+Terraform repository is now shape-checked: `audit.py --strict` fails it until it has every
+workflow file of the `terraform` shape (`pr.yml`, `release.yml`, `check.yml`, `lint.yml`,
+`secret-scan.yml` and `sonarqube.yml`).
+
+### Recommended
+
+- **GitLab Terraform repositories.** Drop `build` from the `WORKFLOW` options if it was declared
+  to silence the audit. The options are `full-pipeline`, `check`, `lint` and `secret-scanning`.
+- **GitHub Terraform repositories.** Add the missing workflow files from the github-ci-library
+  Terraform example, `sonarqube.yml` among them.
+
+### Verify
+
+- `python3 -m unittest discover -s platform-builder/core/scripts/tests` passes.
+- `audit.py` on a Terraform repository prints `shape: terraform`, and a GitLab Terraform
+  pipeline with `full-pipeline`, `check`, `lint` and `secret-scanning` has no Unreachable Module
+  finding.
+
 ## 1.7.0
 
 No migration is required. This release only updates dependencies.

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-24
+
+### Added
+
+- `platform-builder`: Terraform repository detection. A repository with `*.tf` files at its root and no application manifest, Dockerfile or chart audits as the `terraform` shape; before, it was unrecognised and no shape check ran on it.
+- `platform-builder`: a GitLab `terraform` include set (`common`, `terraform`, `secret-scanning`, `release`). `terraform/.test.gitlab-ci.yml` is conditional, for a repository with a Terratest suite under `tests/`, and the map names `TF_STATE_NAME` as the terraform module's required variable.
+
+### Changed
+
+- `platform-builder`: the GitHub `terraform` shape expects `sonarqube.yml`, as the github-ci-library Terraform example has, and calls `terraform-lint` and `terraform-test`.
+
+### Fixed
+
+- `platform-builder`: the GitLab audit no longer reports `terraform/.gitlab-ci.yml` as an unreachable module with an undeclared `build` option. The library's Terraform options are `full-pipeline`, `check` and `lint`, and no Terraform job runs in `build`.
+- `platform-builder`: the GitHub `terraform` shape no longer names `terraform-module`, a workflow github-ci-library does not have.
+
 ## [1.7.0] - 2026-10-23
 
 ### Changed
