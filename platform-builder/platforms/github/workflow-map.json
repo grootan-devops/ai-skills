@@ -127,19 +127,19 @@
       "note": "No release.yml unless the repo actually cuts releases; no image or chart scenarios."
     },
     "terraform": {
-      "match": "main.tf present",
+      "match": "*.tf at the repository root, no application manifest, Dockerfile or Chart.yaml",
       "scenarios": [
         "pr.yml",
         "release.yml",
         "check.yml",
         "lint.yml",
-        "secret-scan.yml"
+        "secret-scan.yml",
+        "sonarqube.yml"
       ],
       "calls_extra": [
-        "terraform-lint",
-        "terraform-module",
-        "terraform-test"
-      ]
+        "terraform"
+      ],
+      "note": "terraform.yml runs the checks from pr.yml and lint.yml. The module test runs from its own terraform-test.yml, which calls terraform.yml with lint: false and test: true (cancel-in-progress: false, so a superseded run cannot kill the teardown), and the Terraform config scan from config-scan.yml; neither is a shape-checked scenario file."
     }
   }
 }

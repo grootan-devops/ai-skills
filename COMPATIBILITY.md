@@ -4,14 +4,14 @@ This is the canonical compatibility contract for the Grootan public platform lib
 
 ## Current release set
 
-The `1.6.0` skills read their standards from these library releases; `observability-builder`
+The `1.8.0` skills read their standards from these library releases; `observability-builder`
 bundles its own. A later minor or patch release within major `1` remains compatible; an earlier
 one lacks guidance the skills follow.
 
 | Component | Compatible release |
 | --- | ---: |
-| AI agent skills | `1.6.0` |
-| GitHub CI/CD library | `1.5.0` |
+| AI agent skills | `1.8.0` |
+| GitHub CI/CD library | `1.7.0` |
 | GitLab CI/CD library | `1.9.0` |
 | Helm template library | `1.4.0` |
 | ArgoCD GitOps template library | `1.4.0` |

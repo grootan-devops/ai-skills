@@ -97,10 +97,14 @@
     },
     "terraform/.gitlab-ci.yml": {
       "provides": [
-        "build",
         "lint",
         "check"
-      ]
+      ],
+      "requires_variable": "TF_STATE_NAME"
+    },
+    "terraform/.test.gitlab-ci.yml": {
+      "provides": [],
+      "include_when": "the repository has a Terratest suite under tests/. The module test provisions real infrastructure in merge requests and full-pipeline runs."
     }
   },
   "default_include_set": {
@@ -124,7 +128,14 @@
       "secret-scanning/.gitlab-ci.yml",
       "release/.gitlab-ci.yml"
     ],
+    "terraform": [
+      "common/.gitlab-ci.yml",
+      "terraform/.gitlab-ci.yml",
+      "secret-scanning/.gitlab-ci.yml",
+      "release/.gitlab-ci.yml"
+    ],
     "conditional": [
+      "terraform/.test.gitlab-ci.yml",
       "readme/.migration-guide.gitlab.yml",
       "deploy/gitops/.komodo.gitlab-ci.yml",
       "deploy/gitops/.argocd.gitlab-ci.yml"

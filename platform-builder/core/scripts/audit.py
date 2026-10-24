@@ -93,6 +93,9 @@ def detect_shape(root: Path) -> Optional[str]:
         return "service"
     if has_app:
         return "library" if (root / "LICENSE").exists() else "app-no-artifact"
+    # Terraform builds no package, image or chart: root-level *.tf and nothing else.
+    if any(root.glob("*.tf")) and not has_docker and not has_chart:
+        return "terraform"
     return None
 
 
