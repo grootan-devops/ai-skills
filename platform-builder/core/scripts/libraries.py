@@ -201,6 +201,12 @@ def chart_dependencies() -> Dict[str, str]:
     return {n: c["chart"] for n, c in load_defaults().items() if isinstance(c, dict) and c.get("chart")}
 
 
+def _skills_version() -> Optional[str]:
+    """The release of these skills, from the repository's VERSION file when it is installed."""
+    version = _ROOT.parent / "VERSION"
+    return version.read_text(encoding="utf-8").strip() if version.is_file() else None
+
+
 def skills_source() -> str:
     data = _read_json(DEFAULTS_FILE)
     return str((data.get("skills") or {}).get("source") or "") if isinstance(data, dict) else ""
@@ -310,6 +316,9 @@ def _describe_local(path: Path, res: Resolved) -> None:
     name = _git(["-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"])
     if name.returncode == 0 and res.ref is None:
         res.ref = name.stdout.strip()
+        if res.ref == "HEAD":           # detached: name the release tag it sits on, if any
+            tag = _git(["-C", str(path), "describe", "--tags", "--exact-match", "HEAD"])
+            res.ref = tag.stdout.strip() if tag.returncode == 0 and tag.stdout.strip() else res.ref
         # Not a ref the caller asked for -- it is whatever the tree happens to be on.
         res.ref_kind = "checked-out"
     status = _git(["-C", str(path), "status", "--porcelain"])
@@ -532,7 +541,11 @@ def _check_data(name: str, res: Resolved) -> Optional[str]:
         path = Path(res.path) / rel
         at = f"{name} {res.ref or 'at ' + str(res.path)}"
         if not path.is_file():
-            upgrade = f" to {res.latest_release}" if res.latest_release and res.latest_release != res.ref else ""
+            if res.latest_release and res.latest_release == res.ref:
+                return (f"{at} ships no {rel}, which this skill's checks read, and it is the "
+                        f"library's latest release: no release ships the file yet. Keep the skills "
+                        f"at the release you used before until one does.")
+            upgrade = f" to {res.latest_release}" if res.latest_release else ""
             return (f"{at} ships no {rel}, which this skill's checks read: it needs a release that "
                     f"ships it. Upgrade the project{upgrade} with `platform update` (it reads "
                     f"--latest), or pass a newer source explicitly.")
@@ -542,10 +555,12 @@ def _check_data(name: str, res: Resolved) -> Optional[str]:
             return f"{at}: {rel} is not a readable JSON object ({exc})"
         if schema not in SUPPORTED_SCHEMAS:
             tags = remote_release_tags(skills_source()) if skills_source() else None
-            newest = f" ({tags[-1]})" if tags else ""
-            return (f"{at}: {rel} has schema {schema!r}, which this skill does not know "
-                    f"(it reads {', '.join(map(str, SUPPORTED_SCHEMAS))}). Upgrade the skills "
-                    f"to the latest release{newest}.")
+            newest, own = (tags[-1] if tags else None), _skills_version()
+            known = f"{at}: {rel} has schema {schema!r}, which this skill does not know " \
+                    f"(it reads {', '.join(map(str, SUPPORTED_SCHEMAS))})."
+            if newest and own and pins.release_key(own) and pins.release_key(newest) <= pins.release_key(own):
+                return f"{known} No skills release reads it yet ({own} is the latest)."
+            return f"{known} Upgrade the skills to the latest release{f' ({newest})' if newest else ''}."
         res.data[rel] = str(path)
     return None
 

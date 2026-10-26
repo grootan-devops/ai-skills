@@ -86,20 +86,32 @@ def read_member(package: Path, rel: str) -> Optional[bytes]:
         return tar.extractfile(member).read() if member else None
 
 
+def _skills_version() -> Optional[str]:
+    """The release of these skills, from the repository's VERSION file when it is installed."""
+    version = Path(__file__).resolve().parents[2] / "VERSION"
+    return version.read_text(encoding="utf-8").strip() if version.is_file() else None
+
+
 def load_data(package: Path, rel: str, library: str) -> Dict[str, Any]:
     """A data file the scripts need, from the vendored release; stops when it cannot be used."""
     raw = read_member(package, rel)
     if raw is None:
         latest = latest_release(library)
+        pinned = package.name[len(library) + 1:-len(".tgz")]
+        if latest and latest == pinned:
+            raise SystemExit(f"{package.name} ships no {rel}, which this skill reads, and it is {library}'s "
+                             "latest release: no release ships the file yet. Keep the skills at the "
+                             "release you used before until one does.")
         to = f" to {latest}" if latest else " to the latest release"
         raise SystemExit(f"{package.name} ships no {rel}, which this skill reads: it needs a {library} "
                          f"release that ships it. Upgrade the chart's {library} dependency{to}.")
     data = json.loads(raw)
     if data.get("schema") not in SUPPORTED_SCHEMAS:
-        latest = latest_release("skills")
-        newest = f" ({latest})" if latest else ""
-        raise SystemExit(f"{package.name}: {rel} has schema {data.get('schema')!r}, which this skill "
-                         f"does not know. Upgrade the skills to the latest release{newest}.")
+        latest, own = latest_release("skills"), _skills_version()
+        known = f"{package.name}: {rel} has schema {data.get('schema')!r}, which this skill does not know."
+        if latest and own and _release_key(own) and _release_key(latest) <= _release_key(own):
+            raise SystemExit(f"{known} No skills release reads it yet ({own} is the latest).")
+        raise SystemExit(f"{known} Upgrade the skills to the latest release{f' ({latest})' if latest else ''}.")
     return data
 
 

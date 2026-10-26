@@ -103,11 +103,24 @@ class LibraryResolutionTests(unittest.TestCase):
 
     def test_an_unknown_schema_asks_for_a_newer_skill(self):
         with patch.object(libraries, "SUPPORTED_SCHEMAS", (2,)), \
-                patch.object(libraries, "skills_source", return_value=self.location):
+                patch.object(libraries, "skills_source", return_value=self.location), \
+                patch.object(libraries, "_skills_version", return_value="1.1.0"):
             res = self.resolve("1.2.0")
         self.assertFalse(res.ok)
         self.assertIn("has schema 1, which this skill does not know", res.error)
         self.assertIn("Upgrade the skills to the latest release (1.2.0)", res.error)
+
+    def test_an_unknown_schema_on_the_latest_skill_says_none_reads_it(self):
+        with patch.object(libraries, "SUPPORTED_SCHEMAS", (2,)), \
+                patch.object(libraries, "skills_source", return_value=self.location), \
+                patch.object(libraries, "_skills_version", return_value="1.2.0"):
+            res = self.resolve("1.2.0")
+        self.assertIn("No skills release reads it yet (1.2.0 is the latest)", res.error)
+
+    def test_the_latest_release_without_the_data_file_says_none_ships_it(self):
+        with patch.object(libraries, "remote_release_tags", return_value=["1.0.0"]):
+            res = self.resolve("1.0.0")
+        self.assertIn("it is the library's latest release: no release ships the file yet", res.error)
 
     def test_offline_latest_uses_a_cached_release_or_stops(self):
         with patch.object(libraries, "remote_release_tags", return_value=None):
