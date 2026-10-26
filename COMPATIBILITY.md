@@ -12,7 +12,7 @@ one lacks guidance the skills follow.
 | --- | ---: |
 | AI agent skills | `1.8.0` |
 | GitHub CI/CD library | `1.7.0` |
-| GitLab CI/CD library | `1.9.0` |
+| GitLab CI/CD library | `1.10.0` |
 | Helm template library | `1.4.0` |
 | ArgoCD GitOps template library | `1.4.0` |
 | Terraform modules | `1.3.0` |
