@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-26
+
+### Changed
+
+- `COMPATIBILITY.md`: GitHub CI/CD library `1.8.0` and GitLab CI/CD library `1.11.0`, the releases that can publish images and charts to several registries. `platform-builder` still generates and audits single-registry configurations (`IMAGE_REGISTRY`, `CHART_REGISTRY`).
+
 ## [1.8.0] - 2026-10-24
 
 ### Added

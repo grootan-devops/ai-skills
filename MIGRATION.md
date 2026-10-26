@@ -7,6 +7,26 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 1.9.0
+
+### Required
+
+No migration required. The skills generate and audit single-registry configurations as before.
+
+### Recommended
+
+- **Library pins.** Move github-ci-library to `1.8.0` and gitlab-ci-library to `1.11.0`, every
+  GitLab include together.
+- **Credential groups.** `platform-builder` does not generate or audit a `REGISTRY_CONFIG`
+  group yet. `audit.py` reads `IMAGE_REPOSITORY` as one path, so a GitLab project that lists full
+  repositories for `PROJECT_REGISTRY_NAME` gets a `Chart Image Differs From CI Push Path`
+  finding. Keep such projects on `IMAGE_REGISTRY` until the skills support groups, or treat that
+  finding as expected.
+
+### Verify
+
+- `python3 -m unittest discover -s platform-builder/core/scripts/tests` passes.
+
 ## 1.8.0
 
 ### Required
