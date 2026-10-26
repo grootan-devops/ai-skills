@@ -13,8 +13,8 @@ Before preparing files, obtain both URLs:
 If either URL is absent, ask and pause. Collect the project/application name and
 environment. Suggest `dev`, `qa`, `test`, `uat`, `pre-prod`, and `prod`; an explicitly empty
 environment is allowed and removes the `environment` key from both values files. Ask for an
-optional target branch override; otherwise use `<project>/<environment>`, or `<project>` when
-the environment is empty. Validate the project and branch as Git/Helm-safe names and show the
+optional target branch override; otherwise the library's branch default applies (its
+Configuration page). Validate the project and branch as Git/Helm-safe names and show the
 resolved names before writing.
 
 Stop the affected step if its CLI, authentication, URL, repository access, destination cluster,
@@ -43,12 +43,13 @@ has not passed. Never ask users to paste passwords or tokens into chat.
    missing or failed, stop and report the exact repository setup required.
 5. Resolve the library documentation source using the source-selection rules in `SKILL.md`.
    Read the library README index and the linked bootstrap/configuration/extras pages. Read
-   migration notes when updating an existing environment. For the dependency pin, identify
-   the highest non-prerelease SemVer release from the library's published GitHub releases/tags,
-   then verify that exact version:
+   migration notes when updating an existing environment. For a new environment's dependency
+   pin, take the highest non-prerelease SemVer release from the library's published GitHub
+   releases/tags, then verify that exact version in the OCI repository the library's README
+   names:
 
    ```sh
-   helm show chart oci://registry-1.docker.io/grootantech/argocd-gitops-tpl-library --version <version>
+   helm show chart <oci-repository>/argocd-gitops-tpl-library --version <version>
    ```
 
    Do not use an unreleased branch's `Chart.yaml` version as a published dependency. If the
@@ -76,8 +77,8 @@ every file, the environment README included.
 
 1. Build both dependency trees and validate both charts. Run `helm lint --strict` and
    `helm template` for `.` and `./extras`, using the configured OCI registry access. Confirm
-   the root chart emits only its child Applications and that the extras chart emits one
-   Application per named manifest directory. Confirm default branch, namespace, app names,
+   the rendered Applications are the ones the library's Configuration and Extras pages
+   describe for these values. Confirm default branch, namespace, app names,
    project, repo URL, server name, and sync/retry settings against the README and user inputs.
 2. Show the resolved branch, changed-file list, generated README/root-app name, and validation
    results. Stop here for a request limited to `argocd env add` or `update`; those commands
@@ -87,8 +88,8 @@ every file, the environment README included.
 4. If explicitly requested, create the root Application only after confirming its target
    branch is already available to Argo CD. A request to create does not itself authorize
    pushing a missing branch. Create from the rendered manifest with `argocd app create -f
-   <root-application.yaml> --server <ARGOCD_URL>`. Do not use `--upsert`. The manifest sets
-   automated sync (`enabled`, prune, and self-heal), so this step may deploy workloads.
+   <root-application.yaml> --server <ARGOCD_URL>`. Do not use `--upsert`. When the manifest
+   enables automated sync, this step may deploy workloads.
 5. Read the created Application with `argocd app get <name> --server <ARGOCD_URL>` and report
    its sync/health status and branch/commit. If creation or sync fails, stop; do not repeatedly
    retry or change credentials/configuration without user direction.

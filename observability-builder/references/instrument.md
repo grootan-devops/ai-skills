@@ -328,7 +328,7 @@ sanitizers, test conventions).
 
 ## 8. Report
 
-The skill version (the version line in README.md); files changed; dependencies with versions and sources; the answers
+The skill version (the ai-skills release it was installed from: `git describe --tags`, or the root `VERSION`); files changed; dependencies with versions and sources; the answers
 from step 2; the platform-builder handoff list ([charts.md](charts.md)); the migration note;
 functions the wrappers skipped and why; checks run and their results; open observability risks
 (the same scope as in step 5: nothing about security or code outside telemetry).

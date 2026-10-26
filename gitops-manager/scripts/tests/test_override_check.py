@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -5,7 +6,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import gitops_fixtures as fx  # noqa: E402
 import override_check  # noqa: E402
+
+RULES = override_check.Rules.load(
+    json.loads((fx.FIXTURES / "environment-map.json").read_text())["overrides"],
+    list(json.loads((fx.FIXTURES / "tpl-library-values.schema.json").read_text())["properties"])
+    + json.loads((fx.FIXTURES / "tpl-library-chart-contract.json").read_text())["values"]["templateKeys"])
 
 CHART = """
 global:
@@ -40,7 +47,7 @@ class OverrideCheckTests(unittest.TestCase):
             chart_values = override_check.load(root / "chart" / "values.yaml")
             data = override_check.load(envf)
             multi = bool(overlay) or any(k in data for k in ("mode", "subComponent"))
-            return override_check.review(data, chart_values, multi)
+            return override_check.review(data, chart_values, multi, RULES)
 
     def test_environment_categories_pass(self):
         env = """

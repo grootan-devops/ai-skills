@@ -1,0 +1,30 @@
+{
+  "$comment": "Test fixture: the root properties of a tpl-library values schema.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "global": {},
+    "component": {},
+    "subComponent": {},
+    "replicas": {},
+    "revisionHistoryLimit": {},
+    "strategy": {},
+    "restartPolicy": {},
+    "initContainers": {},
+    "containers": {},
+    "serviceAccount": {},
+    "hostAliases": {},
+    "pod": {},
+    "jobs": {},
+    "cronjobs": {},
+    "scheduling": {},
+    "service": {},
+    "routes": {},
+    "networkPolicy": {},
+    "persistence": {},
+    "mounts": {},
+    "pdb": {},
+    "autoscaling": {},
+    "metrics": {}
+  }
+}

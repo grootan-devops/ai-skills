@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-27
+
+### Added
+
+- Every library-backed skill reads a library at the release the project pins and, for a new project or an upgrade, at the library's latest release tag. `platform-builder` finds the pin in the GitLab includes, the GitHub reusable workflows and the chart's `tpl-library` dependency, `gitops-manager` in the environment's root and `extras/Chart.yaml`. `libraries.py` and `audit.py` take `--latest` for an upgrade, which `platform update` uses. A library release needs no skill release.
+- `platform-builder`: the checks read their library rules from the data file that release ships, `docs/workflow-map.json` of the CI library and `docs/chart-contract.json` of `helm-tpl-library`; `chart-docs.sh` takes its helm-docs flags from the contract of the chart's own dependency. A release without the file, or with a `schema` the skill does not know, stops the run before any check and says what to upgrade.
+- `platform-builder`: a "Mixed Library Pins" finding when includes or workflows pin different releases of one library; the run reads the oldest.
+- `platform-builder`: Terraform repository detection. A repository with `*.tf` files at its root and no application manifest, Dockerfile or chart audits as the `terraform` shape; before, it was unrecognised and no shape check ran on it.
+- `gitops-manager`: `app_add.py` takes the Application name, namespace and release name from `helm template` of the library release the environment pins, and the values-file path, sync presets and release-shape keys from its `docs/environment-map.json`. `override_check.py` takes what an environment may override from the same map, and the service library's root keys from the `tpl-library` release the service chart pins.
+
+### Changed
+
+- CI calls the github-ci-library 1.7.0 reusable workflows instead of 1.5.0.
+- `COMPATIBILITY.md` lists no library releases; it says how the skills choose a release and that each library's README and MIGRATION.md own its versions, requirements and upgrades. The README carries no release number, and the install commands check out the newest tag.
+- `platform-builder`, `gitops-manager`: the bundled workflow maps and the copies of the libraries' chart, naming and override rules are gone; the entry files point at the libraries' docs instead of restating them, and a test keeps versions and release claims out of them.
+- `platform-builder`: the migration chain takes the release list from the library's remote, so a shallow clone no longer drops the releases between the pin and the target, and a pre-release is not counted as a release.
+
+### Removed
+
+- `platform-builder`: chart rules the library does not have: the `myorg` and `[PRODUCT_NAME]` placeholders, the parity exception for `component` and `subComponent`, the `configmapEnvs` `@default` rule and `values-*.yaml` overlays.
+
+### Fixed
+
+- `platform-builder`: "Chart Image Differs From CI Push Path" no longer reports a correct chart when `IMAGE_REPOSITORY` lists several repositories, or full repositories for a credential group; the chart may pull from any listed one.
+- `platform-builder`: the base-image and dependency-cache guidance points at the selected CI library's Dockerfile standards instead of naming images and library behaviour that change with its releases.
+- `observability-builder`: the skill version comes from the ai-skills release, not from a README line that was not kept up to date.
+
 ## [1.7.0] - 2026-10-23
 
 ### Changed

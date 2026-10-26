@@ -8,8 +8,11 @@ _PLATFORM_DIR = Path(__file__).resolve().parents[3] / "platforms" / "gitlab"
 
 sys.path.insert(0, str(_CORE_DIR))
 sys.path.insert(0, str(_PLATFORM_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import importlib.util
+
+import library_fixtures  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("gitlab_ci_checks", _PLATFORM_DIR / "ci_checks.py")
 gitlab_ci_checks = importlib.util.module_from_spec(spec)
@@ -21,7 +24,7 @@ class GitlabDagNeedsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             p = Path(directory) / ".gitlab-ci.yml"
             p.write_text(ci_content, encoding="utf-8")
-            findings, _ = gitlab_ci_checks.check_gitlab_ci(p)
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
             return findings
 
     def test_missing_sonarqube_needs_override_on_multiple_tests(self):

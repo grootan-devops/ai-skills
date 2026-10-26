@@ -1,0 +1,103 @@
+{
+  "$comment": "Test fixture shaped like the library's data file; the skill reads the real one from the library at the release a project pins.",
+  "schema": 1,
+  "manifest": {
+    "file": "templates/manifest.yaml",
+    "include": "tpl.deployment"
+  },
+  "readme": {
+    "template": "README.gotmpl",
+    "headings": [
+      "Overview & Purpose"
+    ],
+    "templates": [
+      "chart.description"
+    ]
+  },
+  "helmDocs": [
+    "--template-files",
+    "README.gotmpl",
+    "--sort-values-order",
+    "file",
+    "--document-dependency-values"
+  ],
+  "helmignore": {
+    "required": [
+      "Chart.lock",
+      ".helmignore",
+      ".gitlab-ci.yml",
+      ".yamllint.yml",
+      "README.gotmpl",
+      ".gitleaks.toml",
+      "CODEOWNERS",
+      "CONTRIBUTING.md",
+      "LICENSE.md",
+      "Makefile",
+      "SECURITY.md",
+      "VERSION",
+      "tests/"
+    ],
+    "forbidden": [
+      "*.tgz",
+      "charts",
+      "charts/"
+    ]
+  },
+  "chartNames": [
+    "{partOf}-{component}",
+    "{partOf}-{component}-{subComponent}"
+  ],
+  "values": {
+    "exampleMaps": {
+      "containers": "main"
+    },
+    "applicationValues": {
+      "before": "restartPolicy"
+    },
+    "optionalBlocks": {
+      "persistence": [
+        "tpl.pvc"
+      ],
+      "jobs": [
+        "tpl.job"
+      ],
+      "cronjobs": [
+        "tpl.cronjob"
+      ],
+      "metrics": [
+        "tpl.servicemonitor",
+        "tpl.podmonitor"
+      ],
+      "global.metrics": [
+        "tpl.servicemonitor",
+        "tpl.podmonitor"
+      ],
+      "global.tracing": []
+    },
+    "documentedLeaves": [
+      "jobs",
+      "cronjobs",
+      "persistence"
+    ],
+    "placeholders": [
+      "global.image.registry",
+      "global.image.pullSecrets"
+    ],
+    "mountsNeedEnabled": [
+      "configmap",
+      "secret",
+      "emptyDir",
+      "pvc"
+    ],
+    "schemaEnums": [
+      "mode",
+      "subComponent"
+    ],
+    "templateKeys": [
+      "partOf",
+      "subcomponent",
+      "nameOverride",
+      "fullnameOverride"
+    ]
+  }
+}

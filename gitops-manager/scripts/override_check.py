@@ -3,70 +3,54 @@
 
     python3 override_check.py <env-values.yaml> <chart-dir> [-f values.<release>.yaml] [--strict]
 
-An environment file overrides what differs per environment and nothing else. Accepted:
+An environment file overrides what differs per environment and nothing else. What that
+is comes from the libraries, at the releases the charts pin:
 
-  * environment routing   global.routes.*, routes.<r>.host/hosts/httpRoute/ingress/ingressClass/tlsSecretName
-  * image and pull        global.image.*, <any container>.image.* (jobs and cronjobs included)
-  * resources and storage <any container>.resources.*, persistence.<p>.storageClass/size
-  * application config    the chart's own top-level blocks (database, auth, URLs, keys), in full
-  * release shape         mode, component, subComponent, service, probes, strategy,
-                          routes.<r>.enabled, jobs/persistence enabled -- only when one chart
-                          runs several releases
+  * the environment's argocd-gitops-tpl-library: its docs/environment-map.json lists the
+    paths an environment may set (routing, image, resources, storage), the ones only a
+    release of a multi-release chart may set, and the ones that belong in the chart;
+  * the service chart's tpl-library: its root keys separate library settings from the
+    application's own configuration, which an environment carries in full.
 
-Everything else -- mounts, route paths, container env, probes on a single-release app,
-releaseNameLength -- is reported: if production needs it, it belongs in the chart's
-values.yaml. The categories follow argocd-gitops-tpl-library's documentation of what a
-values file overrides. The check only reports; it never edits either file. Exit code is
-0 unless --strict is given and something was reported.
+Everything outside the categories is reported: if production needs it, it belongs in the
+chart's values.yaml. The check only reports; it never edits either file. Exit code is 0
+unless --strict is given and something was reported.
 """
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import library  # noqa: E402
 
 try:
     import yaml
 except ImportError:  # pragma: no cover
     sys.exit("PyYAML is required: pip install pyyaml")
 
-#: Root keys of the helm-tpl-library values contract. Anything else at the root of a chart's
-#: values.yaml is that application's own configuration.
-LIBRARY_ROOT_KEYS = {
-    "global", "nameOverride", "fullnameOverride", "partOf", "component", "subComponent",
-    "replicas", "revisionHistoryLimit", "restartPolicy", "strategy", "initContainers",
-    "containers", "jobs", "cronjobs", "serviceAccount", "hostAliases", "pod", "scheduling",
-    "service", "routes", "networkPolicy", "persistence", "mounts", "pdb", "autoscaling", "metrics",
-}
+@dataclass
+class Rules:
+    """What an environment values file may override, read from the libraries' releases."""
+    root_keys: Set[str]
+    environment: Callable[[str], bool]
+    release_shape: Callable[[str], bool]
+    chart_only: List[Tuple[Callable[[str], bool], str]]
 
-_CONTAINER = r"(?:containers|initContainers|(?:jobs|cronjobs)\.[^.]+\.(?:containers|initContainers))\.[^.]+"
-ACCEPTED = [
-    ("environment routing", re.compile(r"^global\.routes(\.|$)")),
-    ("environment routing", re.compile(r"^routes\.[^.]+\.(host|hosts|httpRoute|ingress|ingressClass|tlsSecretName)$")),
-    ("image and pull", re.compile(r"^global\.image(\.|$)")),
-    ("image and pull", re.compile(rf"^{_CONTAINER}\.image(\.|$)")),
-    ("resources", re.compile(rf"^{_CONTAINER}\.resources(\.|$)")),
-    ("storage", re.compile(r"^persistence\.[^.]+\.(storageClass|size)$")),
-]
-RELEASE_SHAPE = [
-    re.compile(r"^(mode|component|subComponent)$"),
-    re.compile(r"^service(\.|$)"),
-    re.compile(rf"^{_CONTAINER}\.probes(\.|$)"),
-    re.compile(r"^strategy(\.|$)"),
-    re.compile(r"^routes\.[^.]+\.enabled$"),
-    re.compile(r"^(jobs|cronjobs|persistence)\.[^.]+\.enabled$"),
-]
-HINTS = [
-    (re.compile(r"^mounts(\.|$)"), "mounts belong in the chart"),
-    (re.compile(r"^routes\.[^.]+\.(paths|matches)(\.|$)"), "route paths belong in the chart"),
-    (re.compile(rf"^{_CONTAINER}\.(configmapEnvs|secretEnvs|env|additionalConfigmapEnvs|additionalSecretEnvs)(\.|$)"),
-     "container environment belongs in the chart"),
-    (re.compile(rf"^{_CONTAINER}\.probes(\.|$)"), "probe fixes belong in the chart"),
-    (re.compile(r"^global\.releaseNameLength$"), "naming is fixed by the chart"),
-]
+    @classmethod
+    def load(cls, overrides: Dict[str, Any], root_keys: Iterable[str]) -> "Rules":
+        containers = overrides.get("containers") or []
+        environment = [p for paths in (overrides.get("environment") or {}).values() for p in paths]
+        return cls(set(root_keys),
+                   library.path_matcher(environment, containers),
+                   library.path_matcher(overrides.get("releaseShape") or [], containers),
+                   [(library.path_matcher(c.get("paths") or [], containers), str(c.get("hint") or ""))
+                    for c in overrides.get("chartOnly") or []])
 
 
 def load(path: Path) -> Dict[str, Any]:
@@ -104,26 +88,41 @@ def lookup(node: Any, path: str) -> Any:
     return node
 
 
-def review(env: Dict[str, Any], chart_values: Dict[str, Any], multi_release: bool) -> List[str]:
+def review(env: Dict[str, Any], chart_values: Dict[str, Any], multi_release: bool,
+           rules: Rules) -> List[str]:
     notes: List[str] = []
     for path, value in leaves(env):
         root = path.split(".", 1)[0]
-        if root not in LIBRARY_ROOT_KEYS:
+        if root not in rules.root_keys:
             continue                                   # the application's own configuration
-        if any(rx.match(path) for _, rx in ACCEPTED):
+        if rules.environment(path):
             continue
-        if multi_release and any(rx.match(path) for rx in RELEASE_SHAPE):
+        if multi_release and rules.release_shape(path):
             continue
-        hint = next((h for rx, h in HINTS if rx.match(path)), "not an environment setting")
+        hint = next((h for match, h in rules.chart_only if match(path)), "not an environment setting")
         same = lookup(chart_values, path) == value
         notes.append(f"{path}: {hint}{' (same as the chart -- drop it)' if same else ''}")
     return notes
 
 
+def environment_root(env_values: Path) -> Optional[Path]:
+    """The root chart an environment values file belongs to: the nearest one up its path."""
+    for parent in list(env_values.resolve().parents)[:4]:
+        if library.dependency_version(parent, library.GITOPS_LIBRARY) is not None:
+            return parent
+    return None
+
+
+def load_rules(env_root: Path, chart_dir: Path) -> Rules:
+    return Rules.load(library.environment_map(env_root).get("overrides") or {},
+                      library.service_root_keys(chart_dir))
+
+
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="Review a GitOps environment override against its chart.")
     ap.add_argument("env_values", type=Path)
-    ap.add_argument("chart_dir", type=Path)
+    ap.add_argument("chart_dir", type=Path, help="the service chart, its tpl-library dependency vendored or buildable")
+    ap.add_argument("--root", type=Path, help="the environment's root chart (default: found above env_values)")
     ap.add_argument("-f", "--overlay", type=Path, action="append", default=[],
                     help="chart overlay this release uses (values.<release>.yaml)")
     ap.add_argument("--multi-release", action="store_true",
@@ -131,6 +130,10 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--strict", action="store_true", help="exit 1 when anything is reported")
     args = ap.parse_args(argv)
 
+    env_root = args.root or environment_root(args.env_values)
+    if env_root is None:
+        ap.error(f"no root chart depending on {library.GITOPS_LIBRARY} above {args.env_values}: pass --root")
+    rules = load_rules(env_root, args.chart_dir)
     chart_values = load(args.chart_dir / "values.yaml")
     for overlay in args.overlay:
         chart_values = merge(chart_values, load(overlay))
@@ -138,7 +141,7 @@ def main(argv: List[str]) -> int:
     env = load(args.env_values)
     multi = args.multi_release or bool(overlays) or any(k in env for k in ("mode", "subComponent"))
 
-    notes = review(env, chart_values, multi)
+    notes = review(env, chart_values, multi, rules)
     for note in notes:
         print(f"WARN  {args.env_values.name}  {note}")
     print(f"{len(notes)} override(s) outside the environment categories" if notes

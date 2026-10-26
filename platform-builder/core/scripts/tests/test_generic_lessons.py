@@ -14,6 +14,9 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import checks_common  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library_fixtures  # noqa: E402
+
 spec = importlib.util.spec_from_file_location("gitlab_ci_checks_lessons_test", _PLATFORM_DIR / "ci_checks.py")
 gitlab_ci_checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gitlab_ci_checks)
@@ -77,6 +80,10 @@ def _chart(root: Path, values: str = BASE_VALUES, manifest: str = '{{- include "
 
 def _cats(findings):
     return {f.category for f in findings}
+
+
+def setUpModule():
+    library_fixtures.use_chart_library()
 
 
 class DockerfileImageArgTests(unittest.TestCase):
@@ -153,6 +160,14 @@ class ChartRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cats = _cats(checks_common.check_chart_runtime(_chart(Path(td), values)))
         self.assertTrue({"Empty Pod securityContext", "emptyDir Not Enabled", "Hard-coded PVC Claim"} <= cats)
+
+    def test_every_mount_kind_the_library_names_needs_enabled(self):
+        values = BASE_VALUES + ("mounts:\n  configmap:\n    app:\n      path: /etc/app\n"
+                                "  secret:\n    creds:\n      path: /etc/creds\n      enabled: true\n")
+        with tempfile.TemporaryDirectory() as td:
+            cats = _cats(checks_common.check_chart_runtime(_chart(Path(td), values)))
+        self.assertIn("configmap Not Enabled", cats)
+        self.assertNotIn("secret Not Enabled", cats)
 
     def test_non_http_overlay(self):
         overlay = "mode: worker\nsubComponent: worker\nservice: ~\n"
@@ -307,6 +322,30 @@ class ImagePathTests(unittest.TestCase):
             chart = _chart(Path(td))
             self.assertEqual(checks_common.check_image_path_alignment(Path(td), chart, {"IMAGE_REPOSITORY": "group/orders"}), [])
 
+    def align(self, ci_vars):
+        with tempfile.TemporaryDirectory() as td:
+            return checks_common.check_image_path_alignment(Path(td), _chart(Path(td)), ci_vars)
+
+    def test_credential_group_full_repositories_match_any_listed_one(self):
+        # A credential group lists full repositories and leaves IMAGE_REGISTRY unset; every
+        # repository gets every release, so the chart may pull from any of them.
+        listed = "quay.io/group/orders registry.example.com/group/orders"
+        self.assertEqual(self.align({"IMAGE_REPOSITORY": listed}), [])
+        self.assertEqual(self.align({"IMAGE_REPOSITORY": "quay.io/group/orders, oci://REGISTRY.example.com/group/orders"}), [])
+        found = self.align({"IMAGE_REPOSITORY": "quay.io/group/orders quay.io/group/other"})
+        self.assertEqual([f.location for f in found], ["values.yaml:global.image.registry"])
+
+    def test_a_repository_none_of_the_listed_ones_is_flagged(self):
+        found = self.align({"IMAGE_REPOSITORY": "registry.example.com/group/api quay.io/group/api"})
+        self.assertEqual([f.location for f in found], ["values.yaml:containers.main.image.repository"])
+        self.assertIn("'group/api'", found[0].message)
+
+    def test_several_registry_hosts_compare_no_registry(self):
+        # Not a valid single-registry setting: the pipeline itself refuses it.
+        self.assertEqual(self.align({"IMAGE_REGISTRY": "quay.io docker.io", "IMAGE_REPOSITORY": "group/orders"}), [])
+        found = self.align({"IMAGE_REGISTRY": "quay.io", "IMAGE_REPOSITORY": "group/orders"})
+        self.assertEqual([f.location for f in found], ["values.yaml:global.image.registry"])
+
 
 class HygieneTests(unittest.TestCase):
     def test_ai_tooling_reported_not_removed(self):
@@ -343,7 +382,7 @@ class GitLabAdapterTests(unittest.TestCase):
                 (root / name).write_text(body, encoding="utf-8")
             ci = root / ".gitlab-ci.yml"
             ci.write_text(text, encoding="utf-8")
-            return gitlab_ci_checks.check_gitlab_ci(ci)
+            return gitlab_ci_checks.check_gitlab_ci(ci, library_fixtures.gitlab_map())
 
     def test_no_dependency_job_required_without_language_module(self):
         findings, _ = self._ci("include:\n  - remote: 'https://raw.githubusercontent.com/org/gitlab-ci-library/1.4.0/image/.gitlab-ci.yml'\n"

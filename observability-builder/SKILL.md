@@ -106,10 +106,11 @@ python3 scripts/llm_stub.py                                # OpenAI- and Anthrop
 
 Also run the project's own build and tests before and after the change where they can run,
 compared suite by suite, and run the app against the receiver: only a real connection shows
-whether exports arrive (instrument step 7). Report: the skill version (the version line in
-[README.md](./README.md)), files changed, dependencies with versions and sources, the answers
-used, handoffs for platform-builder, the migration note, functions skipped by the wrappers and
-open observability risks (never security or code issues outside telemetry: other review layers
+whether exports arrive (instrument step 7). Report: the skill version (the ai-skills release
+it was installed from: `git describe --tags` in that checkout, or its root `VERSION`), files
+changed, dependencies with versions and sources, the answers used, handoffs for
+platform-builder, the migration note, functions skipped by the wrappers and open
+observability risks (never security or code issues outside telemetry: other review layers
 own those), plus the telemetry inventory in
 [instrument step 8](./references/instrument.md#8-report): metrics and labels, logging that
 bypasses the logger, work outside the API, the resource and span attributes, and, for AI

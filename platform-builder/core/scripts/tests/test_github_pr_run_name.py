@@ -8,6 +8,9 @@ _SCRIPTS = Path(__file__).resolve().parents[1]
 _PLATFORM_DIR = Path(__file__).resolve().parents[3] / "platforms" / "github"
 sys.path.insert(0, str(_SCRIPTS))
 sys.path.insert(0, str(_PLATFORM_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import library_fixtures  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("github_ci_checks", _PLATFORM_DIR / "ci_checks.py")
 github_ci_checks = importlib.util.module_from_spec(spec)
@@ -21,7 +24,7 @@ class GitHubPRRunNameTests(unittest.TestCase):
             wf_dir = repo / ".github" / "workflows"
             wf_dir.mkdir(parents=True)
             (wf_dir / filename).write_text(content, encoding="utf-8")
-            findings, _ = github_ci_checks.ci_checks(repo)
+            findings, _ = github_ci_checks.ci_checks(repo, library_root=library_fixtures.GITHUB_LIBRARY)
             return findings
 
     def test_missing_run_name_flagged(self):

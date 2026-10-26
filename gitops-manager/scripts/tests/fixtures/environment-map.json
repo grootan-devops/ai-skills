@@ -1,0 +1,109 @@
+{
+  "$comment": "Test fixture shaped like the library's environment map; the scripts read the real one from the vendored library at the release an environment pins.",
+  "schema": 1,
+  "apps": {
+    "valuesFile": "values/{path}.yaml",
+    "syncPresets": {
+      "auto": {
+        "automated": {
+          "prune": true,
+          "selfHeal": true
+        },
+        "options": [],
+        "retry": {}
+      },
+      "manual": {
+        "options": [],
+        "retry": {}
+      }
+    },
+    "releaseShapeKeys": [
+      "mode",
+      "component",
+      "subComponent",
+      "service",
+      "strategy"
+    ]
+  },
+  "overrides": {
+    "containers": [
+      "containers.*",
+      "initContainers.*",
+      "jobs.*.containers.*",
+      "jobs.*.initContainers.*",
+      "cronjobs.*.containers.*",
+      "cronjobs.*.initContainers.*"
+    ],
+    "environment": {
+      "routing": [
+        "global.routes.**",
+        "routes.*.host",
+        "routes.*.hosts",
+        "routes.*.httpRoute",
+        "routes.*.ingress",
+        "routes.*.ingressClass",
+        "routes.*.tlsSecretName"
+      ],
+      "image": [
+        "global.image.**",
+        "{container}.image.**"
+      ],
+      "resources": [
+        "{container}.resources.**"
+      ],
+      "storage": [
+        "persistence.*.storageClass",
+        "persistence.*.size"
+      ]
+    },
+    "releaseShape": [
+      "mode",
+      "component",
+      "subComponent",
+      "service.**",
+      "{container}.probes.**",
+      "strategy.**",
+      "routes.*.enabled",
+      "jobs.*.enabled",
+      "cronjobs.*.enabled",
+      "persistence.*.enabled"
+    ],
+    "chartOnly": [
+      {
+        "paths": [
+          "mounts.**"
+        ],
+        "hint": "mounts belong in the chart"
+      },
+      {
+        "paths": [
+          "routes.*.paths.**",
+          "routes.*.matches.**"
+        ],
+        "hint": "route paths belong in the chart"
+      },
+      {
+        "paths": [
+          "{container}.configmapEnvs.**",
+          "{container}.secretEnvs.**",
+          "{container}.env.**",
+          "{container}.additionalConfigmapEnvs.**",
+          "{container}.additionalSecretEnvs.**"
+        ],
+        "hint": "container environment belongs in the chart"
+      },
+      {
+        "paths": [
+          "{container}.probes.**"
+        ],
+        "hint": "probe fixes belong in the chart"
+      },
+      {
+        "paths": [
+          "global.releaseNameLength"
+        ],
+        "hint": "naming is fixed by the chart"
+      }
+    ]
+  }
+}

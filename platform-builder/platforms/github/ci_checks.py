@@ -19,25 +19,29 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+import pins
 from checks_common import Finding
 
 NAME = "github"
 CI_FILES = [".github/workflows"]
-_MAP = Path(__file__).resolve().parent / "workflow-map.json"
+#: The library whose `docs/workflow-map.json` lists the scenario files each shape needs, at
+#: the release the repository pins. libraries.py refuses a release that ships none.
+LIBRARY = "github-ci-library"
+MAP_FILE = "docs/workflow-map.json"
 
 
-def _map() -> Dict[str, Any]:
-    with open(_MAP, encoding="utf-8") as fh:
+def load_map(library_root: Path) -> Dict[str, Any]:
+    with open(Path(library_root) / MAP_FILE, encoding="utf-8") as fh:
         return json.load(fh)
 
 
-def workflows_for_shape(shape: str) -> List[str]:
-    """Scenario files this shape should contain (see workflow-map.json `shapes`)."""
-    return list(_map()["shapes"].get(shape, {}).get("scenarios", []))
+def workflows_for_shape(wmap: Dict[str, Any], shape: str) -> List[str]:
+    """Scenario files this shape should contain (the map's `shapes`)."""
+    return list(wmap["shapes"].get(shape, {}).get("scenarios", []))
 
 
-def purpose(scenario: str) -> str:
-    return _map()["scenarios"].get(scenario, {}).get("purpose", "")
+def purpose(wmap: Dict[str, Any], scenario: str) -> str:
+    return wmap["scenarios"].get(scenario, {}).get("purpose", "")
 
 
 SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
@@ -170,26 +174,8 @@ def check_action_pinning(wf: Dict[str, Any], rel: str) -> List[Finding]:
 
 
 def library_refs(parsed: Dict[str, Any]) -> Dict[str, str]:
-    """{library repo name: ref} for every reusable workflow the repo calls.
-
-    A library module is invoked with a JOB-level `uses:`, which check_action_pinning
-    never looks at -- it walks steps. Without this the run cannot tell which version of
-    the library the consumer is actually on, and so cannot work out what it owes.
-    """
-    found: Dict[str, str] = {}
-    for wf in parsed.values():
-        jobs = wf.get("jobs") if isinstance(wf, dict) else None
-        if not isinstance(jobs, dict):
-            continue
-        for job in jobs.values():
-            uses = job.get("uses") if isinstance(job, dict) else None
-            if not isinstance(uses, str) or "@" not in uses or "/.github/workflows/" not in uses:
-                continue
-            path, _, ref = uses.rpartition("@")
-            parts = path.split("/")
-            if len(parts) >= 2 and ref:
-                found.setdefault(parts[1], ref)
-    return found
+    """{library repo name: ref} for every reusable workflow the repo calls (the first ref)."""
+    return {name: refs[0] for name, refs in pins.github_refs(parsed).items()}
 
 
 def check_untrusted_checkout(wf: Dict[str, Any], rel: str) -> List[Finding]:
@@ -345,18 +331,19 @@ def check_job_wiring(wf: Dict[str, Any], rel: str) -> List[Finding]:
     return out
 
 
-def check_shape(repo: Path, present: List[str], shape: Optional[str]) -> List[Finding]:
+def check_shape(repo: Path, present: List[str], shape: Optional[str],
+                wmap: Dict[str, Any]) -> List[Finding]:
     """Declared workflow files vs the shape the repository actually is."""
     out: List[Finding] = []
     if not shape:
         return out
-    expected = set(workflows_for_shape(shape))
+    expected = set(workflows_for_shape(wmap, shape))
     have = set(present)
     for missing in sorted(expected - have):
         out.append(Finding("P2", "Missing workflow", ".github/workflows",
-                           f"Shape '{shape}' normally has {missing} ({purpose(missing)}), "
+                           f"Shape '{shape}' normally has {missing} ({purpose(wmap, missing)}), "
                            f"which is absent."))
-    catalog = set(_map()["scenarios"])
+    catalog = set(wmap["scenarios"])
     for extra in sorted((have & catalog) - expected):
         out.append(Finding("P2", "Unneeded workflow", f".github/workflows/{extra}",
                            f"{extra} does not apply to shape '{shape}'. It adds scheduling cost "
@@ -364,8 +351,16 @@ def check_shape(repo: Path, present: List[str], shape: Optional[str]) -> List[Fi
     return out
 
 
-def ci_checks(repo: Path, shape: Optional[str] = None) -> Tuple[List[Finding], Dict[str, Any]]:
-    """Adapter entry point. Returns (findings, {workflow name: parsed doc})."""
+def ci_checks(repo: Path, shape: Optional[str] = None, library_root: Optional[Path] = None,
+              library_ref: str = "", notes: Optional[List[str]] = None) -> Tuple[List[Finding], Dict[str, Any]]:
+    """Adapter entry point. Returns (findings, {workflow name: parsed doc}).
+
+    `library_root` is the resolved github-ci-library checkout; its workflow map decides the
+    shape check. `library_ref` and `notes` are accepted for a uniform adapter contract.
+    """
+    if library_root is None:
+        raise ValueError(f"{LIBRARY} must be resolved before its checks run")
+    wmap = load_map(library_root)
     findings: List[Finding] = []
     wf_dir = repo / ".github" / "workflows"
     parsed: Dict[str, Any] = {}
@@ -395,5 +390,5 @@ def ci_checks(repo: Path, shape: Optional[str] = None) -> Tuple[List[Finding], D
         findings += check_script_injection(wf, rel)
         findings += check_job_wiring(wf, rel)
 
-    findings += check_shape(repo, [p.name for p in files], shape)
+    findings += check_shape(repo, [p.name for p in files], shape, wmap)
     return findings, parsed

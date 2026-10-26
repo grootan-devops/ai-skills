@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Resolve the shared CI/Helm libraries a run reads its facts from.
 
-The skill carries no copy of what `ci-templates`, `github-ci-library` and `tpl-library`
-do -- it starts from each library's README index, follows task-specific topic links,
-and reads MIGRATION.md when comparing versions. It must know WHICH copy to read. This module answers
-that, and nothing else: it does not interpret the libraries, it locates them.
+The skill carries no copy of what `gitlab-ci-library`, `github-ci-library` and
+`helm-tpl-library` do -- it starts from each library's README index, follows task-specific
+topic links, reads MIGRATION.md when comparing versions, and its checks read the data file
+each library ships for them. It must know WHICH copy to read. This module answers that, and
+nothing else: it does not interpret the libraries, it locates them.
 
 A source is written as ONE string, `<location>[@<ref>]`:
 
@@ -31,11 +32,21 @@ named falls through to the next layer:
 
     1. --lib NAME=SOURCE           this invocation
     2. $PLATFORM_BUILDER_LIB_<NAME>  environment (NAME upper-cased, '-' -> '_')
-    3. <repo>/.platform-builder.json  the target repo's own pin, committed with it
-    4. core/libraries.json            the skill default
+    3. <repo>/.platform-builder.json  the target repo's own source, committed with it
+    4. the release the repo pins     its CI includes / reusable workflows, its chart dependency
+    5. core/libraries.json            the skill default: the library's latest release
+
+The pin is what the project runs today, so its docs and data describe the project. A new
+project, and an upgrade (`--latest`, which skips layer 4), read the latest release: the ref
+`latest` is resolved to the highest release tag with `git ls-remote`, never to a branch.
+
+A library whose checks need a data file (`requires` in core/libraries.json) is unusable at
+a release that does not ship it, or ships it with a `schema` this skill does not know. The
+run stops there and says what to upgrade, rather than measuring a project against rules the
+skill would have to guess.
 
 Usage:
-    python3 libraries.py [repo] [--platform gitlab|github]
+    python3 libraries.py [repo] [--platform gitlab|github] [--latest]
                          [--lib NAME=SOURCE ...] [--all] [--refresh] [--json]
 """
 
@@ -51,13 +62,27 @@ import subprocess
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 _HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+
+import pins  # noqa: E402
+
 _ROOT = _HERE.parent.parent
 DEFAULTS_FILE = _ROOT / "core" / "libraries.json"
 REPO_CONFIG_NAME = ".platform-builder.json"
 ENV_PREFIX = "PLATFORM_BUILDER_LIB_"
+
+#: The ref that means "the highest release tag", resolved before anything is cloned.
+LATEST = "latest"
+
+#: `schema` versions of the library data files this skill reads. A file with another schema
+#: describes rules this skill does not know; reading it anyway would misjudge the project.
+SUPPORTED_SCHEMAS = (1,)
+
+#: Seconds to wait for `git ls-remote`; it lists refs, so anything slower is a network problem.
+LS_REMOTE_TIMEOUT = 20
 
 #: Documentation entrypoints, not a list of files to preload. Follow README links only
 #: for the task at hand, within the same resolved checkout; legacy READMEs may be monolithic.
@@ -171,6 +196,22 @@ def load_defaults() -> dict:
     return data.get("libraries", {}) if isinstance(data, dict) else {}
 
 
+def chart_dependencies() -> Dict[str, str]:
+    """{library name: the chart name it is published as}, for libraries a chart depends on."""
+    return {n: c["chart"] for n, c in load_defaults().items() if isinstance(c, dict) and c.get("chart")}
+
+
+def _skills_version() -> Optional[str]:
+    """The release of these skills, from the repository's VERSION file when it is installed."""
+    version = _ROOT.parent / "VERSION"
+    return version.read_text(encoding="utf-8").strip() if version.is_file() else None
+
+
+def skills_source() -> str:
+    data = _read_json(DEFAULTS_FILE)
+    return str((data.get("skills") or {}).get("source") or "") if isinstance(data, dict) else ""
+
+
 def platform_libraries(platform: Optional[str]) -> List[str]:
     """Which libraries a run on this platform actually reads."""
     data = _read_json(DEFAULTS_FILE)
@@ -198,9 +239,14 @@ def _spec_of(entry) -> Optional[str]:
     return None
 
 
-def resolve_spec(name: str, repo: Optional[Path],
-                 cli: Dict[str, str]) -> tuple[Optional[str], str]:
-    """Return (spec, origin-of-that-spec) for one library, highest precedence first."""
+def resolve_spec(name: str, repo: Optional[Path], cli: Dict[str, str],
+                 pinned: Optional[str] = None, latest: bool = False) -> tuple[Optional[str], str]:
+    """Return (spec, origin-of-that-spec) for one library, highest precedence first.
+
+    `pinned` is the release the repository itself pins (layer 4). `latest` skips it, and
+    moves a ref named in .platform-builder.json to the latest release while keeping its
+    location (a mirror stays a mirror).
+    """
     if name in cli:
         return cli[name], "command line"
 
@@ -212,9 +258,18 @@ def resolve_spec(name: str, repo: Optional[Path],
         cfg = _read_json(repo / REPO_CONFIG_NAME).get("libraries", {})
         spec = _spec_of(cfg.get(name)) if isinstance(cfg, dict) else None
         if spec:
+            if latest:
+                src = parse_source(spec)
+                if src.kind == "git":
+                    return f"{src.location}@{LATEST}", f"{REPO_CONFIG_NAME} (location), --latest"
             return spec, f"{REPO_CONFIG_NAME}"
 
-    spec = _spec_of(load_defaults().get(name))
+    default = load_defaults().get(name)
+    location = parse_source(_spec_of(default)).location if _spec_of(default) else None
+    if pinned and location and not latest:
+        return f"{location}@{pinned}", "project pin"
+
+    spec = _spec_of(default)
     if spec:
         return spec, "core/libraries.json (default)"
 
@@ -237,6 +292,10 @@ class Resolved:
     commit: Optional[str] = None
     dirty: bool = False          # local copy with uncommitted changes
     docs: Dict[str, str] = field(default_factory=dict)
+    data: Dict[str, str] = field(default_factory=dict)   # data files the skill's checks read
+    requested_ref: Optional[str] = None   # what was asked for when it differs: "latest"
+    release_tags: List[str] = field(default_factory=list)   # oldest first
+    latest_release: Optional[str] = None
     notes: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -257,10 +316,61 @@ def _describe_local(path: Path, res: Resolved) -> None:
     name = _git(["-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"])
     if name.returncode == 0 and res.ref is None:
         res.ref = name.stdout.strip()
+        if res.ref == "HEAD":           # detached: name the release tag it sits on, if any
+            tag = _git(["-C", str(path), "describe", "--tags", "--exact-match", "HEAD"])
+            res.ref = tag.stdout.strip() if tag.returncode == 0 and tag.stdout.strip() else res.ref
         # Not a ref the caller asked for -- it is whatever the tree happens to be on.
         res.ref_kind = "checked-out"
     status = _git(["-C", str(path), "status", "--porcelain"])
     res.dirty = status.returncode == 0 and bool(status.stdout.strip())
+
+
+_REMOTE_TAGS: Dict[str, Optional[List[str]]] = {}
+
+
+def remote_release_tags(location: str) -> Optional[List[str]]:
+    """Release tags of a git remote, oldest first; None when the remote cannot be listed.
+
+    One `ls-remote` answers both "what is the latest release" and "which releases lie between
+    a pin and the target" -- a shallow clone holds only the tags on its own tip, so asking the
+    clone silently drops every release in between.
+    """
+    if location not in _REMOTE_TAGS:
+        try:
+            out = _git(["ls-remote", "--tags", "--refs", location], timeout=LS_REMOTE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            out = None
+        if out is None or out.returncode != 0:
+            _REMOTE_TAGS[location] = None
+        else:
+            tags = [ln.split("refs/tags/", 1)[1] for ln in out.stdout.splitlines() if "refs/tags/" in ln]
+            _REMOTE_TAGS[location] = sorted((t for t in tags if pins.release_key(t)), key=pins.release_key)
+    return _REMOTE_TAGS[location]
+
+
+def _cached_latest(location: str) -> Optional[str]:
+    """The highest release a cached clone of `location` is checked out at, for offline runs."""
+    root = cache_root()
+    best: Optional[str] = None
+    for d in (root.glob("*") if root.is_dir() else []):
+        url = _git(["-C", str(d), "remote", "get-url", "origin"])
+        if url.returncode != 0 or url.stdout.strip() != location:
+            continue
+        tag = _git(["-C", str(d), "describe", "--tags", "--exact-match", "HEAD"])
+        name = tag.stdout.strip() if tag.returncode == 0 else ""
+        if pins.release_key(name) and (best is None or pins.release_key(name) > pins.release_key(best)):
+            best = name
+    return best
+
+
+def _local_release_tags(path: Path, res: "Resolved") -> List[str]:
+    out = _git(["-C", str(path), "tag", "--list"])
+    tags = sorted((t for t in out.stdout.split() if pins.release_key(t)), key=pins.release_key) \
+        if out.returncode == 0 else []
+    shallow = _git(["-C", str(path), "rev-parse", "--is-shallow-repository"])
+    if shallow.returncode == 0 and shallow.stdout.strip() == "true":
+        res.notes.append("shallow clone: its tag list, and so the migration chain, may be incomplete")
+    return tags
 
 
 def _cache_dir(src: Source) -> Path:
@@ -350,6 +460,25 @@ def resolve_one(name: str, spec: str, origin: str, *,
 
     res = Resolved(name, spec, origin, src.kind, ref=src.ref, ref_kind=src.ref_kind)
 
+    if src.kind == "git" and src.ref == LATEST:
+        tags = remote_release_tags(src.location)
+        res.requested_ref = LATEST
+        if tags is None:
+            cached = _cached_latest(src.location)
+            if not cached:
+                res.error = (f"cannot list the releases of {src.location} (offline?) and no cached "
+                             f"release exists: pass a release explicitly, e.g. {src.location}@<tag>")
+                return res
+            res.notes.append(f"offline: using the cached release {cached}, which may not be the latest")
+            src.ref = cached
+        elif not tags:
+            res.error = f"{src.location} has no release tag: pass a branch or tag explicitly"
+            return res
+        else:
+            src.ref = tags[-1]
+        src.raw = f"{src.location}@{src.ref}"
+        res.ref, res.ref_kind = src.ref, src.ref_kind
+
     if src.kind == "local":
         base = repo if repo else Path.cwd()
         path = Path(os.path.expanduser(src.location))
@@ -381,6 +510,16 @@ def resolve_one(name: str, spec: str, origin: str, *,
         if not src.ref:
             res.ref = _default_branch(dest)
 
+    if src.kind == "git":
+        tags = remote_release_tags(src.location)
+        res.release_tags = tags if tags is not None else _local_release_tags(Path(res.path), res)
+    else:
+        res.release_tags = _local_release_tags(Path(res.path), res)
+    res.latest_release = res.release_tags[-1] if res.release_tags else None
+    if pins.release_key(res.ref) and res.latest_release \
+            and pins.release_key(res.ref) < pins.release_key(res.latest_release):
+        res.notes.append(f"behind: {res.ref} -> {res.latest_release} (platform update moves the project)")
+
     for doc in REQUIRED_DOCS + OPTIONAL_DOCS:
         p = Path(res.path) / doc
         if p.is_file():
@@ -389,20 +528,79 @@ def resolve_one(name: str, spec: str, origin: str, *,
     if missing and not res.error:
         res.error = (f"missing {', '.join(missing)} at {res.path} -- a library without a "
                      f"README.md has no contract to read, so this is not a usable source")
-    res.notes = [f"no {d} at this ref" for d in OPTIONAL_DOCS if d not in res.docs]
+    res.notes += [f"no {d} at this ref" for d in OPTIONAL_DOCS if d not in res.docs]
+    if not res.error:
+        res.error = _check_data(name, res)
     return res
 
 
+def _check_data(name: str, res: Resolved) -> Optional[str]:
+    """Why this release cannot serve the skill's checks, or None when it can."""
+    cfg = load_defaults().get(name)
+    for rel in (cfg.get("requires") or []) if isinstance(cfg, dict) else []:
+        path = Path(res.path) / rel
+        at = f"{name} {res.ref or 'at ' + str(res.path)}"
+        if not path.is_file():
+            if res.latest_release and res.latest_release == res.ref:
+                return (f"{at} ships no {rel}, which this skill's checks read, and it is the "
+                        f"library's latest release: no release ships the file yet. Keep the skills "
+                        f"at the release you used before until one does.")
+            upgrade = f" to {res.latest_release}" if res.latest_release else ""
+            return (f"{at} ships no {rel}, which this skill's checks read: it needs a release that "
+                    f"ships it. Upgrade the project{upgrade} with `platform update` (it reads "
+                    f"--latest), or pass a newer source explicitly.")
+        try:
+            schema = json.loads(path.read_text(encoding="utf-8")).get("schema")
+        except (ValueError, AttributeError, OSError) as exc:
+            return f"{at}: {rel} is not a readable JSON object ({exc})"
+        if schema not in SUPPORTED_SCHEMAS:
+            tags = remote_release_tags(skills_source()) if skills_source() else None
+            newest, own = (tags[-1] if tags else None), _skills_version()
+            known = f"{at}: {rel} has schema {schema!r}, which this skill does not know " \
+                    f"(it reads {', '.join(map(str, SUPPORTED_SCHEMAS))})."
+            if newest and own and pins.release_key(own) and pins.release_key(newest) <= pins.release_key(own):
+                return f"{known} No skills release reads it yet ({own} is the latest)."
+            return f"{known} Upgrade the skills to the latest release{f' ({newest})' if newest else ''}."
+        res.data[rel] = str(path)
+    return None
+
+
+def project_pins(repo: Optional[Path], platform: Optional[str]) -> Tuple[Dict[str, List[str]], Optional[Path]]:
+    """({library: [refs the repository pins]}, its chart dir) -- empty without a repository."""
+    if not repo:
+        return {}, None
+    return pins.repo_pins(repo, platform, chart_dependencies())
+
+
 def resolve_all(repo: Optional[Path], platform: Optional[str], cli: Dict[str, str],
-                names: Optional[List[str]] = None, refresh: bool = False) -> List[Resolved]:
-    wanted = names or platform_libraries(platform)
+                names: Optional[List[str]] = None, refresh: bool = False,
+                latest: bool = False,
+                pinned: Optional[Dict[str, List[str]]] = None,
+                gate_charts: bool = True) -> List[Resolved]:
+    """Resolve the libraries a run reads.
+
+    A library published as a chart dependency is read only when the repository has a chart
+    (unless `gate_charts` is off): a repository without one has nothing to measure against
+    it, so an old release of it must not stop the run.
+    """
+    if pinned is None:
+        pinned, cdir = project_pins(repo, platform)
+    else:
+        cdir = pins.chart_dir(repo) if repo else None
+    has_chart = bool(cdir and (cdir / "Chart.yaml").exists())
+    wanted = list(names or platform_libraries(platform))
+    if gate_charts:
+        wanted = [n for n in wanted if has_chart or n not in chart_dependencies()]
     for n in cli:                      # an explicitly passed library is always resolved
         if n not in wanted:
             wanted.append(n)
 
     out: List[Resolved] = []
     for name in wanted:
-        spec, origin = resolve_spec(name, repo, cli)
+        refs = pinned.get(name) or []
+        spec, origin = resolve_spec(name, repo, cli, pinned=pins.pick(refs), latest=latest)
+        if origin == "project pin" and len(refs) > 1:
+            origin = f"project pin, the oldest of {', '.join(refs)}"
         if not spec:
             out.append(Resolved(name, "", origin, "local",
                                 error="no source configured -- pass --lib "
@@ -410,7 +608,11 @@ def resolve_all(repo: Optional[Path], platform: Optional[str], cli: Dict[str, st
                                       f"${ENV_PREFIX}{name.upper().replace('-', '_')}, or add a "
                                       f"default to core/libraries.json"))
             continue
-        out.append(resolve_one(name, spec, origin, repo=repo, refresh=refresh))
+        res = resolve_one(name, spec, origin, repo=repo, refresh=refresh)
+        pin = pins.pick(refs)
+        if pin and origin.startswith(REPO_CONFIG_NAME) and parse_source(spec).ref not in (None, pin):
+            res.notes.append(f"{REPO_CONFIG_NAME} reads {parse_source(spec).ref}, but the project pins {pin}")
+        out.append(res)
     return out
 
 
@@ -435,17 +637,13 @@ def _parse_cli_libs(pairs: List[str]) -> Dict[str, str]:
 # Migration chain
 # --------------------------------------------------------------------------------------
 
-_SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
-
-
-def _semver_key(tag: str):
-    """Sort key for a release tag, or None if it is not a release tag."""
-    m = _SEMVER_RE.match(tag.strip())
-    return tuple(int(g) for g in m.groups()) if m else None
+def _semver_key(tag: Optional[str]):
+    """Sort key for a release tag, or None if it is not one (a pre-release is not)."""
+    return pins.release_key(tag)
 
 
 def list_release_tags(path: Path) -> List[str]:
-    """Release tags in the library clone, oldest first. Non-semver tags are ignored."""
+    """Release tags in a library checkout, oldest first. Other tags are ignored."""
     out = _git(["-C", str(path), "tag", "--list"])
     if out.returncode != 0:
         return []
@@ -453,7 +651,8 @@ def list_release_tags(path: Path) -> List[str]:
     return [t for _, t in sorted(tagged)]
 
 
-def versions_between(path: Path, current: Optional[str], target: Optional[str]) -> List[str]:
+def versions_between(path: Path, current: Optional[str], target: Optional[str],
+                     tags: Optional[List[str]] = None) -> List[str]:
     """Release tags a consumer on `current` has not yet adopted, up to `target`.
 
     Ordered oldest first, `current` exclusive and `target` inclusive. Skipping the
@@ -465,7 +664,7 @@ def versions_between(path: Path, current: Optional[str], target: Optional[str]) 
     chain rather than an empty one, because "we cannot tell what you have applied" must
     not read as "you are up to date". The caller says which case it is.
     """
-    tags = list_release_tags(path)
+    tags = tags if tags is not None else list_release_tags(path)
     if not tags:
         return []
     cur = _semver_key(current) if current else None
@@ -508,7 +707,7 @@ def migration_chain(res: "Resolved", current_ref: Optional[str]) -> List[tuple]:
     """Ordered (version, body) a consumer pinned at `current_ref` still owes."""
     if not res.path:
         return []
-    versions = versions_between(Path(res.path), current_ref, res.ref)
+    versions = versions_between(Path(res.path), current_ref, res.ref, res.release_tags or None)
     return migration_sections(Path(res.path) / "MIGRATION.md", versions)
 
 
@@ -558,10 +757,14 @@ def render(results: List[Resolved]) -> str:
         if r.dirty:
             lines.append("  WARNING  : working copy has uncommitted changes -- this run reads "
                          "them, a pipeline using the published library will not")
+        if r.requested_ref:
+            lines.append(f"  requested: {r.requested_ref}")
         lines.append(f"  index    : {r.docs['README.md']}")
         lines.append("  follow   : task-specific README links, relative to each page at this same ref")
         if "MIGRATION.md" in r.docs:
             lines.append(f"  migration: {r.docs['MIGRATION.md']} (upgrades/compatibility only)")
+        for rel, path in r.data.items():
+            lines.append(f"  data     : {path} (read by the checks, not a page to load)")
         for n in r.notes:
             lines.append(f"  note     : {n}")
     bad = [r for r in results if not r.ok]
@@ -580,6 +783,9 @@ def main() -> None:
     ap.add_argument("--platform", choices=["gitlab", "github"],
                     help="only resolve the libraries this platform reads")
     add_library_args(ap)
+    ap.add_argument("--latest", action="store_true",
+                    help="read every library at its latest release instead of the project's pin "
+                         "(an upgrade, `platform update`)")
     ap.add_argument("--all", action="store_true", help="resolve every known library")
     ap.add_argument("--refresh", action="store_true", help="re-fetch git sources, ignoring cache")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -588,7 +794,9 @@ def main() -> None:
     repo = Path(args.repo_path).resolve()
     results = resolve_all(repo if repo.is_dir() else None,
                           None if args.all else args.platform,
-                          cli_lib_overrides(args), refresh=args.refresh)
+                          cli_lib_overrides(args), refresh=args.refresh, latest=args.latest,
+                          names=known_library_names() if args.all else None,
+                          gate_charts=not args.all)
 
     if args.json:
         print(json.dumps({"repository": str(repo),

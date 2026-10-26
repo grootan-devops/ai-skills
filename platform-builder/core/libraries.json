@@ -1,19 +1,26 @@
 {
   "$comment": [
-    "Default source for each shared library, used when nothing higher in the precedence",
-    "chain names one. Precedence, highest first:",
+    "Where each shared library lives, used when nothing higher in the precedence chain names",
+    "a source. Precedence, highest first:",
     "  1. --<library-name> SOURCE  (or the generic --lib NAME=SOURCE)",
     "  2. $PLATFORM_BUILDER_LIB_<NAME>",
     "  3. <repo>/.platform-builder.json",
-    "  4. this file",
+    "  4. the release the repository pins (CI includes, reusable workflows, chart dependency)",
+    "  5. this file: 'latest', the library's highest release tag, resolved with git ls-remote",
     "A source is a local path, a git URL with an optional '@<ref>' or '#<ref>', or a",
     "GitHub/GitLab web URL of the form '<repo>/tree/<ref>'. The ref may be a branch, a",
-    "tag or a commit SHA, and may be omitted for the default branch.",
-    "The defaults below track 'main'. Pin a tag here once the libraries cut releases: a",
-    "default branch moves, so an unpinned default makes two runs a week apart generate",
-    "different pipelines from the same inputs.",
+    "tag, a commit SHA or 'latest', and may be omitted for the default branch.",
+    "No library version is written here: a project reads the release it pins, a new project",
+    "and an upgrade the latest one, so a library release needs no skill release.",
+    "'chart' names the chart a library is published as, to find a chart's pin; such a",
+    "library is read only when the repository has a chart.",
+    "'requires' lists the data files the checks read; a release without one, or with an",
+    "unknown 'schema' in it, is unusable and the run stops with what to upgrade.",
     "'platforms' says which libraries a run on that platform actually reads."
   ],
+  "skills": {
+    "source": "https://github.com/grootan-devops/ai-skills"
+  },
   "trusted_registries": [
     "registry-1.docker.io/grootantech",
     "grootantech",
@@ -22,15 +29,25 @@
   "libraries": {
     "gitlab-ci-library": {
       "source": "https://github.com/grootan-devops/gitlab-ci-library",
-      "ref": "main"
+      "ref": "latest",
+      "requires": [
+        "docs/workflow-map.json"
+      ]
     },
     "github-ci-library": {
       "source": "https://github.com/grootan-devops/github-ci-library",
-      "ref": "main"
+      "ref": "latest",
+      "requires": [
+        "docs/workflow-map.json"
+      ]
     },
     "helm-tpl-library": {
       "source": "https://github.com/grootan-devops/helm-tpl-library",
-      "ref": "main"
+      "ref": "latest",
+      "chart": "tpl-library",
+      "requires": [
+        "docs/chart-contract.json"
+      ]
     }
   },
   "platforms": {

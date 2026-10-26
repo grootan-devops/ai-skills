@@ -28,7 +28,8 @@ backends and state keys, providers, secrets, lock files and validation — live 
 module library. Locate it, stopping at the first that exists: a path or repository/ref
 named in the request; `$TERRAFORM_MODULES_REPO`; the repository and ref of the stack's
 pinned module source; a `terraform-modules/` checkout beside this skill's directory;
-otherwise the default, `https://github.com/grootan-devops/terraform-modules` at `main`.
+otherwise the latest release tag of `https://github.com/grootan-devops/terraform-modules`
+(`git ls-remote --tags`), never `main` unless asked.
 Read its README documentation index and follow the row for consuming modules at that
 ref, or the equivalent guide of the project's own catalog.
 

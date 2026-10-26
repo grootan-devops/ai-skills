@@ -35,8 +35,8 @@ python3 scripts/app_add.py <root> --app <key> [--group <group>] \
 Run it with `--dry-run` first and show the result, then without it. The script refuses an
 existing entry or values file, inserts only the new entry, scaffolds the values file with
 `<ask: …>` placeholders, and prints the Application name, namespace, release name, values path
-and the yq path a CI deploy job bumps (`.apps.<key>`, or a union for every release of one
-chart).
+and the yq path a CI deploy job bumps (`.apps.<key>`, or `.apps.<group>.<release>` for a
+release of a group).
 
 Fill every placeholder from the user's answers — none may remain — then check the file:
 

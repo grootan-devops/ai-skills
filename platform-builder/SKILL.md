@@ -21,40 +21,33 @@ description: >-
 
 Run core/scripts/platform.py for platform signals and core/scripts/libraries.py for the
 applicable library sources. An explicit platform or library source wins; when a repository
-has both CI systems or neither and the target is unclear, ask. Read local library paths in
-place, including uncommitted work. The resolver reports its source/ref and refuses a ref
-on a local path. Stop if a required source cannot be read.
-For another CI system, such as Azure DevOps, report that this Skill has no adapter rather
-than generating GitHub or GitLab syntax for it.
+has both CI systems or neither and the target is unclear, ask. For another CI system, such
+as Azure DevOps, report that this Skill has no adapter rather than generating GitHub or
+GitLab syntax for it.
 
-Read each selected library's README index and only the linked topic guides needed for
-the task, all from the same checkout/ref. Use its MIGRATION.md for upgrades. Executable
-templates, schemas, and tests establish shipped behavior; the selected-ref docs explain
-intended contracts. Record disagreements instead of silently substituting another ref.
-Resolve with `python3 core/scripts/libraries.py <repo> --platform gitlab|github`.
-The resolver and `audit.py` accept `--lib NAME=SOURCE` and the named flags
-`--gitlab-ci-library SOURCE`, `--github-ci-library SOURCE`, and
-`--helm-tpl-library SOURCE`. Resolve each library independently, highest first:
+Resolve with `python3 core/scripts/libraries.py <repo> --platform gitlab|github`; `audit.py`
+takes the same sources. Each library is read at one release, highest first:
 
 | Priority | Source |
 | --- | --- |
-| 1 | Named flag or `--lib NAME=SOURCE` for this invocation |
+| 1 | `--<library> SOURCE` or `--lib NAME=SOURCE` for this invocation |
 | 2 | `$PLATFORM_BUILDER_LIB_<NAME>` (uppercase, `-` becomes `_`) |
 | 3 | `<repo>/.platform-builder.json` under `libraries` |
-| 4 | `core/libraries.json` default |
+| 4 | the release the repository pins: its CI includes or reusable workflows, its chart's library dependency |
+| 5 | the library's latest release tag |
 
-`SOURCE` may be a local path or `file://` URL (read in place), a Git URL with an
-optional `@ref` or `#ref`, or a GitHub/GitLab `/tree/<ref>` URL. A ref may be a
-branch, tag, or commit; give a branch containing `/` as `#<ref>`, `<url>.git@<ref>` or
-`/tree/<ref>`, because `<url>@<ref>` reads such a ref as part of the URL. Named flags take precedence over a generic `--lib` for
-the same name; the resolver is the authority for parsing and errors.
+`--latest` skips layer 4, for an upgrade. `libraries.py --help` gives the source syntax;
+a local path is read in place, uncommitted work included, and a ref on it is refused. The
+resolver stops at a release that ships no data file for the checks, or one with a schema
+this Skill does not know, and says what to upgrade: stop with it and tell the user. Stop
+too if a required source cannot be read.
 
-A local library checkout is evidence for this run, not a publishable consumer pin. Before
-writing a GitHub reusable-workflow caller, check the selected library's pinning guard:
-the current GitHub library requires a published stable release tag in normal consumers.
-Branch and SHA refs need its explicit testing escape hatch and are not release-ready.
-GitLab include refs and Helm chart versions follow their own selected-library contracts.
-Never copy a version from a README example.
+Read each library's README index and only the linked topic guides the task needs, all at
+the resolved release; use its MIGRATION.md for upgrades. Executable templates, schemas
+and tests establish shipped behaviour; the docs explain intended contracts. Record
+disagreements instead of substituting another ref. Pin exactly the release the docs were
+read from, in the form that library's pinning rules give, and never copy a version from a
+README example. A local library checkout is evidence for this run, not a publishable pin.
 
 ## Read the library docs
 
@@ -64,8 +57,8 @@ pipeline setup, project jobs, Dockerfile and base images, security review, chart
 values, naming, mounts and configuration — all at the resolved ref. For an upgrade, read its
 MIGRATION.md sections between the consumer's pin and the target. Read one CI library for a
 single-platform task. The selected library's implementation remains authoritative for its
-supported inputs and outputs; `platforms/<platform>/workflow-map.json` is the audit's own
-scenario map.
+supported inputs and outputs. The audit reads the CI library's `docs/workflow-map.json` and
+the Helm library's `docs/chart-contract.json` at the same release; nothing here copies them.
 
 ## Working rules
 
@@ -125,8 +118,8 @@ optional resource choice without asking it again.
 | Dockerfile or chart | Image registry, pull secret and repository path, when the repository does not already state them | Set them so the chart pulls exactly what CI pushes. |
 | Chart with routes | Route host and paths — suggest the library's pattern | Use what the user chooses. |
 | Chart | Does the application read a configuration file? | Declare it as a file mount, following the Helm library docs. |
-| Dockerfile | Smoke-test the built image? | Wire the GitHub `docker.yml`/`buildah.yml` `test: true` and `test-script` (default `ci_image_test.sh`), or GitLab `.Image:Test`. |
-| Chart | Unit-test the chart? | Wire GitHub `chart.yml` `run-unittest: true` with `tests/*_test.yaml` suites, or the selected GitLab chart test job. |
+| Dockerfile | Smoke-test the built image? | Wire the image smoke test the selected CI library's image module documents. |
+| Chart | Unit-test the chart? | Wire the chart unit tests the selected CI library's chart module documents, with `tests/*_test.yaml` suites. |
 | Chart | Does the workload require persistent storage (PVC)? | Add `persistence:` and `tpl.pvc`; otherwise omit both. |
 | Chart | Does the workload require batch jobs, recurring cronjobs, or Prometheus metrics scraping? | Add only required values and matching `tpl.job`, `tpl.cronjob`, or `tpl.servicemonitor` entrypoints. |
 
@@ -136,9 +129,9 @@ application's actual contract. Do not declare a test job without a runnable
 fixture. Questions about optional chart resources are unnecessary when the
 workload evidence or explicit request already answers them.
 
-For update, resolve each target library and run `core/scripts/audit.py` against the
-consumer with the same sources: its `migrations[]` output lists the release sections between
-the consumer's pin and the target. Work through every intermediate release in order (a branch
+For update, run `core/scripts/audit.py --latest` against the consumer: it reads every library
+at its latest release, and its `migrations[]` output lists the release sections between the
+consumer's pin and that release. Work through every intermediate release in order (a branch
 or SHA pin may not give a complete chain; report that) and compare each step with the actual
 templates, schema and consumer files. Change only required refs, schemas, wiring, and
 verified defects. Preserve intentional cache keys, custom jobs, values, annotations, probes,

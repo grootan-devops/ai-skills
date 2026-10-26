@@ -11,6 +11,9 @@ sys.path.insert(0, str(_PLATFORM_DIR))
 
 import checks_common  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library_fixtures  # noqa: E402
+
 spec = importlib.util.spec_from_file_location("gitlab_ci_checks_mcp_test", _PLATFORM_DIR / "ci_checks.py")
 gitlab_ci_checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gitlab_ci_checks)
@@ -67,6 +70,10 @@ def _chart(root: Path, values: str, manifest: str = '{{- include "tpl.deployment
     return chart_dir
 
 
+def setUpModule():
+    library_fixtures.use_chart_library()
+
+
 class NamingTests(unittest.TestCase):
     def _cats(self, values: str, name: str = "myapp-orders-mcp"):
         with tempfile.TemporaryDirectory() as td:
@@ -102,7 +109,7 @@ class OptionalGlobalSectionTests(unittest.TestCase):
             chart_dir = _chart(root, _CONSUMER_VALUES, manifest)
             lib = root / "lib_values.yaml"
             lib.write_text(_LIB_VALUES, encoding="utf-8")
-            return checks_common.check_values_parity(chart_dir, lib)
+            return checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib.read_text()))
 
     def test_global_metrics_and_tracing_may_be_omitted_without_monitor(self):
         self.assertEqual(self._parity('{{- include "tpl.deployment" . }}\n'), [])
@@ -127,7 +134,7 @@ Image:Build:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / ".gitlab-ci.yml"
             p.write_text(ci, encoding="utf-8")
-            findings, data = gitlab_ci_checks.check_gitlab_ci(p)
+            findings, data = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
             self.assertNotIn("YAML Syntax Error", {f.category for f in findings})
             self.assertEqual(data["Image:Build"]["before_script"][0],
                              "!reference [.image-registry-login, before_script]")

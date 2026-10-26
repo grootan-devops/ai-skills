@@ -1,0 +1,12 @@
+{
+  "$comment": "Test fixture: the part of a tpl-library chart contract these scripts read.",
+  "schema": 1,
+  "values": {
+    "templateKeys": [
+      "partOf",
+      "subcomponent",
+      "nameOverride",
+      "fullnameOverride"
+    ]
+  }
+}
