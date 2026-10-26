@@ -1,0 +1,31 @@
+# Test fixture: the parts of a tpl-library values.yaml the chart checks read.
+global:
+  releaseNameLength: 6
+  image:
+    registry: "cr.io"
+    pullSecrets:
+      - cr-cred
+
+component: ""
+subComponent: ""
+
+# -- Deployment strategy.
+# @default -- Check values.yaml
+strategy:
+  type: RollingUpdate
+
+restartPolicy: Always
+
+containers:
+  main:
+    # -- Container security context.
+    # @default -- Check values.yaml
+    securityContext:
+      allowPrivilegeEscalation: false
+
+pod:
+  # -- Pod security context.
+  # @default -- Check values.yaml
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001

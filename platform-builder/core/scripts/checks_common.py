@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -105,6 +105,67 @@ def set_repo_context(repo: Path) -> None:
     host, path = origin_project(repo)
     if host and path:
         _OWN_REGISTRIES.update({f"{host}:5050/{path}", f"registry.{host}/{path}", f"{host}/{path}"})
+
+
+@dataclass
+class ChartLibrary:
+    """The helm-tpl-library release a chart is measured against.
+
+    `contract` is its docs/chart-contract.json, `values` and `schema` its values.yaml and
+    values.schema.json, `name` the chart name consumers depend on. The chart checks read
+    the library's rules from here instead of carrying a copy, so a library release that
+    changes them needs no skill release.
+    """
+    contract: Dict[str, Any]
+    values: Dict[str, Any] = field(default_factory=dict)
+    values_text: str = ""
+    schema: Dict[str, Any] = field(default_factory=dict)
+    name: str = ""
+
+    @classmethod
+    def load(cls, root: Path) -> "ChartLibrary":
+        root = Path(root)
+        contract = json.loads((root / "docs" / "chart-contract.json").read_text(encoding="utf-8"))
+        values_file = root / "values.yaml"
+        values_text = values_file.read_text(encoding="utf-8") if values_file.is_file() else ""
+        values = (yaml.safe_load(values_text) or {}) if HAVE_YAML and values_text else {}
+        schema_file = root / "values.schema.json"
+        schema = json.loads(schema_file.read_text(encoding="utf-8")) if schema_file.is_file() else {}
+        chart_file = root / "Chart.yaml"
+        chart = chart_file.read_text(encoding="utf-8") if chart_file.is_file() else ""
+        m = re.search(r"^name:\s*['\"]?([^'\"\s#]+)", chart, re.M)
+        return cls(contract, values if isinstance(values, dict) else {}, values_text,
+                   schema if isinstance(schema, dict) else {}, m.group(1) if m else "")
+
+    def rule(self, *path: str, default: Any = None) -> Any:
+        node: Any = self.contract
+        for part in path:
+            node = node.get(part) if isinstance(node, dict) else None
+        return default if node is None else node
+
+
+_CHART_LIBRARY: Optional[ChartLibrary] = None
+
+
+def set_chart_library(library: Optional[ChartLibrary]) -> None:
+    """Select the helm-tpl-library release the chart checks apply. Called once by the harness."""
+    global _CHART_LIBRARY
+    _CHART_LIBRARY = library
+
+
+def chart_library() -> ChartLibrary:
+    if _CHART_LIBRARY is None:
+        raise RuntimeError("the chart checks need the resolved helm-tpl-library: call set_chart_library first")
+    return _CHART_LIBRARY
+
+
+def helm_docs_args() -> List[str]:
+    """The helm-docs flags the library gives a consumer chart, run inside the chart directory."""
+    return [str(a) for a in chart_library().rule("helmDocs", default=[])]
+
+
+def helm_docs_command() -> str:
+    return " ".join(["helm-docs", *helm_docs_args()])
 
 
 
@@ -399,15 +460,10 @@ def _opaque_block_keys(values_text: str) -> Set[str]:
     return out
 
 
-# Keys tpl-library reads but a consumer is never expected to restate verbatim -- either they
-# are the consumer's own identity, or a nested example-only block.
-_VALUES_PARITY_IGNORE = {"component", "subComponent"}
-
-
 _WRAPPER_SMELL = {"app", "application", "config", "configuration", "settings", "env", "params"}
 
 
-def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Finding]:
+def check_app_values_shape(chart_dir: Path, library: Optional[ChartLibrary] = None) -> List[Finding]:
     """Consumer application values: top level, ahead of the workload plumbing.
 
     The library declares no key for application configuration, so whatever the app needs
@@ -418,20 +474,19 @@ def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Fi
     plumbing they inherit and never touch.
     """
     findings: List[Finding] = []
+    lib = library or chart_library()
     values_file = chart_dir / "values.yaml"
-    if not values_file.exists() or not tpl_library_values.exists():
+    if not values_file.exists():
         return findings
     try:
-        import yaml  # noqa: WPS433
         raw = values_file.read_text(encoding="utf-8")
         consumer = yaml.safe_load(raw) or {}
-        library = yaml.safe_load(tpl_library_values.read_text(encoding="utf-8")) or {}
     except Exception:
         return findings
-    if not isinstance(consumer, dict) or not isinstance(library, dict):
+    if not isinstance(consumer, dict):
         return findings
 
-    lib_keys = set(library)
+    lib_keys = set(lib.values)
     rel = f"{chart_dir.name}/values.yaml"
 
     # --- an invented envelope around the domain groups ----------------------
@@ -450,23 +505,24 @@ def check_app_values_shape(chart_dir: Path, tpl_library_values: Path) -> List[Fi
             ))
 
     # --- appended after the plumbing instead of ahead of it -----------------
+    anchor = lib.rule("values", "applicationValues", "before")
     order = [m.group(1) for m in re.finditer(r"^([A-Za-z_][\w-]*):", raw, re.M)]
-    if "restartPolicy" in order:
-        cut = order.index("restartPolicy")
+    if anchor and anchor in order:
+        cut = order.index(anchor)
         late = [k for k in order[cut:] if k not in lib_keys]
         if late:
             findings.append(Finding(
                 "P2", "Application values sit below the workload plumbing", rel,
                 f"{', '.join(late[:4])} "
-                f"{'appears' if len(late) == 1 else 'appear'} after `restartPolicy:`. Application "
+                f"{'appears' if len(late) == 1 else 'appear'} after `{anchor}:`. Application "
                 "configuration is what a deployer edits; the plumbing is inherited. Move "
-                "these above `restartPolicy:` and keep the library's own key order "
+                f"these above `{anchor}:` and keep the library's own key order "
                 "otherwise, so the replica still diffs cleanly (helm-tpl-library chart standards).",
             ))
     return findings
 
 
-def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Finding]:
+def check_values_parity(chart_dir: Path, library: Optional[ChartLibrary] = None) -> List[Finding]:
     """Consumer values.yaml must mirror the library's values.yaml key-for-key.
 
     The library file is the contract. A key omitted because it is "empty anyway" is
@@ -475,15 +531,15 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
     keys stay, with their `### Example` block, carrying the library's own default.
     """
     findings: List[Finding] = []
+    lib = library or chart_library()
     values_file = chart_dir / "values.yaml"
-    if not values_file.exists() or not tpl_library_values.exists():
+    if not values_file.exists():
         return findings
     try:
-        import yaml  # noqa: WPS433
         consumer = yaml.safe_load(values_file.read_text(encoding="utf-8")) or {}
-        library = yaml.safe_load(tpl_library_values.read_text(encoding="utf-8")) or {}
     except Exception:
         return findings
+    library_values = lib.values
 
     def paths(node: Any, prefix: str = "") -> Set[str]:
         out: Set[str] = set()
@@ -503,32 +559,32 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
     # documented keys (see the comments law). Its sub-keys are the consumer's to shape:
     # `strategy: {type: Recreate}` is complete, and demanding `strategy.rollingUpdate`
     # under it would be demanding an invalid manifest.
-    opaque = _opaque_block_keys(tpl_library_values.read_text(encoding="utf-8"))
+    opaque = _opaque_block_keys(lib.values_text)
     lib_paths = {
-        p for p in paths(library)
+        p for p in paths(library_values)
         if not any(p.startswith(o + ".") for o in opaque)
     }
     consumer_paths = paths(consumer)
 
-    # `containers.<name>` is a free map -- "main" is the library's example, not a fixed
-    # name -- so the container contract is compared against each container the consumer
-    # `containers.<name>` is a free map -- "main" is the library's example, not a fixed
-    # name -- so the container contract is compared against each container the consumer
-    # actually declares.
-    container_contract = {p for p in lib_paths if p.startswith("containers.main.")}
-    lib_paths -= container_contract
-    lib_paths.discard("containers.main")
-    consumer_containers = consumer.get("containers")
-    if isinstance(consumer_containers, dict) and consumer_containers:
-        for cname in consumer_containers:
-            for cp in container_contract:
-                lib_paths.add(cp.replace("containers.main.", f"containers.{cname}.", 1))
-    else:
-        findings.append(Finding(
-            "P1", "values.yaml Not A Library Replica", f"{chart_dir.name}/values.yaml",
-            "values.yaml declares no containers. tpl-library renders the workload from "
-            "`containers.<name>`; without one the chart produces a pod with no container."
-        ))
+    # A free map such as `containers.<name>` names its entries itself -- the library's
+    # entry ("main") is an example, not a fixed name -- so its contract is compared
+    # against each entry the consumer actually declares.
+    for map_key, example in lib.rule("values", "exampleMaps", default={}).items():
+        prefix = f"{map_key}.{example}"
+        entry_contract = {p for p in lib_paths if p.startswith(prefix + ".")}
+        lib_paths -= entry_contract
+        lib_paths.discard(prefix)
+        entries = consumer.get(map_key)
+        if isinstance(entries, dict) and entries:
+            for name in entries:
+                for cp in entry_contract:
+                    lib_paths.add(cp.replace(prefix + ".", f"{map_key}.{name}.", 1))
+        else:
+            findings.append(Finding(
+                "P1", "values.yaml Not A Library Replica", f"{chart_dir.name}/values.yaml",
+                f"values.yaml declares no {map_key}. tpl-library renders the workload from "
+                f"`{map_key}.<name>`; without one the chart produces a pod with no container."
+            ))
 
     # Optional entrypoints rendered by specialized template helpers:
     # persistence (tpl.pvc), cronjobs (tpl.cronjob), jobs (tpl.job), metrics (tpl.servicemonitor / tpl.podmonitor).
@@ -544,10 +600,18 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
         pattern = re.compile(rf'include\s+["\']{re.escape(name)}["\']')
         return any(pattern.search(txt) for txt in manifest_texts)
 
-    has_tpl_pvc = _has_include("tpl.pvc")
-    if not has_tpl_pvc:
-        lib_paths = {p for p in lib_paths if p != "persistence" and not p.startswith("persistence.")}
+    # An optional block exists only where the chart includes its entrypoint; a block no
+    # template reads (an empty entrypoint list) is the application's to keep or drop.
+    optional = lib.rule("values", "optionalBlocks", default={})
+    included = {block: any(_has_include(h) for h in helpers) for block, helpers in optional.items()}
+    for block in optional:
+        if not included[block]:
+            lib_paths = {p for p in lib_paths if p != block and not p.startswith(block + ".")}
 
+    def entrypoint(block: str) -> str:
+        return (optional.get(block) or [block])[0]
+
+    has_tpl_pvc = included.get("persistence", True)
     consumer_persistence = consumer.get("persistence")
     if isinstance(consumer_persistence, dict):
         has_active_pvc = any(
@@ -556,17 +620,14 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
         )
         if has_active_pvc and not has_tpl_pvc:
             findings.append(Finding(
-                "P1", "Missing tpl.pvc in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "P1", f"Missing {entrypoint('persistence')} in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
                 "`persistence` defines active PersistentVolumeClaim entries in values.yaml, "
-                "but `tpl.pvc` is not invoked in templates/manifest.yaml. The claims will not be created. "
-                "Add `{{ include \"tpl.pvc\" . }}` in manifest.yaml."
+                f"but `{entrypoint('persistence')}` is not invoked in templates/manifest.yaml. The claims will not be created. "
+                f"Add `{{{{ include \"{entrypoint('persistence')}\" . }}}}` in manifest.yaml."
             ))
 
-    has_tpl_cronjob = _has_include("tpl.cronjob")
-    if not has_tpl_cronjob:
-        lib_paths = {p for p in lib_paths if p != "cronjobs" and not p.startswith("cronjobs.") and p != "cronjob" and not p.startswith("cronjob.")}
-
-    consumer_cronjobs = consumer.get("cronjobs") or consumer.get("cronjob")
+    has_tpl_cronjob = included.get("cronjobs", True)
+    consumer_cronjobs = consumer.get("cronjobs")
     if isinstance(consumer_cronjobs, dict):
         has_active_cronjob = any(
             isinstance(v, dict) and bool(v.get("schedule")) and not v.get("suspend", False)
@@ -574,17 +635,14 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
         )
         if has_active_cronjob and not has_tpl_cronjob:
             findings.append(Finding(
-                "P1", "Missing tpl.cronjob in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "P1", f"Missing {entrypoint('cronjobs')} in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
                 "`cronjobs` defines active CronJob entries in values.yaml, "
-                "but `tpl.cronjob` is not invoked in templates/manifest.yaml. The CronJobs will not be created. "
-                "Add `{{- include \"tpl.cronjob\" ... }}` in manifest.yaml."
+                f"but `{entrypoint('cronjobs')}` is not invoked in templates/manifest.yaml. The CronJobs will not be created. "
+                f"Add `{{{{- include \"{entrypoint('cronjobs')}\" ... }}}}` in manifest.yaml."
             ))
 
-    has_tpl_job = _has_include("tpl.job")
-    if not has_tpl_job:
-        lib_paths = {p for p in lib_paths if p != "jobs" and not p.startswith("jobs.") and p != "job" and not p.startswith("job.")}
-
-    consumer_jobs = consumer.get("jobs") or consumer.get("job")
+    has_tpl_job = included.get("jobs", True)
+    consumer_jobs = consumer.get("jobs")
     if isinstance(consumer_jobs, dict):
         has_active_job = any(
             isinstance(v, dict) and v.get("enabled") is True
@@ -592,25 +650,13 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
         )
         if has_active_job and not has_tpl_job:
             findings.append(Finding(
-                "P1", "Missing tpl.job in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "P1", f"Missing {entrypoint('jobs')} in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
                 "`jobs` defines active Job entries in values.yaml, "
-                "but `tpl.job` is not invoked in templates/manifest.yaml. The Jobs will not be created. "
-                "Add `{{- include \"tpl.job\" ... }}` in manifest.yaml."
+                f"but `{entrypoint('jobs')}` is not invoked in templates/manifest.yaml. The Jobs will not be created. "
+                f"Add `{{{{- include \"{entrypoint('jobs')}\" ... }}}}` in manifest.yaml."
             ))
 
-    has_tpl_metrics = _has_include("tpl.servicemonitor") or _has_include("tpl.podmonitor")
-    if not has_tpl_metrics:
-        # global.metrics only feeds tpl.servicemonitor/podmonitor, so it goes with them.
-        lib_paths = {
-            p for p in lib_paths
-            if p not in ("metrics", "global.metrics")
-            and not p.startswith(("metrics.", "global.metrics."))
-        }
-
-    # No tpl template reads global.tracing; it documents the app's own OTEL settings, so a
-    # chart keeps it only when the application actually consumes tracing configuration.
-    lib_paths = {p for p in lib_paths if p != "global.tracing" and not p.startswith("global.tracing.")}
-
+    has_tpl_metrics = included.get("metrics", True)
     consumer_global = consumer.get("global") or {}
     consumer_metrics_global = consumer_global.get("metrics") or {}
     is_metrics_enabled = consumer_metrics_global.get("enabled") is True
@@ -618,14 +664,15 @@ def check_values_parity(chart_dir: Path, tpl_library_values: Path) -> List[Findi
     if isinstance(consumer_metrics, dict):
         endpoints = consumer_metrics.get("endpoints")
         if is_metrics_enabled and isinstance(endpoints, list) and len(endpoints) > 0 and not has_tpl_metrics:
+            helpers = optional.get("metrics") or ["metrics"]
             findings.append(Finding(
-                "P1", "Missing tpl.servicemonitor in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
+                "P1", f"Missing {helpers[0]} in manifest.yaml", f"{chart_dir.name}/templates/manifest.yaml",
                 "`metrics.endpoints` defines scrape endpoints in values.yaml and global.metrics.enabled is true, "
-                "but neither `tpl.servicemonitor` nor `tpl.podmonitor` is invoked in templates/manifest.yaml. "
-                "Add `{{ include \"tpl.servicemonitor\" . }}` in manifest.yaml."
+                f"but none of {', '.join(f'`{h}`' for h in helpers)} is invoked in templates/manifest.yaml. "
+                f"Add `{{{{ include \"{helpers[0]}\" . }}}}` in manifest.yaml."
             ))
 
-    missing = sorted(p for p in lib_paths - consumer_paths if p not in _VALUES_PARITY_IGNORE)
+    missing = sorted(lib_paths - consumer_paths)
     if missing:
         shown = ", ".join(missing[:12])
         more = f" (+{len(missing) - 12} more)" if len(missing) > 12 else ""
@@ -808,19 +855,8 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                     if var_name not in declared_arg_defaults and (
                         var_name.endswith("_IMAGE") or "_BASE_IMAGE" in var_name or "_BUILD_IMAGE" in var_name
                     ):
-                        suggested_default = ""
-                        for known_arg, default_img in [
-                            ("PYTHON_312_MICRO_BASE_IMAGE", "grootantech/micro-python-3-12:latest"),
-                            ("NODE_JS_24_MICRO_BASE_IMAGE", "grootantech/micro-node-24:latest"),
-                            ("JAVA_25_MICRO_BASE_IMAGE", "grootantech/micro-java-25:latest"),
-                            ("NGINX_MICRO_BASE_IMAGE", "grootantech/micro-nginx:latest"),
-                            ("MICRO_ROOT_BASE_IMAGE", "grootantech/micro-root:latest"),
-                            ("TOOLKIT_BUILD_IMAGE", "grootantech/toolkit:latest"),
-                        ]:
-                            if var_name == known_arg:
-                                suggested_default = default_img
-                                break
-                        remedy = f" (e.g. '{var_name}={suggested_default}')" if suggested_default else f" (e.g. '{var_name}=grootantech/<image>:latest')"
+                        remedy = (f" (e.g. '{var_name}=grootantech/<image>:latest', the base image the "
+                                  "selected CI library's Dockerfile standards name for this stack)")
                         findings.append(Finding(
                             "P2", "Missing Default Base Image in ARG", f"{df_file.name}:{line_no}",
                             f"ARG '{var_name}' declares no default enterprise image{remedy}. "
@@ -863,11 +899,10 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                 continue
             if _PLATFORM == "github":
                 remedy = (
-                    " The current github-ci-library docker.yml does not restore the language "
-                    "workflow's Actions cache into the Docker build context. Do not copy the "
-                    "GitLab PROJECT_CACHE_KEY/cache: policy: pull recipe; an explicit cache or "
-                    "artifact handoff in the image workflow is required before using an offline "
-                    "BuildKit mount."
+                    " The selected github-ci-library release documents which caches reach its "
+                    "docker.yml build (its README's Docker cache caveat and Dockerfile standards). "
+                    "Do not copy the GitLab PROJECT_CACHE_KEY/cache: policy: pull recipe; use an "
+                    "offline BuildKit mount only for a cache that release hands to the image build."
                 )
             elif _PLATFORM == "gitlab":
                 remedy = (
@@ -1344,9 +1379,10 @@ def check_gitignore(root: Path, chart_dir: Optional[Path] = None) -> List[Findin
     return findings
 
 
-#: Patterns that must never appear unanchored. An unanchored pattern matches a basename at
-#: ANY depth, so it reaches into charts/ and hides resolved dependencies from the loader.
-_HELMIGNORE_FORBIDDEN = {
+#: Why an unanchored pattern breaks a chart. An unanchored pattern matches a basename at ANY
+#: depth, so it reaches into charts/ and hides resolved dependencies from the loader. The
+#: patterns to refuse come from the library's chart contract; this only explains them.
+_HELMIGNORE_WHY = {
     "*.tgz": ("hides the dependency archives helm downloads into charts/. The chart then "
               "reports 'missing these dependencies' with the files plainly present, and any "
               "library-chart include fails with 'no template ... associated with template "
@@ -1355,23 +1391,6 @@ _HELMIGNORE_FORBIDDEN = {
     "charts": ("hides the entire resolved dependency directory. Never ignore it."),
     "charts/": ("hides the entire resolved dependency directory. Never ignore it."),
 }
-
-#: Entries whose absence leaves repo furniture inside the released artifact.
-_HELMIGNORE_EXPECTED = (
-    "Chart.lock",
-    "README.gotmpl",
-    ".gitlab-ci.yml",
-    ".yamllint.yml",
-    ".gitleaks.toml",
-    "CODEOWNERS",
-    "CONTRIBUTING.md",
-    "LICENSE.md",
-    "Makefile",
-    "SECURITY.md",
-    "VERSION",
-    "test/",
-    ".helmignore",
-)
 
 
 def check_helmignore(chart_dir: Path) -> List[Finding]:
@@ -1394,14 +1413,17 @@ def check_helmignore(chart_dir: Path) -> List[Finding]:
 
     lines = [ln.strip() for ln in hi_file.read_text(encoding="utf-8").splitlines()]
     active = [ln for ln in lines if ln and not ln.startswith("#")]
+    rules = chart_library().rule("helmignore", default={})
 
-    for pattern, why in _HELMIGNORE_FORBIDDEN.items():
+    for pattern in rules.get("forbidden", []):
         if pattern in active:
+            why = _HELMIGNORE_WHY.get(pattern, "matches at any depth and can hide the resolved "
+                                               "dependencies in charts/ from the loader.")
             findings.append(Finding(
                 "P1", "Unanchored .helmignore Pattern", f"{hi_file.name}:{pattern}",
                 f"'{pattern}' {why}"))
 
-    missing = [e for e in _HELMIGNORE_EXPECTED
+    missing = [e for e in rules.get("required", [])
                if e not in active and e.rstrip("/") not in active]
     if missing:
         findings.append(Finding(
@@ -1420,7 +1442,8 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
 
     chart_yaml_file = chart_dir / "Chart.yaml"
     values_yaml_file = chart_dir / "values.yaml"
-    manifest_file = chart_dir / "templates" / "manifest.yaml"
+    manifest_rel = chart_library().rule("manifest", "file", default="templates/manifest.yaml")
+    manifest_file = chart_dir / manifest_rel
 
     if not chart_yaml_file.exists():
         findings.append(Finding("P0", "Missing Chart.yaml", str(chart_yaml_file), "chart/Chart.yaml is missing."))
@@ -1439,11 +1462,11 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             ))
         return findings
 
-    # Verify dependency on tpl-library
-    if "tpl-library" not in chart_content:
+    lib = chart_library()
+    if lib.name and lib.name not in chart_content:
         findings.append(Finding(
             "P0", "Helm Template Library", str(chart_yaml_file),
-            "Chart.yaml must declare a dependency on the enterprise 'tpl-library' library."
+            f"Chart.yaml must declare a dependency on the enterprise '{lib.name}' library."
         ))
 
     # Verify Chart.yaml has a meaningful description
@@ -1466,30 +1489,35 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                 f"what the workload does and confirm it with the user."
             ))
 
-    # Verify manifest.yaml includes tpl.deployment
+    # Verify the manifest includes the library's workload umbrella
+    umbrella = lib.rule("manifest", "include", default="")
     if not manifest_file.exists():
-        findings.append(Finding("P1", "Missing Manifest Template", str(manifest_file), "chart/templates/manifest.yaml is missing."))
-    else:
+        findings.append(Finding("P1", "Missing Manifest Template", str(manifest_file), f"chart/{manifest_rel} is missing."))
+    elif umbrella:
         manifest_content = manifest_file.read_text(encoding="utf-8")
-        if 'include "tpl.deployment"' not in manifest_content:
+        if f'include "{umbrella}"' not in manifest_content:
             findings.append(Finding(
                 "P1", "Manifest Non-Standard", str(manifest_file),
-                "manifest.yaml should include 'tpl.deployment' from tpl-library."
+                f"{Path(manifest_rel).name} should include '{umbrella}' from {lib.name or 'tpl-library'}."
             ))
 
-    # Verify README.gotmpl exists and contains overview/purpose
-    readme_gotmpl = chart_dir / "README.gotmpl"
+    # Verify README.gotmpl exists and carries every heading and template the library requires
+    readme_name = lib.rule("readme", "template", default="README.gotmpl")
+    readme_gotmpl = chart_dir / readme_name
     if not readme_gotmpl.exists():
         findings.append(Finding(
-            "P2", "Missing README.gotmpl", str(readme_gotmpl),
-            "chart/README.gotmpl is missing. Helm charts must include README.gotmpl for helm-docs."
+            "P2", f"Missing {readme_name}", str(readme_gotmpl),
+            f"chart/{readme_name} is missing. Helm charts must include {readme_name} for helm-docs."
         ))
     else:
         gotmpl_content = readme_gotmpl.read_text(encoding="utf-8")
-        if "Overview & Purpose" not in gotmpl_content and 'template "chart.description"' not in gotmpl_content:
+        wanted = [(h, f"## {h}") for h in lib.rule("readme", "headings", default=[])] + \
+                 [(f'template "{t}"', f'{{{{ template "{t}" . }}}}') for t in lib.rule("readme", "templates", default=[])]
+        absent = [shown for needle, shown in wanted if needle not in gotmpl_content]
+        if absent:
             findings.append(Finding(
-                "P2", "README.gotmpl Non-Standard", str(readme_gotmpl),
-                "chart/README.gotmpl should include '## Overview & Purpose' and '{{ template \"chart.description\" . }}'."
+                "P2", f"{readme_name} Non-Standard", str(readme_gotmpl),
+                f"chart/{readme_name} should include {' and '.join(repr(a) for a in absent)}."
             ))
 
     # Check values.yaml structure
@@ -1523,20 +1551,14 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                 "and its sibling charts, confirm it with the user, and set releaseNameLength to "
                 "its length."
             ))
-        elif part_of_match:
+        elif rel_len_match:
             part_of_val = part_of_match.group(1).strip()
-            if not part_of_val or part_of_val in ["myorg", "myproduct", "[PRODUCT_NAME]"]:
+            rel_len = int(rel_len_match.group(1))
+            if rel_len != len(part_of_val):
                 findings.append(Finding(
-                    "P1", "Product Name Standard", f"{values_yaml_file.name}:global.partOf",
-                    f"global.partOf '{part_of_val}' is invalid. Must be set to confirmed product name in lowercase (e.g. 'myapp')."
+                    "P1", "Release Name Length Mismatch", f"{values_yaml_file.name}:global.releaseNameLength",
+                    f"global.releaseNameLength ({rel_len}) does not match character length of global.partOf '{part_of_val}' ({len(part_of_val)})."
                 ))
-            elif rel_len_match:
-                rel_len = int(rel_len_match.group(1))
-                if rel_len != len(part_of_val):
-                    findings.append(Finding(
-                        "P1", "Release Name Length Mismatch", f"{values_yaml_file.name}:global.releaseNameLength",
-                        f"global.releaseNameLength ({rel_len}) does not match character length of global.partOf '{part_of_val}' ({len(part_of_val)})."
-                    ))
 
         comp_match = re.search(r"^component:\s*[\"']?([^\"'\n#]*)[\"']?", val_content, re.MULTILINE)
         comp_val = comp_match.group(1).strip() if comp_match else ""
@@ -1547,28 +1569,18 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                 "confirm it with the user, and use what they say."
             ))
 
-        # Chart name: '<partOf>-<component>' or '<partOf>-<component>-<subComponent>'. A
+        # Chart name: one of the library's patterns, e.g. '<partOf>-<component>'. A
         # suggestion, not a rule -- the user may name the chart differently.
         if name_match and part_of_match and comp_val:
-            part_of_val = part_of_match.group(1).strip()
-            if part_of_val and part_of_val not in ["myorg", "myproduct", "[PRODUCT_NAME]"]:
-                accepted = {f"{part_of_val}-{comp_val}"}
-                if sub_val:
-                    accepted.add(f"{part_of_val}-{comp_val}-{sub_val}")
-                if c_name not in accepted:
-                    findings.append(Finding(
-                        "P2", "Chart Name Suggestion", str(chart_yaml_file),
-                        f"Chart name '{c_name}' is neither {' nor '.join(sorted(accepted))}. Suggest one "
-                        f"of those and keep whatever the user confirms."
-                    ))
-
-        # Check image repository formatting
-        if "myorg/" in val_content or "[PRODUCT_NAME]" in val_content:
-            findings.append(Finding(
-                "P1", "Generic Image Repository", str(values_yaml_file),
-                "Image repository contains generic placeholder ('myorg/' or '[PRODUCT_NAME]'). "
-                "Set the repository CI pushes to (ask the user if unknown)."
-            ))
+            parts = {"partOf": part_of_match.group(1).strip(), "component": comp_val, "subComponent": sub_val}
+            accepted = {pattern.format(**parts) for pattern in lib.rule("chartNames", default=[])
+                        if sub_val or "{subComponent}" not in pattern}
+            if parts["partOf"] and accepted and c_name not in accepted:
+                findings.append(Finding(
+                    "P2", "Chart Name Suggestion", str(chart_yaml_file),
+                    f"Chart name '{c_name}' is neither {' nor '.join(sorted(accepted))}. Suggest one "
+                    f"of those and keep whatever the user confirms."
+                ))
 
         # A sibling-service URL stays overridable per environment: the templated default
         # sits behind `.Values.<service>.internalUrl`. Only URL-like keys are judged; a
@@ -1609,21 +1621,16 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
                 "Parent key 'containers:' should not have '# --' comments; only leaf properties or toYaml blocks receive comments."
             ))
 
-        # Check securityContext @default tag
-        if "securityContext:" in val_content and "# -- Security context" in val_content:
-            if "@default -- Check values.yaml" not in val_content:
-                findings.append(Finding(
-                    "P2", "Values Comment Law Violation", str(values_yaml_file),
-                    "securityContext should include '# @default -- Check values.yaml' to avoid distorted markdown table rendering in helm-docs."
-                ))
-
-        # Check configmapEnvs / secretEnvs @default tag
-        if "configmapEnvs:" in val_content and "# -- ConfigMap-based" in val_content:
-            if "@default -- Check values.yaml" not in val_content:
-                findings.append(Finding(
-                    "P2", "Values Comment Law Violation", str(values_yaml_file),
-                    "configmapEnvs and secretEnvs should include '# @default -- Check values.yaml' to prevent bloated markdown tables in helm-docs."
-                ))
+        # A block the library renders whole and marks `# @default -- Check values.yaml` keeps
+        # the marker in the replica, or helm-docs spreads it into a distorted table.
+        lost = sorted(_unmarked_opaque_blocks(val_content, lib))
+        if lost:
+            findings.append(Finding(
+                "P2", "Values Comment Law Violation", str(values_yaml_file),
+                f"{', '.join(lost[:4])} {'lacks' if len(lost) == 1 else 'lack'} the "
+                "'# @default -- Check values.yaml' marker the library gives "
+                f"{'it' if len(lost) == 1 else 'them'}, so helm-docs renders the block as a distorted table."
+            ))
 
     # Check values.schema.json modularity and synchronization with values.yaml
     schema_file = chart_dir / "values.schema.json"
@@ -1634,16 +1641,18 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
         except Exception:
             pass
 
-    # Enforce hard UID/GID 10001:10001 restriction in Helm values
-    if values_data:
+    # The workload runs as the library's non-root identity (its pod.securityContext).
+    lib_pod = (lib.values.get("pod") or {}).get("securityContext") or {}
+    want_u, want_g = lib_pod.get("runAsUser"), lib_pod.get("runAsGroup")
+    if values_data and want_u is not None and want_g is not None:
         main_sec = values_data.get("containers", {}).get("main", {}).get("securityContext", {})
         pod_sec = values_data.get("pod", {}).get("securityContext", {})
         u = main_sec.get("runAsUser") if "runAsUser" in main_sec else pod_sec.get("runAsUser")
         g = main_sec.get("runAsGroup") if "runAsGroup" in main_sec else pod_sec.get("runAsGroup")
-        if u != 10001 or g != 10001:
+        if u != want_u or g != want_g:
             findings.append(Finding(
-                "P1", "Hard SecurityContext Law Violation (10001:10001)", str(values_yaml_file),
-                f"Helm chart values.yaml must enforce 'runAsUser: 10001' and 'runAsGroup: 10001' (found runAsUser={u}, runAsGroup={g})."
+                "P1", f"Hard SecurityContext Law Violation ({want_u}:{want_g})", str(values_yaml_file),
+                f"Helm chart values.yaml must enforce 'runAsUser: {want_u}' and 'runAsGroup: {want_g}' (found runAsUser={u}, runAsGroup={g})."
             ))
 
     if not schema_file.exists():
@@ -1657,7 +1666,7 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
             if not schema_json.get("$defs") and not schema_json.get("definitions"):
                 findings.append(Finding(
                     "P2", "Monolithic Schema Warning", str(schema_file),
-                    "values.schema.json should be split and modularized using '$defs' for database, storage, and container definitions."
+                    "values.schema.json should be split and modularized using '$defs', as the library's own schema is."
                 ))
             # Verify all top-level keys in values.yaml exist in values.schema.json properties
             if values_data:
@@ -1677,7 +1686,7 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
     if not readme_file.exists():
         findings.append(Finding(
             "P1", "Missing chart/README.md", str(readme_file),
-            f"chart/README.md is missing. Generate it inside chart/: `{HELM_DOCS_COMMAND}` "
+            f"chart/README.md is missing. Generate it inside chart/: `{helm_docs_command()}` "
             "(core/scripts/chart-docs.sh runs exactly that)."
         ))
     else:
@@ -1686,10 +1695,44 @@ def check_helm_chart(chart_dir: Path) -> List[Finding]:
     return findings
 
 
-#: The one helm-docs invocation, run inside the chart directory. Plain `helm-docs` renders a
-#: different README (other ordering, no dependency values), which is how hand edits start.
-HELM_DOCS_COMMAND = ("helm-docs --template-files README.gotmpl --sort-values-order file "
-                     "--document-dependency-values")
+def _unmarked_opaque_blocks(values_text: str, lib: ChartLibrary) -> Set[str]:
+    """Blocks the library marks `# @default -- Check values.yaml` that the chart left unmarked.
+
+    An entry of a free map (`containers.main`) stands for every entry the chart declares.
+    """
+    own_keys, own_marked = _dotted_keys(values_text), _opaque_block_keys(values_text)
+    examples = {f"{k}.{v}": k for k, v in lib.rule("values", "exampleMaps", default={}).items()}
+    lost: Set[str] = set()
+    for key in _opaque_block_keys(lib.values_text):
+        prefix = next((p for p in examples if key.startswith(p + ".")), None)
+        if prefix:
+            parent = examples[prefix]
+            names = {k.split(".")[1] for k in own_keys if k.startswith(parent + ".") and k.count(".") >= 1}
+            candidates = {key.replace(prefix + ".", f"{parent}.{n}.", 1) for n in names}
+        else:
+            candidates = {key}
+        lost |= {c for c in candidates if c in own_keys and c not in own_marked}
+    return lost
+
+
+def _dotted_keys(values_text: str) -> Set[str]:
+    """Every mapping key of a values file, as a dotted path."""
+    out: Set[str] = set()
+    stack: List[Tuple[int, str]] = []
+    for raw in values_text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("#", "-")):
+            continue
+        match = re.match(r"^(\s*)([A-Za-z0-9_.\-]+):", raw)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        dotted = f"{stack[-1][1]}.{match.group(2)}" if stack else match.group(2)
+        stack.append((indent, dotted))
+        out.add(dotted)
+    return out
 
 
 def _check_readme_drift(chart_dir: Path, readme_file: Path) -> List[Finding]:
@@ -1703,8 +1746,7 @@ def _check_readme_drift(chart_dir: Path, readme_file: Path) -> List[Finding]:
         return []
     try:
         out = subprocess.run(
-            ["helm-docs", "--chart-search-root", ".", "--template-files", "README.gotmpl",
-             "--sort-values-order", "file", "--document-dependency-values", "--dry-run"],
+            ["helm-docs", "--chart-search-root", ".", *helm_docs_args(), "--dry-run"],
             cwd=str(chart_dir), capture_output=True, text=True, timeout=60)
     except Exception:
         return []
@@ -1717,7 +1759,7 @@ def _check_readme_drift(chart_dir: Path, readme_file: Path) -> List[Finding]:
     return [Finding(
         "P2", "Outdated chart/README.md (helm-docs drift)", str(readme_file),
         f"chart/README.md differs from what helm-docs generates now. Regenerate it inside chart/ "
-        f"with `{HELM_DOCS_COMMAND}` (core/scripts/chart-docs.sh); never edit README.md by hand."
+        f"with `{helm_docs_command()}` (core/scripts/chart-docs.sh); never edit README.md by hand."
     )]
 
 
@@ -1822,9 +1864,8 @@ def _merge_values(base: Any, over: Any) -> Any:
 
 
 def _overlay_files(chart_dir: Path) -> List[Path]:
-    """Per-release overlays: values.<release>.yaml (and the values-<release>.yaml variant)."""
-    found = set(chart_dir.glob("values.*.yaml")) | set(chart_dir.glob("values-*.yaml"))
-    return sorted(p for p in found if p.name != "values.yaml")
+    """Per-release overlays: values.<release>.yaml, the library's naming for several releases."""
+    return sorted(p for p in chart_dir.glob("values.*.yaml") if p.name != "values.yaml")
 
 
 def _variants(chart_dir: Path) -> List[Tuple[str, Dict[str, Any], Dict[str, Any]]]:
@@ -1918,23 +1959,24 @@ def check_chart_runtime(chart_dir: Path) -> List[Finding]:
         if "securityContext" in pod and not pod.get("securityContext"):
             add("P1", "Empty Pod securityContext", f"{name}:pod.securityContext",
                 "pod.securityContext is empty, which chart scanning rejects (e.g. KSV-0118). Keep "
-                "the library's non-root defaults (runAsUser/runAsGroup/fsGroup 10001, runAsNonRoot, "
-                "seccompProfile RuntimeDefault).")
+                "the library's non-root defaults, its values.yaml `pod.securityContext`.")
 
         mounts = own.get("mounts") if isinstance(own.get("mounts"), dict) else {}
-        for mname, m in (mounts.get("emptyDir") or {}).items():
-            if isinstance(m, dict) and m.get("enabled") is not True:
-                add("P1", "emptyDir Not Enabled", f"{name}:mounts.emptyDir.{mname}",
-                    "tpl-library mounts an emptyDir only when `enabled: true` is set; without it the "
-                    "path silently stays unwritable.")
+        for kind in chart_library().rule("values", "mountsNeedEnabled", default=[]):
+            entries = mounts.get(kind)
+            for mname, m in (entries.items() if isinstance(entries, dict) else []):
+                if isinstance(m, dict) and m.get("enabled") is not True:
+                    add("P1", f"{kind} Not Enabled", f"{name}:mounts.{kind}.{mname}",
+                        f"tpl-library mounts a `mounts.{kind}` entry only when `enabled: true` is set; "
+                        "without it nothing is mounted and nothing reports it.")
         persistence = vals.get("persistence") if isinstance(vals.get("persistence"), dict) else {}
         for mname, m in (mounts.get("pvc") or {}).items():
             claim = m.get("claimName") if isinstance(m, dict) else None
             if isinstance(claim, str) and claim and "{{" not in claim and mname in persistence:
                 add("P2", "Hard-coded PVC Claim", f"{name}:mounts.pvc.{mname}.claimName",
                     f"claimName '{claim}' is a literal, but tpl.pvc names the claim it creates from "
-                    "the release and component. Derive it with tpl.resource.siblingName (or leave "
-                    "it empty) so every release mounts the claim that actually exists.")
+                    "the release and component, and an empty claimName already defaults to that "
+                    "name. Leave it empty so every release mounts the claim that actually exists.")
     return findings
 
 
@@ -2073,7 +2115,7 @@ def check_schema_contract(chart_dir: Path) -> List[Finding]:
                 f"{node['minLength']}, so `helm lint --strict` fails on the chart's own defaults. "
                 "Drop the minLength (the library fills an empty value) or give it a real default."))
 
-    for key in ("mode", "subComponent"):
+    for key in chart_library().rule("values", "schemaEnums", default=[]):
         node = _schema_node(schema, [key])
         enum = node.get("enum") if node else None
         if not isinstance(enum, list):
@@ -2130,21 +2172,13 @@ def check_modes(chart_dir: Path) -> List[Finding]:
     return findings
 
 
-_OPTIONAL_BLOCKS = (
-    ("jobs", ("tpl.job",)),
-    ("cronjobs", ("tpl.cronjob",)),
-    ("persistence", ("tpl.pvc",)),
-    ("metrics", ("tpl.servicemonitor", "tpl.podmonitor")),
-    ("global.metrics", ("tpl.servicemonitor", "tpl.podmonitor")),
-)
-
-
 def check_optional_blocks(chart_dir: Path) -> List[Finding]:
-    """jobs, cronjobs, persistence and metrics exist only where the service uses them.
+    """An optional block exists only where the service uses it.
 
-    Each is paired with its tpl entrypoint. A block with no entrypoint renders nothing and
-    documents a feature the chart does not have; drop it from values.yaml and the schema.
-    (global.tracing is judged by whether the application reads it, which no file shows.)
+    The library's chart contract pairs each block with its entrypoints. A block with no
+    entrypoint renders nothing and documents a feature the chart does not have; drop it from
+    values.yaml and the schema. A block no template reads (global.tracing) is judged by whether
+    the application reads it, which no file shows.
     """
     findings: List[Finding] = []
     values = _load_yaml(chart_dir / "values.yaml")
@@ -2156,8 +2190,8 @@ def check_optional_blocks(chart_dir: Path) -> List[Finding]:
         schema = json.loads((chart_dir / "values.schema.json").read_text(encoding="utf-8"))
     except Exception:
         schema = {}
-    for block, helpers in _OPTIONAL_BLOCKS:
-        if any(h in includes for h in helpers):
+    for block, helpers in chart_library().rule("values", "optionalBlocks", default={}).items():
+        if not helpers or any(h in includes for h in helpers):
             continue
         parts = block.split(".")
         cur: Any = values
@@ -2176,7 +2210,7 @@ def check_optional_blocks(chart_dir: Path) -> List[Finding]:
 
 
 def check_values_leaf_docs(chart_dir: Path) -> List[Finding]:
-    """Under jobs/cronjobs/persistence every leaf carries its own `# --` line.
+    """Under the blocks the library names (jobs, cronjobs, persistence) every leaf carries its own `# --` line.
 
     helm-docs gives each documented leaf a README row. A `# --` on a parent map instead
     collapses the whole object into one JSON-blob row -- unless that parent is marked
@@ -2185,6 +2219,7 @@ def check_values_leaf_docs(chart_dir: Path) -> List[Finding]:
     vf = chart_dir / "values.yaml"
     if not vf.exists():
         return []
+    blocks = tuple(chart_library().rule("values", "documentedLeaves", default=[]))
     lines = vf.read_text(encoding="utf-8").splitlines()
     key_re = re.compile(r"^(\s*)([A-Za-z0-9_.\-]+):(.*)$")
     entries = []  # (line_idx, indent, key, has_inline_value, comment_block)
@@ -2237,7 +2272,7 @@ def check_values_leaf_docs(chart_dir: Path) -> List[Finding]:
             first_child = next((lines[j].strip() for j in range(idx + 1, len(lines)) if lines[j].strip() and not lines[j].strip().startswith("#")), "")
             if first_child.startswith("- "):
                 is_parent = False
-        if top in ("jobs", "cronjobs", "persistence") and "." in dotted and not opaque_parent:
+        if top in blocks and "." in dotted and not opaque_parent:
             if is_parent and has_doc and not opaque:
                 parent_documented.append(dotted)
             elif not is_parent and not has_doc:
@@ -2248,7 +2283,7 @@ def check_values_leaf_docs(chart_dir: Path) -> List[Finding]:
     if undocumented:
         findings.append(Finding(
             "P2", "Undocumented Values Leaf", f"{vf.name}",
-            f"{len(undocumented)} leaf key(s) under jobs/cronjobs/persistence have no `# --` line, "
+            f"{len(undocumented)} leaf key(s) under {'/'.join(blocks)} have no `# --` line, "
             f"so helm-docs gives them no README row: {', '.join(undocumented[:8])}"
             f"{' (+more)' if len(undocumented) > 8 else ''}. Add `# --` and `# @section --` above each."))
     if parent_documented:
@@ -2309,14 +2344,22 @@ def check_comment_style(root: Path, chart_dir: Optional[Path]) -> List[Finding]:
     return findings
 
 
+def _lookup(node: Any, dotted: str) -> Any:
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
 def check_image_path_alignment(repo: Path, chart_dir: Path, ci_vars: Dict[str, Any]) -> List[Finding]:
     """The image the chart renders must be the image CI pushes (GitLab).
 
     gitlab-ci-library's Common:Init pushes to CI_PROJECT_PATH unless IMAGE_REPOSITORY is set.
     A chart that leaves `repository` empty gets `<partOf>/<component>[/<subComponent>]` from
     the library instead, and silently deploys an image that was never pushed. The library's
-    placeholder registry and pull secret (`cr.io`, `cr-cred`) are never right for a real
-    project -- ask the user for the registry, pull secret and repository path.
+    placeholders (its chart contract names the keys, its values.yaml the values) are never
+    right for a real project -- ask the user for the registry, pull secret and repository path.
     """
     findings: List[Finding] = []
     values = _load_yaml(chart_dir / "values.yaml")
@@ -2325,16 +2368,20 @@ def check_image_path_alignment(repo: Path, chart_dir: Path, ci_vars: Dict[str, A
     glob_ = values.get("global") if isinstance(values.get("global"), dict) else {}
     image_g = glob_.get("image") if isinstance(glob_.get("image"), dict) else {}
     registry = image_g.get("registry")
-    if registry == "cr.io":
-        findings.append(Finding(
-            "P1", "Library Placeholder Registry", "values.yaml:global.image.registry",
-            "global.image.registry is still the library placeholder 'cr.io'. Set the registry CI "
-            "pushes to (ask the user)."))
-    if image_g.get("pullSecrets") == ["cr-cred"]:
-        findings.append(Finding(
-            "P2", "Library Placeholder Pull Secret", "values.yaml:global.image.pullSecrets",
-            "global.image.pullSecrets is still the library placeholder 'cr-cred'. Set the pull "
-            "secret that exists in the target namespaces (ask the user)."))
+    lib = chart_library()
+    for key in lib.rule("values", "placeholders", default=[]):
+        placeholder, value = _lookup(lib.values, key), _lookup(values, key)
+        if placeholder in (None, "", [], {}) or value != placeholder:
+            continue
+        if key.endswith("registry"):
+            sev, cat, ask = "P1", "Library Placeholder Registry", "Set the registry CI pushes to (ask the user)."
+        elif key.endswith("pullSecrets"):
+            sev, cat, ask = ("P2", "Library Placeholder Pull Secret",
+                             "Set the pull secret that exists in the target namespaces (ask the user).")
+        else:
+            sev, cat, ask = "P2", "Library Placeholder Value", "Set the value for this project (ask the user)."
+        findings.append(Finding(sev, cat, f"values.yaml:{key}",
+                                f"{key} is still the library placeholder {placeholder!r}. {ask}"))
 
     _host, project_path = origin_project(repo)
     ci_repo = str(ci_vars.get("IMAGE_REPOSITORY") or "") or project_path

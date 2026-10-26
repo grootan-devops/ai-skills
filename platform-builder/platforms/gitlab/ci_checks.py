@@ -36,36 +36,40 @@ if HAVE_YAML:
 
     _GitLabLoader.add_constructor("!reference", _reference)
 
+import pins
 from checks_common import (Finding, iter_jobs, CI_RESERVED_KEYS,
                            MULTILINE_SHELL_MARKERS, classify_unproxied_public_image)
 
 NAME = "gitlab"
 CI_FILES = [".gitlab-ci.yml"]
-_MAP = Path(__file__).resolve().parent / "workflow-map.json"
+#: The library whose `docs/workflow-map.json` says which WORKFLOW options each module
+#: provides, at the release the repository pins. libraries.py refuses a release without it.
+LIBRARY = "gitlab-ci-library"
+MAP_FILE = "docs/workflow-map.json"
 
 
-def _map() -> Dict[str, Any]:
-    with open(_MAP, encoding="utf-8") as fh:
+def load_map(library_root: Path) -> Dict[str, Any]:
+    with open(Path(library_root) / MAP_FILE, encoding="utf-8") as fh:
         return json.load(fh)
 
 
-def module_workflows() -> Dict[str, List[str]]:
-    return {n: list(s.get("provides", [])) for n, s in _map()["modules"].items() if s.get("provides")}
+def module_workflows(wmap: Dict[str, Any]) -> Dict[str, List[str]]:
+    return {n: list(s.get("provides", [])) for n, s in wmap["modules"].items() if s.get("provides")}
 
 
-def workflow_provider() -> Dict[str, str]:
-    shared = set(_map().get("shared_options", {}))
+def workflow_provider(wmap: Dict[str, Any]) -> Dict[str, str]:
+    shared = set(wmap.get("shared_options", []))
     out: Dict[str, str] = {}
-    for name, spec in _map()["modules"].items():
+    for name, spec in wmap["modules"].items():
         for opt in spec.get("provides", []):
             if opt not in shared:
                 out.setdefault(opt, name)
     return out
 
 
-def option_signature_job() -> Dict[str, str]:
+def option_signature_job(wmap: Dict[str, Any]) -> Dict[str, str]:
     sig: Dict[str, str] = {}
-    for spec in _map()["modules"].values():
+    for spec in wmap["modules"].values():
         sig.update(spec.get("signature_jobs", {}))
     return sig
 
@@ -91,7 +95,7 @@ def _declares_build_script(repo: Path) -> bool:
     return False
 
 
-def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
+def check_gitlab_ci(ci_file: Path, wmap: Dict[str, Any]) -> Tuple[List[Finding], Dict[str, Any]]:
     findings: List[Finding] = []
     if not ci_file.exists():
         findings.append(Finding("P0", "Missing CI File", str(ci_file), ".gitlab-ci.yml does not exist."))
@@ -178,7 +182,7 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
     # Module without option => dead weight the user can never dispatch.
     if workflow_options:
         for opt in workflow_options:
-            provider = workflow_provider().get(opt)
+            provider = workflow_provider(wmap).get(opt)
             if provider and not any(provider in f for f in included_files):
                 findings.append(Finding(
                     "P1", "Workflow Mismatch", f"{ci_file.name}:variables.WORKFLOW",
@@ -195,9 +199,9 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
             and all(isinstance(r, dict) and r.get("when") == "never" for r in body["rules"])
             and body["rules"]
         }
-        signature_jobs = option_signature_job()
+        signature_jobs = option_signature_job(wmap)
 
-        for module, provided in module_workflows().items():
+        for module, provided in module_workflows(wmap).items():
             if not any(module in f for f in included_files):
                 continue
             missing = [
@@ -550,37 +554,9 @@ def check_gitlab_ci(ci_file: Path) -> Tuple[List[Finding], Dict[str, Any]]:
     return findings, data
 
 
-#: Raw-file URLs that carry a repository name and ref: GitHub raw, GitHub /raw/, GitLab /-/raw/.
-_REMOTE_REF = (
-    re.compile(r"^https?://raw\.githubusercontent\.com/[^/]+/(?P<repo>[^/]+)/(?P<ref>[^/]+)/"),
-    re.compile(r"^https?://[^/]+/(?:[^/]+/)*(?P<repo>[^/]+)/-/raw/(?P<ref>[^/]+)/"),
-    re.compile(r"^https?://[^/]+/(?:[^/]+/)*(?P<repo>[^/-][^/]*)/raw/(?P<ref>[^/]+)/"),
-)
-
-
 def library_refs(data: Dict[str, Any]) -> Dict[str, str]:
-    """{library repo name: ref} for every library include the pipeline pulls in.
-
-    The ref on an include is the consumer's pinned library version -- on `include:
-    project:` it is `ref:`, on `include: remote:` it is a path segment of the raw URL.
-    Without it nothing can tell which migrations the repo still owes.
-    """
-    found: Dict[str, str] = {}
-    inc = data.get("include") if isinstance(data, dict) else None
-    for entry in (inc if isinstance(inc, list) else [inc] if inc else []):
-        if not isinstance(entry, dict):
-            continue
-        project, ref = entry.get("project"), entry.get("ref")
-        if isinstance(project, str) and isinstance(ref, str) and ref:
-            found.setdefault(project.rstrip("/").split("/")[-1], ref)
-        remote = entry.get("remote")
-        if isinstance(remote, str):
-            for rx in _REMOTE_REF:
-                m = rx.match(remote)
-                if m:
-                    found.setdefault(m.group("repo"), m.group("ref"))
-                    break
-    return found
+    """{library repo name: ref} for every library include the pipeline pulls in (the first ref)."""
+    return {name: refs[0] for name, refs in pins.gitlab_refs(data).items()}
 
 
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
@@ -775,14 +751,20 @@ def check_dependency_artifacts(data: Dict[str, Any], ci_file: Path) -> List[Find
     return findings
 
 
-def ci_checks(repo: Path, shape: Optional[str] = None) -> Tuple[List[Finding], Dict[str, Any]]:
+def ci_checks(repo: Path, shape: Optional[str] = None, library_root: Optional[Path] = None,
+              library_ref: str = "", notes: Optional[List[str]] = None) -> Tuple[List[Finding], Dict[str, Any]]:
     """Adapter entry point. Returns (findings, parsed CI data for the harness).
 
-    `shape` is accepted and unused: GitLab expresses project shape through the WORKFLOW
-    option list, which check_gitlab_ci already validates against the include: list.
-    Keeping the signature uniform lets the harness call every adapter identically.
+    `library_root` is the resolved gitlab-ci-library checkout: its workflow map decides the
+    WORKFLOW/include checks and its templates the `extends:` targets. `shape` is accepted and
+    unused: GitLab expresses project shape through the WORKFLOW option list, which
+    check_gitlab_ci validates against the include: list.
     """
+    if library_root is None:
+        raise ValueError(f"{LIBRARY} must be resolved before its checks run")
     ci_file = repo / ".gitlab-ci.yml"
-    findings, data = check_gitlab_ci(ci_file)
+    findings, data = check_gitlab_ci(ci_file, load_map(library_root))
     findings.extend(check_dependency_artifacts(data, ci_file))
+    if data:
+        findings.extend(check_extends_targets(data, ci_file, Path(library_root), library_ref))
     return findings, data

@@ -7,6 +7,9 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parents[1]
 _PLATFORMS = Path(__file__).resolve().parents[3] / "platforms"
 sys.path.insert(0, str(_SCRIPTS))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import library_fixtures  # noqa: E402
 
 
 def _load(name: str, path: Path):
@@ -60,31 +63,42 @@ class TerraformShapeTests(unittest.TestCase):
     def test_terraform_only_in_a_subdirectory_is_unrecognised(self):
         self.assertIsNone(self.shape("modules/vpc/main.tf"))
 
-    def gitlab_findings(self, options):
+    def gitlab_findings(self, options, wmap=None):
         ci = _GITLAB_TERRAFORM.replace("{options}", "\n".join(f'      - "{o}"' for o in options))
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / ".gitlab-ci.yml"
             p.write_text(ci, encoding="utf-8")
-            findings, _ = gitlab_ci_checks.check_gitlab_ci(p)
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, wmap or library_fixtures.gitlab_map())
         return [f for f in findings if f.category in ("Unreachable Module", "Workflow Mismatch")]
 
-    def test_gitlab_terraform_options_match_the_library(self):
-        # The library documents full-pipeline, check and lint for Terraform; no Terraform
-        # job runs in `build`, so declaring it would be a dead Run-pipeline button.
+    def test_gitlab_terraform_options_follow_the_library_map(self):
+        # The fixture map gives the terraform module lint and check; declaring exactly the
+        # included modules' options leaves nothing unreachable.
         self.assertEqual(self.gitlab_findings(["full-pipeline", "check", "lint", "secret-scanning"]), [])
+
+    def test_gitlab_options_change_with_the_library_map(self):
+        # A release whose map says terraform also provides `build` makes `build` reachable
+        # only when declared: the skill follows the map, not a copy of its own.
+        wmap = library_fixtures.gitlab_map()
+        wmap["modules"]["terraform/.gitlab-ci.yml"]["provides"] = ["build", "lint", "check"]
+        findings = self.gitlab_findings(["full-pipeline", "check", "lint", "secret-scanning"], wmap)
+        self.assertTrue(any("terraform/.gitlab-ci.yml" in f.message and "build" in f.message for f in findings))
 
     def test_gitlab_terraform_without_lint_is_unreachable(self):
         findings = self.gitlab_findings(["full-pipeline", "check", "secret-scanning"])
         self.assertTrue(any("terraform/.gitlab-ci.yml" in f.message and "lint" in f.message for f in findings))
 
-    def test_github_terraform_example_matches_the_shape(self):
-        # The library's Terraform example: the shape's scenarios, plus terraform-test.yml and
-        # config-scan.yml, which are not shape-checked.
+    def test_github_terraform_shape_follows_the_library_map(self):
+        # The map's terraform scenarios, plus terraform-test.yml and config-scan.yml, which
+        # the map does not list and so are not shape-checked.
         present = ["pr.yml", "release.yml", "check.yml", "lint.yml", "secret-scan.yml",
                    "sonarqube.yml", "terraform-test.yml", "config-scan.yml"]
         with tempfile.TemporaryDirectory() as td:
-            findings = github_ci_checks.check_shape(Path(td), present, "terraform")
+            findings = github_ci_checks.check_shape(Path(td), present, "terraform", library_fixtures.github_map())
         self.assertEqual([f.message for f in findings], [])
+        with tempfile.TemporaryDirectory() as td:
+            findings = github_ci_checks.check_shape(Path(td), present[:-3], "terraform", library_fixtures.github_map())
+        self.assertEqual([f.category for f in findings], ["Missing workflow"])
 
 
 if __name__ == "__main__":

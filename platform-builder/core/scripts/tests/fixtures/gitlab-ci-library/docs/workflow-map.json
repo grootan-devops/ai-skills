@@ -1,0 +1,93 @@
+{
+  "$comment": "Test fixture shaped like the library's data file; the skill reads the real one from the library at the release a project pins.",
+  "schema": 1,
+  "shared_options": [
+    "build",
+    "deploy"
+  ],
+  "modules": {
+    "common/.gitlab-ci.yml": {
+      "provides": [
+        "full-pipeline",
+        "check",
+        "lint"
+      ]
+    },
+    "chart/.gitlab-ci.yml": {
+      "provides": [
+        "chart-build-and-push",
+        "chart-scan"
+      ],
+      "signature_jobs": {
+        "chart-scan": "Chart:Scan"
+      }
+    },
+    "image/.gitlab-ci.yml": {
+      "provides": [
+        "image-build-and-push",
+        "image-scan"
+      ],
+      "signature_jobs": {
+        "image-scan": "Image:Scan"
+      }
+    },
+    "nodejs/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "python/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "golang/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "java/.gitlab-ci.yml": {
+      "provides": [
+        "build"
+      ]
+    },
+    "sonarqube/.gitlab-ci.yml": {
+      "provides": [
+        "sonarqube"
+      ],
+      "signature_jobs": {
+        "sonarqube": "Sonarqube"
+      }
+    },
+    "secret-scanning/.gitlab-ci.yml": {
+      "provides": [
+        "secret-scanning"
+      ],
+      "signature_jobs": {
+        "secret-scanning": "Git:Secret:Scan"
+      }
+    },
+    "license/.gitlab-ci.yml": {
+      "provides": [
+        "license-scanning"
+      ],
+      "signature_jobs": {
+        "license-scanning": "License:Scan"
+      }
+    },
+    "sbom/.gitlab-ci.yml": {
+      "provides": [
+        "sbom-scanning"
+      ],
+      "signature_jobs": {
+        "sbom-scanning": "SBOM:Scan"
+      }
+    },
+    "terraform/.gitlab-ci.yml": {
+      "provides": [
+        "lint",
+        "check"
+      ]
+    }
+  }
+}

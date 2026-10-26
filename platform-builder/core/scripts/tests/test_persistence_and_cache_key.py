@@ -11,6 +11,9 @@ sys.path.insert(0, str(_PLATFORM_DIR))
 
 import checks_common  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library_fixtures  # noqa: E402
+
 spec = importlib.util.spec_from_file_location("gitlab_ci_checks_test", _PLATFORM_DIR / "ci_checks.py")
 gitlab_ci_checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gitlab_ci_checks)
@@ -35,7 +38,7 @@ stages:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / ".gitlab-ci.yml"
             p.write_text(ci, encoding="utf-8")
-            findings, _ = gitlab_ci_checks.check_gitlab_ci(p)
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
             cache_findings = [f for f in findings if "PROJECT_CACHE_KEY" in f.category or "PROJECT_CACHE_KEY" in f.message]
             self.assertEqual(len(cache_findings), 0)
 
@@ -52,7 +55,7 @@ stages:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / ".gitlab-ci.yml"
             p.write_text(ci, encoding="utf-8")
-            findings, _ = gitlab_ci_checks.check_gitlab_ci(p)
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
             cache_findings = [f for f in findings if "PROJECT_CACHE_KEY" in f.category]
             self.assertEqual(len(cache_findings), 1)
             self.assertEqual(cache_findings[0].category, "Missing PROJECT_CACHE_KEY")
@@ -88,7 +91,7 @@ containers:
       tag: "v1.0.0"
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             self.assertEqual(len(findings), 0)
 
     def test_values_parity_requires_persistence_when_tpl_pvc_present(self):
@@ -120,7 +123,7 @@ containers:
       tag: "v1.0.0"
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             self.assertEqual(len(findings), 1)
             self.assertIn("persistence", findings[0].message)
 
@@ -157,7 +160,7 @@ persistence:
     size: 10Gi
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             pvc_findings = [f for f in findings if f.category == "Missing tpl.pvc in manifest.yaml"]
             self.assertEqual(len(pvc_findings), 1)
 
@@ -194,7 +197,7 @@ containers:
       tag: "v1.0.0"
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             self.assertEqual(len(findings), 0)
 
     def test_active_cronjobs_without_tpl_cronjob_flags_p1(self):
@@ -229,7 +232,7 @@ cronjobs:
     schedule: "0 2 * * *"
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             cron_findings = [f for f in findings if f.category == "Missing tpl.cronjob in manifest.yaml"]
             self.assertEqual(len(cron_findings), 1)
 
@@ -265,7 +268,7 @@ jobs:
     enabled: true
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
             self.assertEqual(len(job_findings), 1)
 
@@ -311,7 +314,7 @@ metrics:
       path: /metrics
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             metrics_findings = [f for f in findings if f.category == "Missing tpl.servicemonitor in manifest.yaml"]
             self.assertEqual(len(metrics_findings), 1)
 
@@ -355,7 +358,7 @@ metrics:
       path: /metrics
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             metrics_findings = [f for f in findings if f.category == "Missing tpl.servicemonitor in manifest.yaml"]
             self.assertEqual(len(metrics_findings), 0)
 
@@ -392,7 +395,7 @@ persistence:
     size: 10Gi
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             pvc_findings = [f for f in findings if f.category == "Missing tpl.pvc in manifest.yaml"]
             self.assertEqual(len(pvc_findings), 0)
 
@@ -429,7 +432,7 @@ jobs:
     containers: {}
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
             self.assertEqual(len(job_findings), 0)
 
@@ -466,7 +469,7 @@ jobs:
     enabled: true
 """, encoding="utf-8")
 
-            findings = checks_common.check_values_parity(chart_dir, lib_values_file)
+            findings = checks_common.check_values_parity(chart_dir, library_fixtures.chart_library(lib_values_file.read_text()))
             job_findings = [f for f in findings if f.category == "Missing tpl.job in manifest.yaml"]
             self.assertEqual(len(job_findings), 1)
 

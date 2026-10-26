@@ -20,12 +20,17 @@ class LibraryDocumentationTests(unittest.TestCase):
         (self.root / "docs").mkdir()
         (self.root / "docs/chart.md").write_text("# Chart\nUncommitted local guidance.\n")
         (self.root / "docs/unrelated.md").write_text("Not relevant to this task.\n")
+        # The data files the libraries' checks read, so any library name resolves here.
+        for data in ("docs/workflow-map.json", "docs/chart-contract.json"):
+            (self.root / data).write_text('{"schema": 1}\n')
+        libraries._REMOTE_TAGS.clear()
 
-    def test_configured_defaults_use_main(self):
+    def test_configured_defaults_use_the_latest_release(self):
+        # No library version is written into the skill: the default is the latest release.
         with patch.dict(os.environ, {}, clear=True):
             for name in ("gitlab-ci-library", "github-ci-library", "helm-tpl-library"):
                 spec, origin = libraries.resolve_spec(name, None, {})
-                self.assertEqual(libraries.parse_source(spec).ref, "main")
+                self.assertEqual(libraries.parse_source(spec).ref, libraries.LATEST)
                 self.assertIn("default", origin)
 
     def test_explicit_ref_overrides_environment_and_default(self):
@@ -43,6 +48,7 @@ class LibraryDocumentationTests(unittest.TestCase):
         self.assertTrue(resolved.ok)
         self.assertEqual(Path(resolved.path), self.root)
         self.assertEqual(set(resolved.docs), {"README.md"})
+        self.assertEqual(set(resolved.data), {"docs/workflow-map.json"})
         selected = Path(resolved.docs["README.md"]).parent / "docs/chart.md"
         self.assertIn("Uncommitted", selected.read_text())
         selected.write_text("# Chart\nAn additional local edit.\n")
@@ -76,7 +82,7 @@ class LibraryDocumentationTests(unittest.TestCase):
                 self.assertEqual(Path(resolved.docs["README.md"]).parent / "docs/chart.md", self.root / "docs/chart.md")
 
     def test_unqualified_url_reports_remote_default_branch_including_slashes(self):
-        def git(args):
+        def git(args, *_, **__):
             output = "origin/release/main\n" if "symbolic-ref" in args else "c" * 40
             return subprocess.CompletedProcess(args, 0, output)
 
@@ -90,7 +96,7 @@ class LibraryDocumentationTests(unittest.TestCase):
     def test_cached_unqualified_source_checks_out_remote_default_not_main(self):
         commands = []
 
-        def git(args):
+        def git(args, *_, **__):
             commands.append(args)
             output = "origin/trunk\n" if "symbolic-ref" in args else ""
             return subprocess.CompletedProcess(args, 0, output)

@@ -13,7 +13,7 @@ echo ">> values.yaml"
 helm lint --strict "${CHART_DIR}" -f "${CHART_DIR}/values.yaml"
 helm template release "${CHART_DIR}" -f "${CHART_DIR}/values.yaml" >/dev/null
 
-for overlay in "${CHART_DIR}"/values.*.yaml "${CHART_DIR}"/values-*.yaml; do
+for overlay in "${CHART_DIR}"/values.*.yaml; do
   [ -e "${overlay}" ] || continue
   echo ">> $(basename "${overlay}")"
   helm lint --strict "${CHART_DIR}" -f "${CHART_DIR}/values.yaml" -f "${overlay}"

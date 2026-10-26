@@ -25,8 +25,9 @@ class DockerfileCacheGuidanceTests(unittest.TestCase):
 
         self.assertEqual(len(packaging), 1)
         self.assertIn(".uv-cache", packaging[0].message)
-        self.assertIn("github-ci-library docker.yml", packaging[0].message)
-        self.assertIn("explicit cache or artifact handoff", packaging[0].message)
+        # Which caches reach the build is the selected library release's to say.
+        self.assertIn("selected github-ci-library release documents", packaging[0].message)
+        self.assertIn("Docker cache caveat", packaging[0].message)
         self.assertNotIn("same PROJECT_CACHE_KEY and cache path", packaging[0].message)
 
     def test_gitlab_python_remedy_uses_shared_gitlab_cache_key(self):
@@ -39,7 +40,7 @@ class DockerfileCacheGuidanceTests(unittest.TestCase):
         self.assertEqual(len(packaging), 1)
         self.assertIn("source=.uv,target=/tmp/.uv", packaging[0].message)
         self.assertIn("same PROJECT_CACHE_KEY and cache path", packaging[0].message)
-        self.assertNotIn("github-ci-library docker.yml", packaging[0].message)
+        self.assertNotIn("github-ci-library release", packaging[0].message)
 
     def test_gitlab_dockerfile_bare_arg_emits_guidance(self):
         findings = self.findings_for(
@@ -48,7 +49,9 @@ class DockerfileCacheGuidanceTests(unittest.TestCase):
         )
         arg_findings = [f for f in findings if f.category == "Missing Default Base Image in ARG"]
         self.assertEqual(len(arg_findings), 1)
-        self.assertIn("grootantech/micro-python-3-12:latest", arg_findings[0].message)
+        # The image itself is named by the CI library's Dockerfile standards, not here.
+        self.assertIn("PYTHON_312_MICRO_BASE_IMAGE=grootantech/<image>:latest", arg_findings[0].message)
+        self.assertIn("Dockerfile standards", arg_findings[0].message)
 
     def test_gitlab_dockerfile_default_enterprise_arg_passes(self):
         findings = self.findings_for(

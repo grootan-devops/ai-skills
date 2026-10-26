@@ -14,6 +14,9 @@ sys.path.insert(0, str(_SCRIPTS))
 
 import checks_common  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library_fixtures  # noqa: E402
+
 spec = importlib.util.spec_from_file_location("gitlab_ci_checks_lessons_test", _PLATFORM_DIR / "ci_checks.py")
 gitlab_ci_checks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gitlab_ci_checks)
@@ -77,6 +80,10 @@ def _chart(root: Path, values: str = BASE_VALUES, manifest: str = '{{- include "
 
 def _cats(findings):
     return {f.category for f in findings}
+
+
+def setUpModule():
+    library_fixtures.use_chart_library()
 
 
 class DockerfileImageArgTests(unittest.TestCase):
@@ -343,7 +350,7 @@ class GitLabAdapterTests(unittest.TestCase):
                 (root / name).write_text(body, encoding="utf-8")
             ci = root / ".gitlab-ci.yml"
             ci.write_text(text, encoding="utf-8")
-            return gitlab_ci_checks.check_gitlab_ci(ci)
+            return gitlab_ci_checks.check_gitlab_ci(ci, library_fixtures.gitlab_map())
 
     def test_no_dependency_job_required_without_language_module(self):
         findings, _ = self._ci("include:\n  - remote: 'https://raw.githubusercontent.com/org/gitlab-ci-library/1.4.0/image/.gitlab-ci.yml'\n"
