@@ -1,15 +1,19 @@
 import io
+import json
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app_add  # noqa: E402
+import gitops_fixtures as fx  # noqa: E402
+import library  # noqa: E402
 
 ROOT_VALUES = """enabled: true
 cluster: lab
@@ -100,12 +104,19 @@ class AppAddTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "env"
         self.root.mkdir()
-        (self.root / "Chart.yaml").write_text("apiVersion: v2\nname: platform\nversion: 1.0.0\n", encoding="utf-8")
+        fx.depend(self.root, "platform", fx.GITOPS, "1.9.0", fx.environment_files())
         (self.root / "values.yaml").write_text(ROOT_VALUES, encoding="utf-8")
         self.svc = Path(self.tmp.name) / "service"
         self.svc.mkdir()
+        fx.depend(self.svc, "orders", fx.SERVICE, "1.5.0", fx.service_files())
         (self.svc / "values.yaml").write_text(SERVICE_VALUES, encoding="utf-8")
         (self.svc / "values.worker.yaml").write_text(WORKER_OVERLAY, encoding="utf-8")
+        render = patch.object(library, "render", fx.fake_render)
+        render.start()
+        self.addCleanup(render.stop)
+        latest = patch.object(library, "latest_release", return_value="9.9.9")
+        latest.start()
+        self.addCleanup(latest.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -220,6 +231,35 @@ class AppAddTests(unittest.TestCase):
     def test_bad_names_rejected(self):
         with self.assertRaises(SystemExit):
             self.run_add("--app", "Orders_API", *self.chart_args())
+
+    def test_sync_presets_come_from_the_library(self):
+        env_map = json.loads((fx.FIXTURES / "environment-map.json").read_text())
+        env_map["apps"]["syncPresets"]["manual"] = {"options": ["ServerSideApply=true"], "retry": {}}
+        fx.package(self.root, fx.GITOPS, "1.9.0", fx.environment_files(env_map))
+        self.run_add("--app", "orders", *self.chart_args(), "--sync", "manual")
+        new = yaml.safe_load((self.root / "values.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(new["apps"]["orders"]["sync"], {"options": ["ServerSideApply=true"], "retry": {}})
+
+    def test_a_library_release_without_the_map_stops(self):
+        fx.package(self.root, fx.GITOPS, "1.9.0", {})
+        with self.assertRaises(SystemExit) as stop:
+            self.run_add("--app", "orders", *self.chart_args())
+        self.assertIn("ships no docs/environment-map.json", str(stop.exception))
+        self.assertIn("to 9.9.9", str(stop.exception))
+        self.assertEqual((self.root / "values.yaml").read_text(encoding="utf-8"), ROOT_VALUES)
+
+    def test_root_and_extras_must_pin_one_release(self):
+        (self.root / "extras").mkdir()
+        fx.depend(self.root / "extras", "platform", fx.GITOPS, "1.8.0", fx.environment_files())
+        with self.assertRaises(SystemExit) as stop:
+            self.run_add("--app", "orders", *self.chart_args())
+        self.assertIn("both charts must pin the same release", str(stop.exception))
+
+    def test_a_service_library_without_the_chart_contract_stops(self):
+        fx.package(self.svc, fx.SERVICE, "1.5.0", {"values.schema.json": b"{}"})
+        with self.assertRaises(SystemExit) as stop:
+            self.run_add("--app", "orders", *self.chart_args())
+        self.assertIn("ships no docs/chart-contract.json", str(stop.exception))
 
 
 if __name__ == "__main__":

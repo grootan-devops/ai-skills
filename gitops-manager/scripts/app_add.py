@@ -18,6 +18,11 @@ The values file is scaffolded from the service chart: environment settings as `<
 placeholders, the chart's application blocks in full, and -- for a group release -- the chart
 overlay's release shape. Every placeholder must be completed from the user's answers. An
 existing entry or file is never overwritten; nothing is committed, pushed or synced.
+
+Nothing here restates the library. The entry's values-file path, sync presets and release
+shape come from the environment map of the argocd-gitops-tpl-library release the environment
+pins; the Application name, namespace and release name are what that release renders, with
+`helm template` on a temporary copy of the environment that carries the new entry.
 """
 
 from __future__ import annotations
@@ -26,13 +31,14 @@ import argparse
 import copy
 import re
 import shutil
-import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import library  # noqa: E402
 import override_check as oc  # noqa: E402
 
 try:
@@ -40,50 +46,21 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("PyYAML is required: pip install pyyaml")
 
+#: Entry keys stay lowercase kebab-case, as the library names Applications and files from them.
 NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
-RELEASE_SHAPE_KEYS = ("mode", "component", "subComponent", "service", "strategy")
 
 
 def ask(what: str) -> str:
     return f"<ask: {what}>"
 
 
-def kebab(name: str) -> str:
-    """util.kebabcase from the library."""
-    step = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", name)
-    step = re.sub(r"([A-Z])([A-Z][a-z])", r"\1-\2", step)
-    return step.lower()
-
-
-def chart_name(root: Path) -> str:
-    chart = root / "Chart.yaml"
-    if not chart.exists():
-        raise SystemExit(f"{root} is not a chart: no Chart.yaml")
-    m = re.search(r"^name:\s*['\"]?([^'\"\s#]+)", chart.read_text(encoding="utf-8"), re.M)
-    if not m:
-        raise SystemExit(f"no chart name in {chart}")
-    return m.group(1)
-
-
-def resolve(args: argparse.Namespace, root: Path, values: Dict[str, Any]) -> Dict[str, str]:
-    """Names and paths the library derives for this entry (templates/argocd/*.tpl)."""
-    env = str(values.get("environment") or "")
-    cluster = str(values.get("cluster") or "")          # library >= 1.2.0 names include it
-    cname = chart_name(root)
-    app, group = args.app, args.group
-    segments = ([kebab(group)] if group and group != cname else []) + [kebab(app)]
-    parts = [cname] + ([cluster] if cluster else []) + segments + ([env] if env else [])
-    apps = values.get("apps") if isinstance(values.get("apps"), dict) else {}
-    group_ns = (apps.get(group) or {}).get("namespace") if group else None
-    namespace = args.namespace or group_ns or values.get("namespace") or (f"{cname}-{env}" if env else cname)
+def entry_paths(args: argparse.Namespace, env_map: Dict[str, Any]) -> Dict[str, str]:
+    """Where the entry and its values file go; the path pattern is the library's."""
+    key = f"{args.group}/{args.app}" if args.group else args.app
     return {
-        "application": "-".join(parts)[:253].rstrip("-"),
-        "values_path": "" if args.chart_path else
-                       (f"values/{group}/{kebab(app)}.yaml" if group else f"values/{kebab(app)}.yaml"),
-        "namespace": str(namespace),
-        "release": str(args.release_name or (app if args.chart_path else args.chart_name)),
-        "yq": f".apps.{group}.{app}" if group else f".apps.{app}",
-        "entry": f"apps.{group}.{app}" if group else f"apps.{app}",
+        "values_path": "" if args.chart_path else env_map["apps"]["valuesFile"].format(path=key),
+        "yq": f".apps.{args.group}.{args.app}" if args.group else f".apps.{args.app}",
+        "entry": f"apps.{args.group}.{args.app}" if args.group else f"apps.{args.app}",
     }
 
 
@@ -98,7 +75,7 @@ def _scalar(val: str) -> str:
     return yaml.safe_dump(val, default_style='"').strip()
 
 
-def entry_lines(args: argparse.Namespace, indent: int) -> List[str]:
+def entry_lines(args: argparse.Namespace, indent: int, sync: Dict[str, Any]) -> List[str]:
     p = " " * indent
     out = [f"{p}{args.app}:", f"{p}  chart:"]
     if args.chart_path:
@@ -115,9 +92,8 @@ def entry_lines(args: argparse.Namespace, indent: int) -> List[str]:
     if args.namespace:
         out.append(f"{p}  namespace: {_scalar(args.namespace)}")
     out.append(f"{p}  sync:")
-    if args.sync == "auto":
-        out += [f"{p}    automated:", f"{p}      prune: true", f"{p}      selfHeal: true"]
-    out += [f"{p}    options: []", f"{p}    retry: {{}}"]
+    block = yaml.safe_dump(sync, sort_keys=False, default_flow_style=False).splitlines() if sync else ["{}"]
+    out += [f"{p}    {line}" for line in block]
     return out
 
 
@@ -140,11 +116,11 @@ def _block_end(lines: List[str], start: int, parent_indent: int) -> int:
     return last + 1
 
 
-def insert_entry(text: str, args: argparse.Namespace) -> str:
+def insert_entry(text: str, args: argparse.Namespace, sync: Dict[str, Any]) -> str:
     """values.yaml text with the new apps entry added; every other line untouched."""
     lines = text.splitlines()
     idx = next((i for i, ln in enumerate(lines) if re.match(r"^apps:\s*(\{\s*\})?\s*(#.*)?$", ln)), None)
-    block = entry_lines(args, 4 if args.group else 2)
+    block = entry_lines(args, 4 if args.group else 2, sync)
     if args.group:
         block = [f"  {args.group}:"] + block
 
@@ -160,13 +136,13 @@ def insert_entry(text: str, args: argparse.Namespace) -> str:
                               if re.match(rf"^  {re.escape(args.group)}:\s*(#.*)?$", lines[i])), None)
         if group_idx is not None:
             group_end = _block_end(lines, group_idx, 2)
-            new = lines[:group_end] + [""] + entry_lines(args, 4) + lines[group_end:]
+            new = lines[:group_end] + [""] + entry_lines(args, 4, sync) + lines[group_end:]
         else:
             new = lines[:apps_end] + [""] + block + lines[apps_end:]
     return "\n".join(new) + ("\n" if text.endswith("\n") or not text else "")
 
 
-def expected_entry(args: argparse.Namespace) -> Dict[str, Any]:
+def expected_entry(args: argparse.Namespace, sync: Dict[str, Any]) -> Dict[str, Any]:
     if args.chart_path:
         chart: Dict[str, Any] = {"path": args.chart_path}
         if args.values_file:
@@ -178,13 +154,12 @@ def expected_entry(args: argparse.Namespace) -> Dict[str, Any]:
         entry["releaseName"] = args.release_name
     if args.namespace:
         entry["namespace"] = args.namespace
-    sync: Dict[str, Any] = {"automated": {"prune": True, "selfHeal": True}} if args.sync == "auto" else {}
-    sync.update({"options": [], "retry": {}})
-    entry["sync"] = sync
+    entry["sync"] = copy.deepcopy(sync)
     return entry
 
 
-def verify_insert(old_text: str, new_text: str, args: argparse.Namespace) -> Optional[str]:
+def verify_insert(old_text: str, new_text: str, args: argparse.Namespace,
+                  sync: Dict[str, Any]) -> Optional[str]:
     """None when the only change is the expected new entry; otherwise why not."""
     try:
         old = yaml.safe_load(old_text) or {}
@@ -204,16 +179,21 @@ def verify_insert(old_text: str, new_text: str, args: argparse.Namespace) -> Opt
         got = new_apps.pop(args.app, None)
     if new_apps != old_apps:
         return "existing apps entries changed"
-    if got != expected_entry(args):
+    if got != expected_entry(args, sync):
         return f"new entry parsed as {got!r}"
     return None
 
 
-def scaffold(service: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
-    """The environment values file for one release, from the service chart's values."""
+def scaffold(service: Dict[str, Any], overlay: Dict[str, Any], release_shape: List[str],
+             root_keys: set) -> Dict[str, Any]:
+    """The environment values file for one release, from the service chart's values.
+
+    `release_shape` and `root_keys` come from the libraries: the keys a release of a
+    multi-release chart sets, and the service library's own root keys.
+    """
     merged = oc.merge(copy.deepcopy(service), overlay) if overlay else copy.deepcopy(service)
     out: Dict[str, Any] = {}
-    for key in RELEASE_SHAPE_KEYS:                 # release shape, only as the overlay sets it
+    for key in release_shape:                      # release shape, only as the overlay sets it
         if key in overlay:
             out[key] = copy.deepcopy(overlay[key])
 
@@ -247,7 +227,7 @@ def scaffold(service: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
                 out.setdefault(block, {}).setdefault(name, {})["enabled"] = item["enabled"]
 
     for key, val in merged.items():                # application blocks, carried in full
-        if key not in oc.LIBRARY_ROOT_KEYS and key not in RELEASE_SHAPE_KEYS and key not in out:
+        if key not in root_keys and key not in release_shape and key not in out:
             out[key] = _ask_for_secrets(copy.deepcopy(val), key)
     return out
 
@@ -271,31 +251,64 @@ def load_service(path: Path) -> Dict[str, Any]:
     return oc.load(target)
 
 
-def render_check(root: Path, info: Dict[str, str], args: argparse.Namespace) -> List[str]:
-    """helm template the root chart and check the new Application (needs a vendored library)."""
-    if not shutil.which("helm") or not list((root / "charts").glob("*.tgz")):
-        return [f"render       run `helm dependency build {root}` then `helm template {root}` "
-                f"and check Application {info['application']}"]
-    out = subprocess.run(["helm", "template", str(root)], capture_output=True, text=True)
-    if out.returncode != 0:
-        return [f"render       helm template failed: {out.stderr.strip()[:400]}"]
-    app = next((d for d in yaml.safe_load_all(out.stdout)
-                if isinstance(d, dict) and d.get("kind") == "Application"
-                and (d.get("metadata") or {}).get("name") == info["application"]), None)
-    if not app:
-        return [f"render       no Application named {info['application']} was rendered"]
+def _applications(docs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {(d.get("metadata") or {}).get("name"): d for d in docs if d.get("kind") == "Application"}
+
+
+def describe(app: Dict[str, Any]) -> Dict[str, Any]:
+    """Name, namespace, release name, chart, values and sync options of a rendered Application."""
     spec = app.get("spec") or {}
     src, dest = spec.get("source") or {}, spec.get("destination") or {}
     helm = src.get("helm") or {}
+    plugin_env = {e.get("name"): e.get("value") for e in ((src.get("plugin") or {}).get("env") or [])
+                  if isinstance(e, dict)}
+    return {
+        "application": (app.get("metadata") or {}).get("name"),
+        "namespace": dest.get("namespace"),
+        "release": helm.get("releaseName") or plugin_env.get("HELM_RELEASE_NAME"),
+        "chart": src.get("chart"),
+        "version": src.get("targetRevision"),
+        "values": str(helm.get("values") or plugin_env.get("HELM_VALUES") or "").strip(),
+        "options": [str(o) for o in ((spec.get("syncPolicy") or {}).get("syncOptions") or [])],
+    }
+
+
+def rendered_entry(root: Path, new_text: str, values_path: str, body: str) -> Dict[str, Any]:
+    """The Application the new entry adds, rendered by the library release the root pins.
+
+    The root chart is copied with its vendored dependency, the entry and its values file are
+    written into the copy, and the Application present only after the change is the new one.
+    """
+    library.vendored(root, library.GITOPS_LIBRARY)
+    before = _applications(library.render(root))
+    with tempfile.TemporaryDirectory() as td:
+        copy_root = Path(td) / root.name
+        shutil.copytree(root, copy_root, ignore=shutil.ignore_patterns(".git"))
+        (copy_root / "values.yaml").write_text(new_text, encoding="utf-8")
+        if values_path:
+            (copy_root / values_path).parent.mkdir(parents=True, exist_ok=True)
+            (copy_root / values_path).write_text(body, encoding="utf-8")
+        after = _applications(library.render(copy_root))
+    added = [after[name] for name in after if name not in before]
+    if len(added) != 1:
+        raise SystemExit(f"the new entry rendered {len(added)} new Applications instead of one: "
+                         f"{', '.join(str(a['metadata']['name']) for a in added) or 'none'}")
+    return describe(added[0])
+
+
+def render_check(root: Path, info: Dict[str, Any], args: argparse.Namespace) -> List[str]:
+    """helm template the written root chart and check the new Application against the preview."""
+    app = _applications(library.render(root)).get(info["application"])
+    if not app:
+        return [f"render       no Application named {info['application']} was rendered"]
+    got = describe(app)
     problems = []
-    if not args.chart_path and (src.get("chart") != args.chart_name
-                                or str(src.get("targetRevision")) != str(args.chart_version)):
-        problems.append(f"chart rendered as {src.get('chart')}@{src.get('targetRevision')}")
-    if dest.get("namespace") != info["namespace"]:
-        problems.append(f"namespace rendered as {dest.get('namespace')}")
-    if helm.get("releaseName") != info["release"]:
-        problems.append(f"releaseName rendered as {helm.get('releaseName')}")
-    if not args.chart_path and not str(helm.get("values") or "").strip():
+    if not args.chart_path and (got["chart"] != args.chart_name or str(got["version"]) != str(args.chart_version)):
+        problems.append(f"chart rendered as {got['chart']}@{got['version']}")
+    for key in ("namespace", "release"):
+        if got[key] != info[key]:
+            problems.append(f"{key} rendered as {got[key]}")
+    if not args.chart_path and not got["values"]:
         problems.append(f"helm.values is empty: {info['values_path']} was not picked up")
     return [f"render       {p}" for p in problems] or [f"render       Application {info['application']} OK"]
 
@@ -345,27 +358,32 @@ def main(argv: List[str]) -> int:
     elif args.app in apps:
         raise SystemExit(f"apps.{args.app} already exists; edit it instead")
 
-    info = resolve(args, root, values)
+    env_map = library.environment_map(root)
+    sync = env_map["apps"]["syncPresets"][args.sync]
+    info: Dict[str, Any] = entry_paths(args, env_map)
     target = root / info["values_path"] if info["values_path"] else None
     if target is not None and target.exists():
         raise SystemExit(f"{info['values_path']} already exists; it is never overwritten")
 
-    new_text = insert_entry(text, args)
-    problem = verify_insert(text, new_text, args)
+    new_text = insert_entry(text, args, sync)
+    problem = verify_insert(text, new_text, args, sync)
     if problem:
         raise SystemExit(f"refusing to edit values.yaml: {problem}")
 
     body, placeholders, notes = "", 0, []
     if target is not None:
         service = load_service(args.service_values)
+        service_chart = args.service_values if args.service_values.is_dir() else args.service_values.parent
+        root_keys = set(library.service_root_keys(service_chart))
         overlay = oc.load(args.overlay) if args.overlay else {}
-        env_values = scaffold(service, overlay)
+        env_values = scaffold(service, overlay, list(env_map["apps"]["releaseShapeKeys"]), root_keys)
         body = yaml.safe_dump(env_values, sort_keys=False, default_flow_style=False, width=1000)
         placeholders = body.count("<ask:")
         chart_values = oc.merge(service, overlay) if overlay else service
-        notes = oc.review(yaml.safe_load(body) or {}, chart_values, bool(args.group or overlay))
+        rules = oc.Rules.load(env_map.get("overrides") or {}, root_keys)
+        notes = oc.review(yaml.safe_load(body) or {}, chart_values, bool(args.group or overlay), rules)
 
-    options = [str(o) for o in ((values.get("sync") or {}).get("options") or [])]
+    info.update(rendered_entry(root, new_text, info["values_path"], body))
     print(f"entry        {info['entry']}  (in {values_file})")
     if target is not None:
         print(f"values file  {info['values_path']}  ({placeholders} placeholder(s) to fill from the user's answers)")
@@ -373,7 +391,7 @@ def main(argv: List[str]) -> int:
         print("values file  none: a --chart-path chart reads values.yaml and its valuesFiles from its own directory")
     print(f"application  {info['application']}")
     print(f"namespace    {info['namespace']}"
-          + ("  (must already exist: CreateNamespace=false)" if "CreateNamespace=false" in options else ""))
+          + ("  (must already exist: CreateNamespace=false)" if "CreateNamespace=false" in info["options"] else ""))
     print(f"releaseName  {info['release']}")
     print(f"CI yq path   {info['yq']}")
     for note in notes:
@@ -382,7 +400,7 @@ def main(argv: List[str]) -> int:
     if args.dry_run:
         new_group = bool(args.group) and not isinstance(apps.get(args.group), dict)
         print("\n--- values.yaml entry ---")
-        print("\n".join(([f"  {args.group}:"] if new_group else []) + entry_lines(args, 4 if args.group else 2)))
+        print("\n".join(([f"  {args.group}:"] if new_group else []) + entry_lines(args, 4 if args.group else 2, sync)))
         if body:
             print(f"--- {info['values_path']} ---\n{body}")
         print("dry run: nothing written")
