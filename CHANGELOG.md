@@ -17,6 +17,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- CI calls the github-ci-library 1.7.0 reusable workflows instead of 1.5.0.
 - `COMPATIBILITY.md` lists no library releases; it says how the skills choose a release and that each library's README and MIGRATION.md own its versions, requirements and upgrades. The README carries no release number, and the install commands check out the newest tag.
 - `platform-builder`, `gitops-manager`: the bundled workflow maps and the copies of the libraries' chart, naming and override rules are gone; the entry files point at the libraries' docs instead of restating them, and a test keeps versions and release claims out of them.
 - `platform-builder`: the migration chain takes the release list from the library's remote, so a shallow clone no longer drops the releases between the pin and the target, and a pre-release is not counted as a release.
