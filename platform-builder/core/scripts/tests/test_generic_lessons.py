@@ -161,6 +161,14 @@ class ChartRuntimeTests(unittest.TestCase):
             cats = _cats(checks_common.check_chart_runtime(_chart(Path(td), values)))
         self.assertTrue({"Empty Pod securityContext", "emptyDir Not Enabled", "Hard-coded PVC Claim"} <= cats)
 
+    def test_every_mount_kind_the_library_names_needs_enabled(self):
+        values = BASE_VALUES + ("mounts:\n  configmap:\n    app:\n      path: /etc/app\n"
+                                "  secret:\n    creds:\n      path: /etc/creds\n      enabled: true\n")
+        with tempfile.TemporaryDirectory() as td:
+            cats = _cats(checks_common.check_chart_runtime(_chart(Path(td), values)))
+        self.assertIn("configmap Not Enabled", cats)
+        self.assertNotIn("secret Not Enabled", cats)
+
     def test_non_http_overlay(self):
         overlay = "mode: worker\nsubComponent: worker\nservice: ~\n"
         with tempfile.TemporaryDirectory() as td:
