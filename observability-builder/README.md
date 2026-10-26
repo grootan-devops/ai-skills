@@ -1,7 +1,5 @@
 # Observability Builder
 
-Version: 1.5.0
-
 An AI agent skill that instruments any service or frontend for end-to-end observability —
 access logs, structured logs, OpenTelemetry traces with nested function spans, metrics,
 error logs, profiling, RUM and session replay, and LLM and agent telemetry with Langfuse — and

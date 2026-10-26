@@ -1,55 +1,23 @@
-# Ecosystem Compatibility
+# Compatibility
 
-This is the canonical compatibility contract for the Grootan public platform libraries.
+The skills carry no library versions. Each skill reads a library at the release the project
+pins (its CI includes or reusable workflows, its chart or module dependency) and, for a new
+project or an upgrade, at the library's latest release tag. A library release therefore needs
+no skill release.
 
-## Current release set
+Each library documents its own release, runtime requirements, versioning and deprecation
+policy, and upgrade steps, in its README and MIGRATION.md:
 
-The `1.8.0` skills read their standards from these library releases; `observability-builder`
-bundles its own. A later minor or patch release within major `1` remains compatible; an earlier
-one lacks guidance the skills follow.
+| Library | Read |
+| --- | --- |
+| GitHub CI/CD library | [github-ci-library](https://github.com/grootan-devops/github-ci-library) |
+| GitLab CI/CD library | [gitlab-ci-library](https://github.com/grootan-devops/gitlab-ci-library) |
+| Helm template library | [helm-tpl-library](https://github.com/grootan-devops/helm-tpl-library) |
+| ArgoCD GitOps template library | [argocd-gitops-tpl-library](https://github.com/grootan-devops/argocd-gitops-tpl-library) |
+| Terraform modules | [terraform-modules](https://github.com/grootan-devops/terraform-modules) |
 
-| Component | Compatible release |
-| --- | ---: |
-| AI agent skills | `1.8.0` |
-| GitHub CI/CD library | `1.7.0` |
-| GitLab CI/CD library | `1.10.0` |
-| Helm template library | `1.4.0` |
-| ArgoCD GitOps template library | `1.4.0` |
-| Terraform modules | `1.3.0` |
-
-## Initial release set
-
-| Component | Compatible release |
-| --- | ---: |
-| AI agent skills | `1.0.0` |
-| GitHub CI/CD library | `1.0.0` |
-| GitLab CI/CD library | `1.0.0` |
-| Helm template library | `1.0.0` |
-| ArgoCD GitOps template library | `1.0.0` |
-| Terraform modules | `1.0.0` |
-
-## Runtime contract
-
-- Helm libraries require Helm 3.13 or newer and Kubernetes 1.28 or newer.
-- Terraform modules require Terraform 1.5 or newer and AWS provider 6.x.
-- Reusable workflows require the tools named by their workflow contracts; no toolkit
-  image release is globally pinned.
-- Consumers must pin exact library versions. Branches are not release references.
-
-Patch and minor releases remain backward compatible within major version `1`.
-Breaking public-interface changes require a new major version, migration notes, and
-an updated matrix before release.
-
-## Compatibility and deprecation policy
-
-- Compatibility guarantees apply only to documented public interfaces and supported
-  runtime ranges within the same major release.
-- Deprecations are documented in the changelog and, when practical, retained through
-  at least the next minor release before removal.
-- Security, correctness, provider, platform, or upstream compatibility requirements
-  may require faster removal or replacement of unsafe behavior.
-- Breaking changes require a new major version, an updated compatibility matrix, and
-  explicit migration guidance in the affected repository.
-- Toolkit compatibility is capability-based: consumers must provide the tools and
-  versions required by the relevant workflow contract rather than pinning a global
-  toolkit image release.
+The skills' checks read the rules they apply from a data file each library ships with its
+release: `docs/workflow-map.json` in the CI libraries, `docs/chart-contract.json` in the Helm
+template library and `docs/environment-map.json` in the ArgoCD GitOps template library. A
+release that ships no data file, or one with a `schema` a skill does not know, stops the
+skill with what to upgrade: the project's library, or the skills themselves.

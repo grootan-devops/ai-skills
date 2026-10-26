@@ -59,7 +59,7 @@ python3 -m unittest discover -s platform-builder/core/scripts/tests -v
   CI platform adapter. It reports the resolved library provenance.
 - core/libraries.json defines default sources; core/scripts/libraries.py
   implements source precedence and selected-ref resolution.
-- platforms/github and platforms/gitlab own their CI checks and workflow-map.json.
+- platforms/github and platforms/gitlab own their CI checks; the workflow maps they read ship with the CI libraries.
   Do not mix their syntax or cache mechanics.
 - aliases/ contains thin platform-specific entry points; AGENTS.md is an
   agent-discovery pointer.

@@ -30,12 +30,12 @@ Target branch override: <branch-or-none>
    Record which Argo CD authentication, repository registration, and cluster
    checks remain for activation. Do not ask me to paste credentials.
 2. Resolve the selected library source/ref. Read its README and linked
-   bootstrap guides at that same ref. Find the highest published stable OCI
-   chart version and verify it with helm show chart --version; do not pin an
-   unreleased branch's Chart.yaml value or a README example.
-3. Create the local branch and write the library's starter files:
-   Chart.yaml, values.yaml, values/, templates/apps.yaml, the root
-   Application and extras/ as required. Use the documented project, namespace, destination,
+   bootstrap guides at that same ref. Pin that release, the latest release tag
+   for a new environment, and verify it with helm show chart --version; do not
+   pin an unreleased branch's Chart.yaml value, a registry candidate or a
+   README example.
+3. Create the local branch and write the starter files the library's
+   getting-started guide lists, as required. Use the documented project, namespace, destination,
    naming, and branch rules. Keep credentials out of manifests. Do not
    overwrite an existing branch or Application.
 4. Build dependencies, lint, and render both root and extras charts. Inspect

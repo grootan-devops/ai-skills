@@ -22,26 +22,30 @@ inventing a different consumer layout.
 
 When consuming `argocd-gitops-tpl-library`:
 
-1. Resolve the library source: a local checkout or repository/ref named in the request,
-   otherwise the default, `https://github.com/grootan-devops/argocd-gitops-tpl-library` at
-   `main`. Explicit branches, tags, and commits are exact; a local path includes its current
-   uncommitted files. A repository URL without a ref uses that repository's actual default
-   branch. Report the source and ref you read, and never mix linked documentation from
-   another ref.
+1. Resolve the library release: a local checkout or repository/ref named in the request;
+   otherwise the release the environment pins in its root and `extras/Chart.yaml`, which
+   must be the same; otherwise, for a new environment, the latest release tag of
+   `https://github.com/grootan-devops/argocd-gitops-tpl-library` (`git ls-remote --tags`).
+   Never `main` unless asked, and never the highest version in the registry, which can be an
+   unreleased candidate. Explicit branches, tags, and commits are exact; a local path
+   includes its current uncommitted files. Report the source and ref you read, and never mix
+   linked documentation from another ref.
 2. Read that source's `README.md` first, then only the linked docs relevant to the task —
    environment bootstrap, adding a service, or its values file. Resolve relative links from the same checkout/ref; do not follow a link to
    another branch or recursively crawl unrelated docs. When upgrading, read that source's
    `MIGRATION.md` if it exists at the selected ref; if it does not, use the README and relevant
    topic guides from that same checkout and do not infer migration steps. For older releases
    with a monolithic README or no linked guide, find the relevant sections there.
-3. Treat version strings in examples as examples only. Pin the highest stable chart version
-   actually published to the OCI registry; do not derive a dependency version from a sample
-   workflow pin or an unreleased source branch.
+3. Treat version strings in examples as examples only. Pin the release you read, the same in
+   both charts, and verify it exists in the OCI repository the library's README names; do not
+   derive a dependency version from a sample workflow pin or an unreleased source branch.
 
 To bootstrap a service into an existing environment (`argocd app add`), follow the library's
 README index task for adding a service and [the service bootstrap steps](./references/service-bootstrap.md),
 then use `scripts/app_add.py`: it adds the service's `apps` entry to the root `values.yaml` and
-scaffolds its `values/` file from the service chart, without overwriting anything. Ask for
+scaffolds its `values/` file from the service chart, without overwriting anything. It reads
+the environment map of the release the environment pins and takes names from `helm template`
+of that release, so it needs helm; it stops on a release that ships no map. Ask for
 the chart source, a published version and every environment value it leaves as a placeholder.
 
 When writing or reviewing the values file an environment applies to a service chart, follow

@@ -11,28 +11,29 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
 
 ### Required
 
-No migration required for repositories other than Terraform, which audit as before. A GitHub
-Terraform repository is now shape-checked: `audit.py --strict` fails it until it has every
-workflow file of the `terraform` shape (`pr.yml`, `release.yml`, `check.yml`, `lint.yml`,
-`secret-scan.yml` and `sonarqube.yml`).
+- **Libraries are read at a release, not at `main`.** A skill reads each library at the
+  release the project pins, or at the latest release tag for a new project or an upgrade
+  (`platform update`, `audit.py --latest`). To read another ref, name it: a `--<library>`
+  source, `$PLATFORM_BUILDER_LIB_<NAME>` or `.platform-builder.json`.
+- **The libraries' data files are required.** The checks read their rules from the data file
+  a library release ships. A project pinned to an older release stops with the release to
+  upgrade to: run `platform update` first, or stay on ai-skills `1.7.0` until then.
+- **`COMPATIBILITY.md` no longer lists library releases.** The `1.4.0` rule that a library pin
+  be at least the listed release is gone: pin any release, and the skill reads that release.
 
 ### Recommended
 
-- **GitLab Terraform repositories.** Drop `build` from the `WORKFLOW` options if it was declared
-  to silence the audit. The options are `full-pipeline`, `check`, `lint` and `secret-scanning`;
-  from gitlab-ci-library `1.10.0` no Terraform job runs in `build`.
-- **GitHub Terraform repositories.** Add the missing workflow files from the github-ci-library
-  Terraform example, `sonarqube.yml` among them. From github-ci-library `1.7.0`, call
-  `terraform.yml`, which replaces `terraform-lint.yml` and `terraform-test.yml`: with
-  `state-name` for the checks, and with `lint: false` and `test: true` from the module-test
-  workflow.
+- Remove `ref: main` from a `.platform-builder.json` that only pinned it to follow the
+  libraries: the project's own pins now decide.
+- `gitops-manager` needs helm to add a service: it renders the pinned library to name the new
+  Application.
 
 ### Verify
 
-- `python3 -m unittest discover -s platform-builder/core/scripts/tests` passes.
-- `audit.py` on a Terraform repository prints `shape: terraform`, and a GitLab Terraform
-  pipeline with `full-pipeline`, `check`, `lint` and `secret-scanning` has no Unreachable Module
-  finding.
+- `python3 -m unittest discover -s platform-builder/core/scripts/tests` passes, and so do the
+  `gitops-manager`, `terraform-module-builder` and `observability-builder` suites.
+- `audit.py` prints each library with `via project pin` or the latest release, and a project
+  on a release without the data file stops with exit code 2 and the release to upgrade to.
 
 ## 1.7.0
 
