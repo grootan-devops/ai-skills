@@ -2344,6 +2344,32 @@ def check_comment_style(root: Path, chart_dir: Optional[Path]) -> List[Finding]:
     return findings
 
 
+_DOCKER_HUB = {"docker.io", "index.docker.io", "registry-1.docker.io"}
+
+
+def split_image_list(value: Any) -> List[str]:
+    """The entries of an IMAGE_REGISTRY / IMAGE_REPOSITORY value: spaces and/or commas."""
+    return [v for v in re.split(r"[\s,]+", str(value or "")) if v]
+
+
+def _registry_host(value: str) -> str:
+    """A registry host for comparison only: scheme dropped, lower-cased, Docker Hub as one host."""
+    host = re.sub(r"^[a-z]+://", "", value.strip().lower()).split("/", 1)[0]
+    return "docker.io" if host in _DOCKER_HUB else host
+
+
+def split_full_repository(entry: str) -> Tuple[str, str]:
+    """('host', 'path') for a full repository such as `quay.io/org/app`, else ('', entry).
+
+    A credential group lists full repositories in IMAGE_REPOSITORY, with IMAGE_REGISTRY unset;
+    the first segment is a host when it has a dot or a port, or is localhost.
+    """
+    first, _, rest = re.sub(r"^[a-z]+://", "", entry, flags=re.I).partition("/")
+    if rest and ("." in first or ":" in first or first == "localhost"):
+        return first, rest
+    return "", entry
+
+
 def _lookup(node: Any, dotted: str) -> Any:
     for part in dotted.split("."):
         if not isinstance(node, dict) or part not in node:
@@ -2384,9 +2410,21 @@ def check_image_path_alignment(repo: Path, chart_dir: Path, ci_vars: Dict[str, A
                                 f"{key} is still the library placeholder {placeholder!r}. {ask}"))
 
     _host, project_path = origin_project(repo)
-    ci_repo = str(ci_vars.get("IMAGE_REPOSITORY") or "") or project_path
-    ci_repo = ci_repo.replace("${CI_PROJECT_PATH}", project_path).replace("$CI_PROJECT_PATH", project_path)
-    if not ci_repo or "$" in ci_repo:
+    def var(key: str) -> str:
+        val = ci_vars.get(key)
+        val = val.get("value") if isinstance(val, dict) else val
+        return val if isinstance(val, str) else ""
+
+    raw_repos = var("IMAGE_REPOSITORY") or project_path
+    raw_repos = raw_repos.replace("${CI_PROJECT_PATH}", project_path).replace("$CI_PROJECT_PATH", project_path)
+    registries = split_image_list(var("IMAGE_REGISTRY"))
+    # Every repository CI pushes to, as (host or "", path). Each receives every release, so
+    # the chart may pull from any of them.
+    targets = []
+    for entry in split_image_list(raw_repos):
+        host, path = split_full_repository(entry)
+        targets.append((host or (registries[0] if len(registries) == 1 else ""), path))
+    if not targets or any("$" in h + p for h, p in targets):
         return findings
     main = ((values.get("containers") or {}).get("main") or {}) if isinstance(values.get("containers"), dict) else {}
     explicit = str(((main.get("image") or {}).get("repository")) or "") if isinstance(main, dict) else ""
@@ -2399,15 +2437,21 @@ def check_image_path_alignment(repo: Path, chart_dir: Path, ci_vars: Dict[str, A
         comp, sub = values.get("component") or "", values.get("subComponent") or ""
         path = f"{comp}/{sub}" if comp and sub else (comp or sub)
         chart_repo = f"{part_of}/{path}" if part_of and path else path
-    if chart_repo and chart_repo.strip("/") != ci_repo.strip("/"):
+    pushed = " or ".join(f"'{p}'" for p in dict.fromkeys(p for _, p in targets))
+    matching = [t for t in targets if t[1].strip("/") == chart_repo.strip("/")]
+    if chart_repo and not matching:
         findings.append(Finding(
             "P1", "Chart Image Differs From CI Push Path", "values.yaml:containers.main.image.repository",
             f"The chart renders repository '{chart_repo}'{' (derived by the library)' if not explicit else ''}, "
-            f"but CI pushes to '{ci_repo}'. Set containers.main.image.repository to the CI push path "
+            f"but CI pushes to {pushed}. Set containers.main.image.repository to the CI push path "
             "(confirm it with the user)."))
-    ci_registry = str(ci_vars.get("IMAGE_REGISTRY") or "")
-    if ci_registry and "$" not in ci_registry and registry and registry != ci_registry:
+    # Several hosts in IMAGE_REGISTRY is not a valid single-registry setting (the pipeline
+    # refuses it), so no registry can be compared then.
+    hosts = {_registry_host(h) for h, _ in (matching or targets) if h}
+    if len(registries) <= 1 and hosts and registry and "$" not in str(registry) \
+            and _registry_host(str(registry)) not in hosts:
+        shown = " or ".join(f"'{h}'" for h in sorted({h for h, _ in (matching or targets) if h}))
         findings.append(Finding(
             "P1", "Chart Image Differs From CI Push Path", "values.yaml:global.image.registry",
-            f"The chart pulls from registry '{registry}' but CI pushes to '{ci_registry}'."))
+            f"The chart pulls from registry '{registry}' but CI pushes to {shown}."))
     return findings

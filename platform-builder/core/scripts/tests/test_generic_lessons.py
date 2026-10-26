@@ -314,6 +314,30 @@ class ImagePathTests(unittest.TestCase):
             chart = _chart(Path(td))
             self.assertEqual(checks_common.check_image_path_alignment(Path(td), chart, {"IMAGE_REPOSITORY": "group/orders"}), [])
 
+    def align(self, ci_vars):
+        with tempfile.TemporaryDirectory() as td:
+            return checks_common.check_image_path_alignment(Path(td), _chart(Path(td)), ci_vars)
+
+    def test_credential_group_full_repositories_match_any_listed_one(self):
+        # A credential group lists full repositories and leaves IMAGE_REGISTRY unset; every
+        # repository gets every release, so the chart may pull from any of them.
+        listed = "quay.io/group/orders registry.example.com/group/orders"
+        self.assertEqual(self.align({"IMAGE_REPOSITORY": listed}), [])
+        self.assertEqual(self.align({"IMAGE_REPOSITORY": "quay.io/group/orders, oci://REGISTRY.example.com/group/orders"}), [])
+        found = self.align({"IMAGE_REPOSITORY": "quay.io/group/orders quay.io/group/other"})
+        self.assertEqual([f.location for f in found], ["values.yaml:global.image.registry"])
+
+    def test_a_repository_none_of_the_listed_ones_is_flagged(self):
+        found = self.align({"IMAGE_REPOSITORY": "registry.example.com/group/api quay.io/group/api"})
+        self.assertEqual([f.location for f in found], ["values.yaml:containers.main.image.repository"])
+        self.assertIn("'group/api'", found[0].message)
+
+    def test_several_registry_hosts_compare_no_registry(self):
+        # Not a valid single-registry setting: the pipeline itself refuses it.
+        self.assertEqual(self.align({"IMAGE_REGISTRY": "quay.io docker.io", "IMAGE_REPOSITORY": "group/orders"}), [])
+        found = self.align({"IMAGE_REGISTRY": "quay.io", "IMAGE_REPOSITORY": "group/orders"})
+        self.assertEqual([f.location for f in found], ["values.yaml:global.image.registry"])
+
 
 class HygieneTests(unittest.TestCase):
     def test_ai_tooling_reported_not_removed(self):

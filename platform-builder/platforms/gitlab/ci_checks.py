@@ -38,7 +38,8 @@ if HAVE_YAML:
 
 import pins
 from checks_common import (Finding, iter_jobs, CI_RESERVED_KEYS,
-                           MULTILINE_SHELL_MARKERS, classify_unproxied_public_image)
+                           MULTILINE_SHELL_MARKERS, classify_unproxied_public_image,
+                           split_full_repository, split_image_list)
 
 NAME = "gitlab"
 CI_FILES = [".gitlab-ci.yml"]
@@ -218,9 +219,11 @@ def check_gitlab_ci(ci_file: Path, wmap: Dict[str, Any]) -> Tuple[List[Finding],
                     f"`rules: [{{when: never}}]` to retire it deliberately."
                 ))
 
-    # Check IMAGE_REPOSITORY placeholder & naming standard
-    img_repo = variables.get("IMAGE_REPOSITORY", "")
-    if isinstance(img_repo, str) and img_repo:
+    # Check IMAGE_REPOSITORY placeholder & naming standard, per listed repository
+    raw_repo = variables.get("IMAGE_REPOSITORY", "")
+    raw_repo = raw_repo.get("value", "") if isinstance(raw_repo, dict) else raw_repo
+    for img_repo in split_image_list(raw_repo if isinstance(raw_repo, str) else ""):
+        img_repo = split_full_repository(img_repo)[1]
         if "myorg/" in img_repo or "[PRODUCT_NAME]" in img_repo:
             findings.append(Finding(
                 "P1", "Generic Image Repository", f"{ci_file.name}:variables.IMAGE_REPOSITORY",
