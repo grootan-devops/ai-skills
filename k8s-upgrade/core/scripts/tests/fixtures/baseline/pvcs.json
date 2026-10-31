@@ -1,0 +1,13 @@
+{
+ "items": [
+  {
+   "metadata": {
+    "namespace": "data",
+    "name": "data-pg-0"
+   },
+   "status": {
+    "phase": "Bound"
+   }
+  }
+ ]
+}

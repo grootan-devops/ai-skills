@@ -1,0 +1,35 @@
+# Requests the smoke Service by DNS name from another pod. smoke_test.sh replaces __NS__ and
+# __CLIENT_IMAGE__.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smoke-client
+  namespace: __NS__
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: client
+          image: __CLIENT_IMAGE__
+          command: ["wget", "-qO-", "-T", "10", "http://smoke.__NS__.svc.cluster.local/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 16Mi

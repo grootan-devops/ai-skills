@@ -11,10 +11,13 @@ It is self-contained: the workflow, the observability standard it applies, the
 
 | Command | What it does |
 | --- | --- |
-| `observability instrument [path]` | Detects the stack, asks the deployment questions, researches current libraries, plans, implements and verifies against a real receiver |
-| `observability audit [path]` | Finds secrets, bodies, unbounded labels and misplaced setup in instrumentation; changes nothing unless asked |
+| `observability instrument` | Detects the stack, asks the deployment questions, researches current libraries, plans, implements and verifies against a real receiver |
+| `observability audit` | Finds secrets, bodies, unbounded labels and misplaced setup in instrumentation; changes nothing unless asked |
 
-Copyable prompts are in [PROMPT.md](./PROMPT.md).
+Commands work on the project in the current directory when it is one (a dependency manifest
+such as `package.json`, `pyproject.toml` or `go.mod`), and otherwise ask for its path. On a
+project that is already instrumented, `observability instrument` audits what exists first and
+extends it to the same standard; its verify step is the report to share before merging.
 
 ## Install
 

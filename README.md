@@ -12,9 +12,23 @@ This directory contains reusable, production-hardened **AI Agent Skills**. Skill
 | --- | --- | --- |
 | [`terraform-module-builder`](./terraform-module-builder/) | AWS reference modules; other providers require schema evidence | Terraform module creation, updates, and audits with provider schema checks, migration review, and repository-native validation. |
 | [`terraform-module-consumer`](./terraform-module-consumer/) | Terraform, Terragrunt, provider-agnostic modules | Compose existing versioned modules into environment infrastructure configurations, with state-safe validation and no direct managed resources or apply. |
-| [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes, Terraform pipelines | Unified CI/CD, container and Helm platform engineering for both platforms: one engine with per-platform adapters that measures a repository against the CI and Helm library releases it pins, and plans upgrades across their migration notes. Supersedes the former `gitlab-platform-builder` and `github-platform-builder`, which remain available as aliases inside it. |
-| [`gitops-manager`](./gitops-manager/) | Argo CD, Helm, Git | Focused Argo CD environment bootstrap: authenticated preflight, cluster metadata discovery, standard root/extras charts, validation, and root Application creation. |
+| [`platform-builder`](./platform-builder/) | GitLab CI/CD, GitHub Actions, Docker, Helm, Kubernetes, Terraform pipelines, Argo CD GitOps (Komodo planned) | Unified CI/CD, container, Helm and GitOps platform engineering, from onboarding a repository to running it in an environment. One engine with per-platform adapters measures a repository against the CI and Helm library releases it pins, and plans upgrades across their migration notes. Per-backend GitOps workflows bootstrap, clone and audit environments; add Helm, private-chart or manifest apps that meet the cluster's workload rules; promote sandbox stacks with their data; and wire each app's CI deploy job, automatic or manual. Supersedes the former `gitops-manager`, `gitlab-platform-builder` and `github-platform-builder`; the last two remain available as aliases inside it. |
+| [`k8s-upgrade`](./k8s-upgrade/) | Kubernetes: kubeadm (EKS, AKS, GKE and Scaleway Kapsule planned) | Upgrade a cluster one minor version at a time in six gated stages: workspace and inputs, offline lint, preflight with admission-webhook and version-path checks, baseline and backups, control plane then nodes gated node by node, and validation against the baseline with a smoke test. |
 | [`observability-builder`](./observability-builder/) | Any language or framework, OpenTelemetry, OTLP backends (OneUptime, Grafana, Dynatrace, New Relic), Langfuse | End-to-end observability from one `observability.yml`: access and application logs, traces with function spans, ops metrics on `/metrics`, errors, profiling, RUM and session replay, and LLM, agent, RAG and MCP telemetry for Langfuse or OneUptime's AI views, with spend per user and team. Instruments services and frontends, verifies against a local receiver, and audits telemetry for leaked secrets and prompts. |
+
+### From application to environment
+
+`platform-builder` takes a project from its repository to an environment:
+
+1. **`platform onboard <repo>`** writes the project's chart, Dockerfile and CI. Its report ends
+   with the next step.
+2. **The project's first full CI run** publishes the chart and the image.
+3. **`platform env add` / `platform app add <repo>`** reads the project's chart, image and CI
+   pin from its own files, and checks both artifacts are published. If they are not, it offers
+   to run that pipeline, and only runs it on a yes. It then adds the app with no chart or image
+   questions.
+4. **The same command wires the app's CI deploy job.** The only question is whether it runs
+   automatically or manually, per environment. `platform audit` validates the result.
 
 Maintainer regression checks for the platform checker live in
 [`platform-builder`](./platform-builder/README.md#maintainer-regression-checks).
@@ -41,11 +55,19 @@ npx skills add https://github.com/grootan-devops/ai-skills \
 ```
 
 Swap `--skill` for any supported skill in the catalog above — `terraform-module-builder`,
-`terraform-module-consumer`, `platform-builder`, `gitops-manager` or `observability-builder`.
+`terraform-module-consumer`, `platform-builder`, `observability-builder` or
+`k8s-upgrade`.
 Repeat the command to install more than one.
 
 Each skill is self-contained: the CLI copies that directory and nothing else, so a skill
 never reaches outside its own folder for a reference.
+
+Every skill checks for a newer ai-skills release each time it runs. For a git checkout, it
+compares the tag, or else the repository's root `VERSION`, and the branch's commits with the
+remote. A copied install doesn't record its release, so the check names the latest release and
+offers the reinstall command. When an update exists, the agent shows the command
+(`npx skills add …`, `git pull`, or a checkout of the new tag) and asks before running it.
+Offline, the skill carries on with the installed release.
 
 ---
 
@@ -218,7 +240,7 @@ Every skill in this repository follows the standard layout:
 
 ```text
 skills/<skill_name>/
-├── SKILL.md          # Required: YAML frontmatter + the workflow instructions
+├── SKILL.md          # Required: YAML frontmatter + the workflow instructions; first step: the update check
 ├── scripts/          # Optional: Automated CLI linters, generators, and validators
 └── references/       # Optional: step-by-step instructions for one workflow
 ```
@@ -247,10 +269,11 @@ the release the project pins, then — for a new project — the library's lates
 | Skill | Library | Resolved from, highest first |
 | --- | --- | --- |
 | `platform-builder` | `gitlab-ci-library`, `github-ci-library`, `helm-tpl-library` | a `--<library>` flag, `$PLATFORM_BUILDER_LIB_<NAME>`, the repository's `.platform-builder.json`, the release the repository pins, then the latest release (`--latest` skips the pin, for an upgrade) |
-| `gitops-manager` | `argocd-gitops-tpl-library` | a checkout or repository/ref in the request, the release the environment's root and `extras/Chart.yaml` pin, then the latest release of `https://github.com/grootan-devops/argocd-gitops-tpl-library` |
+| `platform-builder` (GitOps) | `argocd-gitops-tpl-library`; for a deploy job, `gitlab-ci-library` or `github-ci-library` | a checkout or repository/ref in the request, the release the environment's root and `extras/Chart.yaml` pin (or the repository's other branches pin), then the latest release of `https://github.com/grootan-devops/argocd-gitops-tpl-library`; a deploy job uses the CI-library release the application project already pins, and stops for a project with none |
 | `terraform-module-builder` | `terraform-modules` (edited in a local checkout) | a path or repository/ref in the request, the current repository, `$TERRAFORM_MODULES_REPO`, a sibling checkout, then `https://github.com/grootan-devops/terraform-modules` |
 | `terraform-module-consumer` | `terraform-modules` | the request, `$TERRAFORM_MODULES_REPO`, the stack's pinned module source, a sibling checkout, then the latest release of `https://github.com/grootan-devops/terraform-modules` |
 | `observability-builder` | none | the standard is bundled in the skill |
+| `k8s-upgrade` | none | no library: the stages and checks are the skill's own, and each provider's tools are read from the cluster |
 
 ### Progressive Disclosure
 

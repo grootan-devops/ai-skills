@@ -2,16 +2,18 @@
 
 This Skill creates, updates, and audits Terraform modules against the
 checked-out terraform-modules repository. [SKILL.md](./SKILL.md) is the
-execution policy; AGENTS.md is a discovery pointer, and PROMPT.md contains
-copyable requests.
+execution policy, and AGENTS.md is a discovery pointer.
 
 ## Workflows
 
-| Command | Result |
-| --- | --- |
-| `terraform-module add <provider> <resource_type> <module_name>` | Create a module with an inspected provider schema, documentation, and useful tests. |
-| `terraform-module update <module_path>` | Target the latest stable provider and make a reviewed, surgical module change. |
-| `terraform-module audit <module_path_or_repo>` | Report findings without editing. |
+| Command | Result | Asks for, when missing |
+| --- | --- | --- |
+| `terraform-module add` | Create a module with an inspected provider schema, documentation, and useful tests. | provider, resource type and module name |
+| `terraform-module update` | Target the latest stable provider and make a reviewed, surgical module change. | the module and the change |
+| `terraform-module audit` | Report findings without editing. | the module, or the whole repository |
+
+Commands work on the terraform-modules checkout in the current directory when it is one (a
+`modules/` folder and `MIGRATION.md` at its root), and otherwise ask for its path.
 
 The reference repository's README documentation index links its module API,
 naming, security, documentation, release, state-migration and test standards;

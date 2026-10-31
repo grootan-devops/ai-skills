@@ -1,0 +1,81 @@
+{
+ "apiVersion": "v1",
+ "kind": "List",
+ "items": [
+  {
+   "kind": "ValidatingWebhookConfiguration",
+   "metadata": {"name": "catch-all-policy"},
+   "webhooks": [
+    {
+     "name": "validate.policy.example.com",
+     "failurePolicy": "Fail",
+     "clientConfig": {"service": {"namespace": "policy", "name": "policy-webhook"}},
+     "rules": [{"apiGroups": ["*"], "apiVersions": ["*"], "operations": ["CREATE", "UPDATE"], "resources": ["*"]}]
+    }
+   ]
+  },
+  {
+   "kind": "MutatingWebhookConfiguration",
+   "metadata": {"name": "default-policy"},
+   "webhooks": [
+    {
+     "name": "mutate.default.example.com",
+     "clientConfig": {"service": {"namespace": "mesh", "name": "injector"}},
+     "rules": [{"apiGroups": ["discovery.k8s.io"], "apiVersions": ["v1"], "operations": ["*"], "resources": ["endpointslices"]}]
+    }
+   ]
+  },
+  {
+   "kind": "ValidatingWebhookConfiguration",
+   "metadata": {"name": "ignore-policy"},
+   "webhooks": [
+    {
+     "name": "validate.ignore.example.com",
+     "failurePolicy": "Ignore",
+     "clientConfig": {"service": {"namespace": "audit", "name": "audit-webhook"}},
+     "rules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["*"], "resources": ["*"]}]
+    }
+   ]
+  },
+  {
+   "kind": "ValidatingWebhookConfiguration",
+   "metadata": {"name": "exempts-apiserver"},
+   "webhooks": [
+    {
+     "name": "validate.exempt.example.com",
+     "failurePolicy": "Fail",
+     "clientConfig": {"service": {"namespace": "policy", "name": "exempt-webhook"}},
+     "matchConditions": [{"name": "not-apiserver", "expression": "request.userInfo.username != 'system:apiserver'"}],
+     "rules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["endpoints"]}]
+    }
+   ]
+  },
+  {
+   "kind": "ValidatingWebhookConfiguration",
+   "metadata": {"name": "skips-system-namespaces"},
+   "webhooks": [
+    {
+     "name": "validate.apps.example.com",
+     "failurePolicy": "Fail",
+     "clientConfig": {"service": {"namespace": "apps", "name": "apps-webhook"}},
+     "namespaceSelector": {"matchExpressions": [
+      {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["default", "kube-system"]}
+     ]},
+     "rules": [{"apiGroups": ["*"], "apiVersions": ["*"], "operations": ["*"], "resources": ["*"]}]
+    }
+   ]
+  },
+  {
+   "kind": "ValidatingWebhookConfiguration",
+   "metadata": {"name": "deletes-only"},
+   "webhooks": [
+    {
+     "name": "validate.delete.example.com",
+     "failurePolicy": "Fail",
+     "clientConfig": {"url": "https://hooks.example.com/validate"},
+     "rules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["DELETE"], "resources": ["services"]}]
+    }
+   ]
+  }
+ ]
+}

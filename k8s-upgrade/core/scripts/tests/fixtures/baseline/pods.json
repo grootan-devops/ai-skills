@@ -1,0 +1,198 @@
+{
+ "items": [
+  {
+   "metadata": {
+    "namespace": "default",
+    "name": "web-6d4cf56db6-abcde",
+    "labels": {
+     "pod-template-hash": "6d4cf56db6"
+    },
+    "ownerReferences": [
+     {
+      "kind": "ReplicaSet",
+      "name": "web-6d4cf56db6"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": true,
+      "state": {
+       "running": {}
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ]
+   }
+  },
+  {
+   "metadata": {
+    "namespace": "default",
+    "name": "web-6d4cf56db6-fghij",
+    "labels": {
+     "pod-template-hash": "6d4cf56db6"
+    },
+    "ownerReferences": [
+     {
+      "kind": "ReplicaSet",
+      "name": "web-6d4cf56db6"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": true,
+      "state": {
+       "running": {}
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ]
+   }
+  },
+  {
+   "metadata": {
+    "namespace": "default",
+    "name": "flaky-7f9c8b7d5-qwert",
+    "labels": {
+     "pod-template-hash": "7f9c8b7d5"
+    },
+    "ownerReferences": [
+     {
+      "kind": "ReplicaSet",
+      "name": "flaky-7f9c8b7d5"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": false,
+      "state": {
+       "waiting": {
+        "reason": "CrashLoopBackOff"
+       }
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "False"
+     }
+    ]
+   }
+  },
+  {
+   "metadata": {
+    "namespace": "data",
+    "name": "pg-0",
+    "labels": {},
+    "ownerReferences": [
+     {
+      "kind": "StatefulSet",
+      "name": "pg"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": true,
+      "state": {
+       "running": {}
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ]
+   }
+  },
+  {
+   "metadata": {
+    "namespace": "kube-system",
+    "name": "kube-apiserver-cp-1",
+    "labels": {},
+    "ownerReferences": [
+     {
+      "kind": "Node",
+      "name": "cp-1"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Running",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": true,
+      "state": {
+       "running": {}
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ]
+   }
+  },
+  {
+   "metadata": {
+    "namespace": "batch",
+    "name": "report-28012345-xyz12",
+    "labels": {},
+    "ownerReferences": [
+     {
+      "kind": "Job",
+      "name": "report-28012345"
+     }
+    ]
+   },
+   "status": {
+    "phase": "Succeeded",
+    "containerStatuses": [
+     {
+      "name": "main",
+      "ready": false,
+      "state": {
+       "running": {}
+      }
+     }
+    ],
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "False"
+     }
+    ]
+   }
+  }
+ ]
+}

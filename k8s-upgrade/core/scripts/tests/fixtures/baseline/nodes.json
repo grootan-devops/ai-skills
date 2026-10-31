@@ -1,0 +1,59 @@
+{
+ "items": [
+  {
+   "metadata": {
+    "name": "cp-1",
+    "labels": {
+     "kubernetes.io/hostname": "cp-1",
+     "node-role.kubernetes.io/control-plane": ""
+    }
+   },
+   "spec": {},
+   "status": {
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ],
+    "addresses": [
+     {
+      "type": "InternalIP",
+      "address": "192.0.2.11"
+     }
+    ],
+    "nodeInfo": {
+     "kubeletVersion": "v1.30.4",
+     "containerRuntimeVersion": "containerd://1.7.22"
+    }
+   }
+  },
+  {
+   "metadata": {
+    "name": "worker-1",
+    "labels": {
+     "kubernetes.io/hostname": "worker-1"
+    }
+   },
+   "spec": {},
+   "status": {
+    "conditions": [
+     {
+      "type": "Ready",
+      "status": "True"
+     }
+    ],
+    "addresses": [
+     {
+      "type": "InternalIP",
+      "address": "192.0.2.21"
+     }
+    ],
+    "nodeInfo": {
+     "kubeletVersion": "v1.30.4",
+     "containerRuntimeVersion": "containerd://1.7.22"
+    }
+   }
+  }
+ ]
+}

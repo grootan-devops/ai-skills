@@ -31,6 +31,19 @@ The skill ships no per-framework templates on purpose: frameworks and SDKs chang
 any template, so research the project's language, framework and libraries at run time from
 official docs and package registries, and make the *output* match the standard.
 
+## Check for updates first
+
+At the start of every invocation, run `python3 scripts/update_check.py` from this skill's folder.
+
+- **An update is available (exit 1):** tell the user the installed and latest release and the
+  command it prints, and ask whether to update now. Run the update only on a yes, then reload
+  this skill before you go on.
+- **The installed release is unknown (exit 2, a copied install):** tell the user the latest
+  release and the reinstall command it prints, and ask whether to reinstall now. Run it only
+  on a yes, then reload this skill before you go on.
+- **They decline, or it could not check (exit 2):** carry on with the installed release and
+  name it in your report.
+
 ## Route the request
 
 | Request | Action |
@@ -107,7 +120,7 @@ python3 scripts/llm_stub.py                                # OpenAI- and Anthrop
 Also run the project's own build and tests before and after the change where they can run,
 compared suite by suite, and run the app against the receiver: only a real connection shows
 whether exports arrive (instrument step 7). Report: the skill version (the ai-skills release
-it was installed from: `git describe --tags` in that checkout, or its root `VERSION`), files
+it was installed from, as `scripts/update_check.py` printed it), files
 changed, dependencies with versions and sources, the answers used, handoffs for
 platform-builder, the migration note, functions skipped by the wrappers and open
 observability risks (never security or code issues outside telemetry: other review layers

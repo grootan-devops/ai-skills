@@ -1,0 +1,9 @@
+# k8s-upgrade workspace: credentials and cluster evidence stay on this machine.
+*/control-plane.md
+*/workers.md
+*/kubeconfig
+*/state.json
+*/*/pre/
+*/*/post/
+*/*/preflight/
+*/*/gates/

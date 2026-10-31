@@ -18,6 +18,8 @@ policy, and upgrade steps, in its README and MIGRATION.md:
 
 The skills' checks read the rules they apply from a data file each library ships with its
 release: `docs/workflow-map.json` in the CI libraries, `docs/chart-contract.json` in the Helm
-template library and `docs/environment-map.json` in the ArgoCD GitOps template library. A
+template library and `docs/environment-map.json` in the ArgoCD GitOps template library.
+`platform-builder` wires a deploy job from the GitOps deploy template the CI library ships at
+the release the application project pins, and stops when that release ships none. A
 release that ships no data file, or one with a `schema` a skill does not know, stops the
 skill with what to upgrade: the project's library, or the skills themselves.

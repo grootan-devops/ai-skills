@@ -1,0 +1,9 @@
+# Control-plane nodes
+
+The first row runs `kubeadm upgrade apply`; the others run `kubeadm upgrade node`, in this
+order. Keep this file mode 600 and out of git. See references/workspace.md for the columns.
+
+| name | host | port | user | auth | password | ssh_key_path | sudo_password |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| cp-1 | 10.0.0.11 | 22 | ubuntu | key | | ~/.ssh/cluster_ed25519 | |
+| cp-2 | 10.0.0.12 | 22 | ubuntu | password | change-me | | |
