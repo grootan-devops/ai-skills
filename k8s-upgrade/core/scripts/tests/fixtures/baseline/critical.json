@@ -1,0 +1,20 @@
+[
+ {
+  "category": "database",
+  "reason": "postgres",
+  "namespace": "data",
+  "kind": "StatefulSet",
+  "name": "pg",
+  "desired": 1,
+  "ready": 1
+ },
+ {
+  "category": "ingress",
+  "reason": "ingress-nginx",
+  "namespace": "ingress",
+  "kind": "Deployment",
+  "name": "ingress-nginx-controller",
+  "desired": 2,
+  "ready": 1
+ }
+]

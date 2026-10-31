@@ -7,6 +7,57 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 2.0.0
+
+### Required
+
+- **`gitops-manager` is removed; its work is part of `platform-builder`.** Uninstall it, and
+  install or reinstall `platform-builder`:
+  `npx skills add https://github.com/grootan-devops/ai-skills --skill platform-builder`.
+  - **Commands:** `argocd env add|update|audit|clone` became `platform env …`, and
+    `argocd app add|promote` became `platform app …`. There is no separate deploy-job command:
+    those commands wire the CI deploy job and ask only whether it runs automatically or
+    manually.
+  - **Scripts**, now under `platform-builder/`:
+    - `scripts/app_add.py` → `gitops/argocd/scripts/app_add.py`
+    - `scripts/override_check.py` → `gitops/argocd/scripts/override_check.py`
+    - `scripts/library.py` → `core/scripts/gitops_library.py` (the Argo CD part is in
+      `gitops/argocd/scripts/argocd.py`)
+  - **References:**
+    - `references/argocd-environment.md` → `gitops/argocd/references/environment.md`
+    - `references/service-bootstrap.md` → `gitops/argocd/references/service-bootstrap.md`
+
+  Update any prompt, alias or automation that names the old skill, commands or paths.
+- **`platform ship` is removed.** Use `platform app add` to put an app into an existing
+  environment, or `platform env add` for a new one. Both wire the app's CI deploy job and ask
+  only whether it runs automatically or manually.
+- **New environments are named differently.** `platform env add` takes the cluster label from
+  the GitOps repository's README, else from the repository's name. The label prefixes the
+  chart name, and `cluster` is left unset. The default branch is `<product>/<env>`. To keep
+  the previous naming for a new environment, name the chart, branch and `cluster` value in
+  the request. Existing environments are read as they are and never renamed.
+
+### Recommended
+
+- Each skill now checks for a newer release when it runs. A git checkout knows its release from its tag or the repository's root `VERSION`. A copied install doesn't record one, so it names the latest release and offers `npx skills add … --skill <name>`; reinstall when it does. Maintainers bump only the root `VERSION`.
+- `PROMPT.md` is gone from every skill. Type the command instead (each skill's README lists
+  them, with what each asks for), or name the skill if your tool didn't load it. Replace any
+  saved prompts or automation that pasted from PROMPT.md.
+- New apps and environments now wait for a developer's review. `platform app add` opens an
+  MR/PR into the environment branch, and a new environment's root Application is created only
+  after its branch is approved in chat. Give the dev who reviews push access to the GitOps
+  repository, and the person running the skill `glab` or `gh` access to open and merge MRs/PRs.
+- Install `k8s-upgrade` where clusters are upgraded:
+  `npx skills add https://github.com/grootan-devops/ai-skills --skill k8s-upgrade`.
+
+### Verify
+
+- `python3 -m unittest discover -s platform-builder/core/scripts/tests` and
+  `-s platform-builder/gitops/argocd/scripts/tests` pass, and so do the `k8s-upgrade`,
+  `terraform-module-builder` and `observability-builder` suites.
+- `python3 platform-builder/core/scripts/naming.py --repo-url <gitops-url> --product <p> --env <e>`
+  prints the label and its source for a repository you use.
+
 ## 1.8.0
 
 ### Required

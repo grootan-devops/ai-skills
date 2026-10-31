@@ -13,7 +13,11 @@ _REPO = Path(__file__).resolve().parents[4]
 _ENTRY_FILES = sorted(
     p for pattern in ("README.md", "COMPATIBILITY.md",
                       "platform-builder/*.md", "platform-builder/aliases/*/SKILL.md",
-                      "gitops-manager/*.md", "gitops-manager/references/*.md",
+                      "platform-builder/core/references/*.md",
+                      "platform-builder/gitops/*/references/*.md",
+                      "platform-builder/gitops/*/workflows/*.md",
+                      "k8s-upgrade/*.md", "k8s-upgrade/core/references/*.md",
+                      "k8s-upgrade/providers/*/README.md", "k8s-upgrade/providers/*/references/*.md",
                       "terraform-module-builder/*.md", "terraform-module-consumer/*.md")
     for p in _REPO.glob(pattern))
 

@@ -21,26 +21,26 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.7.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.9.0
     secrets: inherit
     with:
       ignore-docker: "true"
       ignore-chart: "true"
 
   lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.7.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.9.0
     secrets: inherit
     with:
       lint-md-files: "**/*.md"
 
   check:
     needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.7.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.9.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
   secret-scan:
-    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.7.0
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.9.0
     secrets: inherit
     with:
       full-history: false
@@ -62,6 +62,9 @@ jobs:
       - name: Test Platform Builder Tools
         run: python3 -m unittest discover -s platform-builder/core/scripts/tests -v
 
+      - name: Test Platform Builder Argo CD GitOps Tools
+        run: python3 -m unittest discover -s platform-builder/gitops/argocd/scripts/tests -v
+
   terraform-skill-tests:
     name: Terraform Skill Regression Tests
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -79,8 +82,8 @@ jobs:
       - name: Test Terraform Skill Tools
         run: python3 -m unittest discover -s terraform-module-builder/scripts/tests -v
 
-  gitops-skill-tests:
-    name: GitOps Skill Regression Tests
+  k8s-upgrade-skill-tests:
+    name: Kubernetes Upgrade Skill Regression Tests
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
@@ -93,8 +96,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test GitOps Skill Tools
-        run: python3 -m unittest discover -s gitops-manager/scripts/tests -v
+      - name: Test Kubernetes Upgrade Core Tools
+        run: python3 -m unittest discover -s k8s-upgrade/core/scripts/tests -v
+
+      - name: Test Kubernetes Upgrade kubeadm Provider Tools
+        run: python3 -m unittest discover -s k8s-upgrade/providers/kubeadm/scripts/tests -v
 
   observability-skill-tests:
     name: Observability Skill Regression Tests

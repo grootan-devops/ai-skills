@@ -1,0 +1,116 @@
+# Smoke-test workload. smoke_test.sh replaces __NS__, __IMAGE__, __TOKEN__ and
+# __STORAGE_CLASS_LINE__.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NS__
+  labels:
+    app.kubernetes.io/part-of: k8s-upgrade-smoke
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: smoke
+  namespace: __NS__
+spec:
+  accessModes: [ReadWriteOnce]
+  __STORAGE_CLASS_LINE__
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke
+  namespace: __NS__
+  labels:
+    app.kubernetes.io/name: smoke
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: smoke
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: smoke
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        runAsNonRoot: true
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Proves the volume attached and is writable, and gives the client a token to check.
+        - name: write
+          image: __IMAGE__
+          command: ["sh", "-c", "echo __TOKEN__ > /usr/share/nginx/html/index.html"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 16Mi
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+      containers:
+        - name: web
+          image: __IMAGE__
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 32Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: smoke
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke
+  namespace: __NS__
+spec:
+  selector:
+    app.kubernetes.io/name: smoke
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

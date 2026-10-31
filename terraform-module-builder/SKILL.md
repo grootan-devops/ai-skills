@@ -9,6 +9,19 @@ description: >-
 
 # Terraform Module Builder
 
+## Check for updates first
+
+At the start of every invocation, run `python3 scripts/update_check.py` from this skill's folder.
+
+- **An update is available (exit 1):** tell the user the installed and latest release and the
+  command it prints, and ask whether to update now. Run the update only on a yes, then reload
+  this skill before you go on.
+- **The installed release is unknown (exit 2, a copied install):** tell the user the latest
+  release and the reinstall command it prints, and ask whether to reinstall now. Run it only
+  on a yes, then reload this skill before you go on.
+- **They decline, or it could not check (exit 2):** carry on with the installed release and
+  name it in your report.
+
 ## Route the request
 
 | Request | Workflow |

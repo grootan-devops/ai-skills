@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-01
+
+### Added
+
+- Every skill checks for a newer ai-skills release each time it runs, and asks before updating. Each skill ships an identical `update_check.py`; the release lives only in the repository's root `VERSION`. A git checkout is compared by its tag, or else that root `VERSION`, and its branch commits, with the repository's latest release tag and remote branch. A copied install doesn't record its release, so the check names the latest release and offers the reinstall command. A test keeps the copies identical, no skill carrying its own `VERSION`, and the check the first step of every `SKILL.md`.
+- `k8s-upgrade`: upgrade a Kubernetes cluster one minor version at a time in six stages run one per request (`init`, `lint`, `check`, `prepare`, `upgrade`, `validate`), each refusing to start until the stages before it passed. It baselines critical components, pods, PVCs, databases and PVC usage, takes backups, upgrades the control plane and then the nodes with a gate per node, and validates against the baseline with a throwaway smoke test. The kubeadm provider is supported; EKS, AKS, GKE and Scaleway Kapsule are planned.
+- `platform-builder` manages GitOps environments and the apps deployed through them (Argo CD on `argocd-gitops-tpl-library`; Komodo planned). The commands are:
+  - **`platform env add|update|audit`**: bootstrap, update and audit an environment.
+  - **`platform env clone`**: create an environment of a product from one of its branches, its databases included.
+  - **`platform app add`**: trace a chart, CI URL or onboarded project, classify the app (public chart, private `helm-tpl-library` chart or raw manifests) and make it meet the cluster's workload rules (`core/references/kubernetes-rules.md`).
+  - **`platform app promote`**: move a sandbox stack into its own environments and migrate its data.
+- `platform-builder`: `env add`, `app add`, `env clone` and `app promote` wire each app's CI deploy job from the CI library's GitOps deploy template, at the release the application project already pins. The only question is whether each environment's job runs automatically or manually. `core/scripts/ci_pin.py` finds the platform and the pin, and checks the template ships in that release.
+- `platform-builder`: a readiness gate (`core/references/app-readiness.md`) takes a project from `platform onboard` to an environment:
+  - **Reads the project.** `core/scripts/app_facts.py` reads its chart, image and CI-library pin from its own files, finding the chart the way the audit does.
+  - **Checks the registry.** It confirms the chart version and image tag for the environment's channel are published, read-only, with the user's existing login.
+  - **Offers the first run.** If they are not published, it offers to run the project's pipeline, and does so only on a yes.
+
+  `app_add.py --app-facts` then takes the chart source, the service values and the main image from the project, so they are not asked.
+- `platform-builder`: the GitOps repository link is validated once, before any other step reads or writes it (`gitops/argocd/scripts/repo_check.py`). The check confirms the repository is reachable with the user's own credentials and that at least one branch is an `argocd-gitops-tpl-library` environment. On such a branch, the root and `extras/` charts pin one release under one name, and `values.yaml` has an `apps` map. It also compares each environment branch with its siblings: library pins, values keys, files and the recorded branch. It stops for a repository of another kind or an empty one, and it asks before going on past broken branches, which are never used as templates. `platform app promote` now asks for the repository link too.
+- `platform-builder`: a developer reviews new work in the GitOps repository before it goes live (`gitops/argocd/references/review-gate.md`). `platform app add` commits a new app on a `review-<product>-<env>-<app>` branch and opens an MR/PR into the environment branch. The dev reviews it, pushes changes if needed and approves in chat; the skill then re-renders, merges and syncs. `platform env add`, `env clone` and `app promote` push the new environment branch and hand it over for review; the root Application is created only after approval. `gitops/argocd/scripts/review_links.py` prints the branch, MR/PR and file links. Changes to apps that already run keep the usual path.
+- `platform-builder`: once new apps are live, the report opens with what the developer keeps (`gitops/argocd/scripts/app_report.py`). For each app: its URL (Argo CD's live external URLs, else the hosts in its own files), its Argo CD Applications with UI links, links to its values file or manifests folder and to the line that declares it in the root `values.yaml`, then the root Application and the `argocd app sync` commands to run later, in order.
+- `platform-builder`: new GitOps values files follow the layout of the branch's existing ones (`gitops/argocd/scripts/yaml_style.py`): indent, list indent, blank lines between top-level keys and, depth by depth, between nested blocks, and the quote character. `app_add.py` learns it from the branch's own `values/` files, else from another environment branch in the clone, and prints which files it followed.
+- `platform-builder`: `core/scripts/naming.py` derives a new environment's label, chart, branch, namespace and root Application name. The cluster label is the one the GitOps repository's README records, else the repository's name, else the user is asked. The label prefixes the chart name (`<label>-<product>`), the library's `cluster` value stays unset, and the default branch is `<product>/<env>`.
+
+### Changed
+
+- Every skill's README lists its commands, what each does, and what it asks for when an input is missing. A command works on the project in the current directory when it is one, and asks for its path otherwise. Every other input is read from the repositories, or asked for, never guessed.
+- `platform-builder` is laid out for GitOps backends the way it is for CI platforms. Shared GitOps references and scripts are in `core/` (`gitops_library.py` holds the shared library handling), and Argo CD's references, workflows and scripts are in `gitops/argocd/`.
+- `platform-builder`: an onboard's report ends with the next step, which is to publish once and then run `platform env add` or `platform app add`.
+- CI runs the Argo CD GitOps suite in the platform-builder job, and the new `k8s-upgrade` suites. The workflows use `github-ci-library` 1.9.0. The entry-file test covers the GitOps and `k8s-upgrade` references and workflows.
+
+### Removed
+
+- Every skill's `PROMPT.md`. Agents route on the command (for example `platform app add`) through `SKILL.md`, so the copyable prompts only repeated the workflows. Each skill's README now has the command list.
+- `platform-builder`: the `platform ship` command. `platform env add` and `platform app add` add the environment and the app to the GitOps repository, and wire each app's CI deploy job.
+- The `gitops-manager` skill. Its commands are `platform-builder` commands now: `argocd env add|update|audit|clone` became `platform env …`, and `argocd app add|promote` became `platform app …`. Its scripts moved into `platform-builder` (see MIGRATION.md).
+
 ## [1.8.0] - 2026-10-27
 
 ### Added

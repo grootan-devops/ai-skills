@@ -1,0 +1,19 @@
+# smoke_test.sh replaces __NS__, __HOST__ and __INGRESS_CLASS__.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smoke
+  namespace: __NS__
+spec:
+  ingressClassName: __INGRESS_CLASS__
+  rules:
+    - host: __HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: smoke
+                port:
+                  name: http

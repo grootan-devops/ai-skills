@@ -1,0 +1,2 @@
+namespace	pvc	pod	node	used_bytes	capacity_bytes	source
+data	data-pg-0	pg-0	worker-1	2147483648	10737418240	kubelet-stats
