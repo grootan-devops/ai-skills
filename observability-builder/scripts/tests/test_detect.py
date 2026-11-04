@@ -159,7 +159,7 @@ class DetectOtherStacks(unittest.TestCase):
             "nuxt": ({"nuxt": "4", "vue": "3"}, "fullstack"),
             "react-router": ({"@react-router/node": "7", "react": "19"}, "fullstack"),
             "angular-express": ({"@angular/core": "20", "express": "5"}, "fullstack"),
-            "vue-spa": ({"vue": "3", "vite": "7"}, "spa"),
+            "vue-spa": ({"vue": "3", "vite": "7"}, None),
             "fastify": ({"fastify": "5"}, "api"),
         }
         with tempfile.TemporaryDirectory() as tmp:

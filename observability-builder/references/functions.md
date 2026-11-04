@@ -174,7 +174,7 @@ are kept for the places where CPU, memory or lock time needs attributing.
   time. Other runtimes differ ([profiling](signals/profiling.md#labels-per-runtime)).
 - Label values are bounded (code locations and fixed operation names), never IDs or secrets.
 - Static identity labels are set once when the profiler starts
-  ([data model](data-model.md#rum-and-profiling)).
+  ([data model](data-model.md#profiling)).
 - `trace_id` and `span_id` are never set by hand. Where the runtime supports span profiles, the
   span-profile integration links samples to spans; Node.js has none.
 

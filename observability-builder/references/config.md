@@ -16,14 +16,14 @@ loader in the service's language, part of the observability module ([layout.md](
 
 Only the features OpenTelemetry has no setting for read their own sections: log format, level
 and slow-step threshold, the access log, path exclusions, the `/metrics` server, profiling,
-RUM, and GenAI's content policy and Langfuse destination. Agents that read the environment
+and GenAI's content policy and Langfuse destination. Agents that read the environment
 before any application code runs (the Java agent, `opentelemetry-instrument`) get their values
 from the loader running in the container entrypoint first, which then starts the process with
 the variables it wrote.
 
 The file holds only connection details, static attributes, toggles and the access-log and
 exclusion lists. `resource` is shared; each signal section (`tracing`, `metrics`, `logging`,
-`profiling`, `rum`) is self-contained, with its own switch, exporter and options. `genai` adds
+`profiling`) is self-contained, with its own switch, exporter and options. `genai` adds
 LLM and agent telemetry on top of `tracing` and `metrics`.
 
 ## File location
@@ -136,28 +136,12 @@ profiling:
     headers: {}
   sample_rate: 100                           # samples per second
 
-rum:                                         # browser RUM and session replay (signals/rum.md)
-  enabled: false
-  exporter:
-    endpoint: "${OBS_RUM_ENDPOINT}"          # backend OTLP base the same-origin proxy forwards to, e.g. https://oneuptime.example.com/otlp
-    headers: {}                              # added by the proxy, never sent to the browser
-  app_identifier: "${OBS_SERVICE_NAME}"     # required when RUM is on; the browser's service.name
-  sample_ratio: 1.0                          # the browser's root sampling ratio
-  session_replay:
-    enabled: false                           # starts only with input masking in place
-    host: "${OBS_RUM_HOST}"                  # OneUptime origin the replay proxy forwards to (an origin, not a path)
-    headers: {}                              # added by the replay proxy; default rum.exporter.headers. Set it when
-                                             #   OTLP goes to a collector that holds the key, e.g.
-                                             #   x-oneuptime-token: "${file:/var/run/secrets/observability/oneuptime-token}"
-
 genai:                                       # LLM and agent telemetry (signals/genai.md)
   enabled: false
   content:                                   # prompts, completions, tool arguments and results,
-                                             #   retrieved documents: sent to one destination only
+                                             #   retrieved documents: sent to Langfuse only
     capture: "${OBS_GENAI_CONTENT:-off}"     # off | redacted | full: the most this environment
                                              #   allows; full only where the data is synthetic
-    destination: langfuse                    # langfuse | ops: the one tool that receives content
-                                             #   (ops: the ops backend's AI views, e.g. OneUptime)
     sample_ratio: 1.0                        # share of traces with content, decided by trace id
     max_chars: 20000                         # per content attribute, after redaction
     media: reference                         # reference | upload (upload only with full, to Langfuse)
@@ -180,7 +164,7 @@ genai:                                       # LLM and agent telemetry (signals/
 Each section is described on its signal page: [traces](signals/traces.md),
 [metrics](signals/metrics.md), [application logs](signals/app-logs.md),
 [access log](signals/access-log.md), [errors](signals/errors.md),
-[profiling](signals/profiling.md), [browser RUM](signals/rum.md) and [GenAI](signals/genai.md).
+[profiling](signals/profiling.md) and [GenAI](signals/genai.md).
 
 ### Exporter blocks
 
@@ -197,11 +181,7 @@ Each section is described on its signal page: [traces](signals/traces.md),
 | `headers` | `{}` | Added to every export request, e.g. backend auth when sending direct. |
 
 `profiling.exporter` has `endpoint` (default `http://localhost:4040`), `protocol` (`pyroscope`
-or `otlp`, default `pyroscope`) and `headers`. `rum.exporter` has `endpoint` and `headers`; the
-same-origin proxy adds those headers server-side, so they never reach the browser. The replay
-proxy adds `rum.session_replay.headers`, or `rum.exporter.headers` when it has none: with OTLP
-going to a collector that holds the backend key, `rum.exporter.headers` is empty and the replay
-key goes in `rum.session_replay.headers`.
+or `otlp`, default `pyroscope`) and `headers`.
 
 Apps send to the collector by default, and the collector adapts to each backend. Sending
 directly to a backend changes only the exporter blocks and the log output; the ops metrics stay
@@ -216,7 +196,7 @@ tracing:
     compression: gzip
     timeout: 10s
     headers:
-      x-oneuptime-token: "${file:/var/run/secrets/observability/token}"
+      authorization: "${file:/var/run/secrets/observability/authorization}"
 logging:
   output: [stdout, otlp]                     # no log-shipping collector: stdout and OTLP
   exporter: *backend
@@ -262,10 +242,9 @@ helpers and the stamping processor.
   `redacted` needs the feature's redactor, so a feature without one records nothing under a
   `redacted` ceiling. The chart sets `full` only where the data is synthetic; production takes
   `off`, or `redacted` when features with a redactor have the owner's sign-off.
-- **`content.destination`** names the one tool that receives content: `langfuse` (the
-  default) or `ops`, the ops backend's AI views (OneUptime's), never both and never logs or
-  metrics ([genai](signals/genai.md#destination)). `ops` needs mode `hybrid` or `otel`, or
-  Langfuse off.
+- **Content goes to Langfuse only,** never to the ops path, logs or metrics
+  ([genai](signals/genai.md#content-stays-in-langfuse)); content on with Langfuse off is
+  recorded nowhere.
 - **`langfuse.export`** picks who sends the spans. `app`: the SDK's span processor (`hybrid`,
   `sdk`) or the module's OTLP exporter (`otel`) on the module's own tracer provider, so both
   backends see the same trace ids. `collector`: the collector's Langfuse branch sends the AI spans
@@ -335,7 +314,6 @@ baseline in [acceptance.md](acceptance.md) uses it).
 | `logging.exporter.*` | `OTEL_EXPORTER_OTLP_LOGS_*`, the same keys as `tracing.exporter.*` |
 | `logging.format`, `logging.application.*`, `logging.access_log.*` | read by the module's logger, function wrappers (`slow_threshold`) and access-log middleware |
 | `profiling.*` | the profiler SDK's server address, headers and sample rate, or the OTLP profiles exporter |
-| `rum.*` | browser configuration served at runtime; exporter headers stay in the proxy |
 | `genai.content.capture`, `genai.enabled` | The content switches of every GenAI instrumentation, written even with GenAI off: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (`SPAN_ONLY` with `full`, otherwise `NO_CONTENT`), `OTEL_INSTRUMENTATION_GENAI_EMIT_EVENT=false`, `TRACELOOP_TRACE_CONTENT`, the `OPENINFERENCE_HIDE_*` set (embedding vectors always hidden) and `LANGFUSE_OBSERVE_DECORATOR_IO_CAPTURE_ENABLED`, all on only with `full`. Under `redacted`, only the module's content helper records content. Where a library has no variable, the module passes the option in code (for example `recordInputs`/`recordOutputs`, or a callback handler's capture flags) |
 | `genai.metrics.enabled` | No standard variable. The module records `gen_ai_client_*` at each model call and serves them on `/metrics` ([signals/metrics.md](signals/metrics.md)) |
 | `genai.langfuse.*` | No standard variable. The module's Langfuse span processor or exporter (app route) and its client (scores, and the app's prompts and datasets) take the base URL, keys, timeout, flush interval and scope as constructor options; the JS score client reads its flush settings from `LANGFUSE_FLUSH_AT` and `LANGFUSE_FLUSH_INTERVAL` only ([sdk-notes.md](sdk-notes.md#genai-and-langfuse)) |
@@ -380,18 +358,15 @@ of these. Verify against a real OTLP receiver at least once
 1. the raw file against the schema, where any scalar may still be a `${...}` string;
 2. the resolved file, with values converted to their types and empty values removed, against
    the schema again. It fails when a required key doesn't resolve: `resource.service.name`,
-   `resource.service.version`, `resource.environment`; when RUM is on,
-   `rum.exporter.endpoint` and `rum.app_identifier` (plus `rum.session_replay.host` with replay
-   on); and when Langfuse is on, `genai.langfuse.base_url`, plus both keys on the app route or
+   `resource.service.version`, `resource.environment`; and when Langfuse is on, `genai.langfuse.base_url`, plus both keys on the app route or
    with scores on.
 
 With GenAI on it also checks the settings against each other: literal Langfuse keys (an error
 for the secret key, a warning for the public key); the collector route with mode `sdk`, with
 tracing off or with exporter headers (direct export); scores on with mode `otel`, which sends
 none; an environment name Langfuse rejects; `full`
-content in a production-named environment; `media: upload` without `full`; the `ops`
-content destination with mode `sdk`, and the `langfuse` destination with content on and
-Langfuse off; AI-looking fields or full bodies in the access log; and a `base_url` with a path or
+content in a production-named environment; `media: upload` without `full`; content on with Langfuse
+off; AI-looking fields or full bodies in the access log; and a `base_url` with a path or
 plain http to a remote host.
 
 At runtime a bad configuration never stops the service. If the file is missing, unreadable or
@@ -425,7 +400,6 @@ section for them:
 | Correlation id header and validity rules | fixed, [hooks.md](hooks.md) |
 | Propagators, semconv opt-ins, batching, retries, limits | fixed in code (table above) |
 | `service.instance.id`, the SDK detectors' attributes | not set: the resource holds only the standard's eight attributes, plus `k8s.cluster.name` where several clusters send to one backend ([data-model.md](data-model.md#resource)) |
-| RUM masking marks and selectors | code |
 | AI features: names, tags, metadata, content opt-in and redactors, which AI entry points are always sampled | code, the feature registry ([signals/genai.md](signals/genai.md)) |
 | Prompts, score configs, model prices, evaluators, annotation queues | Langfuse itself, as a platform handoff ([backends/langfuse.md](backends/langfuse.md)) |
 | The content key families, the ops allow-list for AI spans | fixed by the standard, [signals/genai.md](signals/genai.md) |

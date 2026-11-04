@@ -17,7 +17,7 @@ difference.
 - **Each environment branch is a root chart plus an `extras/` chart.** Both pin the same
   library release.
 - **Branch names:**
-  - `<product>/<env>`, for example `oneuptime/dev` or `oneuptime/prod`
+  - `<product>/<env>`, for example `storefront/dev` or `storefront/prod`
   - `sandbox`, a single word
   - `<env>` is one of `dev`, `qa`, `test`, `uat`, `pre-prod` and `prod`
   - everything is lowercase kebab-case, with `/` only between product and env

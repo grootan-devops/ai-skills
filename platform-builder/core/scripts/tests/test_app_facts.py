@@ -19,7 +19,7 @@ variables:
   CHART_REPOSITORY: helm
   CHART_REGISTRY_PASSWORD: never-read
   IMAGE_REPOSITORY:
-    value: oneuptime/api
+    value: storefront/api
     description: where the image goes
 """
 GITHUB_RELEASE = """on: push
@@ -28,11 +28,11 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/release.yml@3.0.0
     with:
       image-registry: ghcr.io
-      chart-repository: oneuptime/charts
+      chart-repository: storefront/charts
       registry-token: never-read
 """
 CHART = """apiVersion: v2
-name: oneuptime-api
+name: storefront-api
 version: 1.4.0
 appVersion: 1.4.0
 dependencies:
@@ -41,7 +41,7 @@ dependencies:
     repository: oci://registry.example.com/helm
 """
 VALUES = """global:
-  partOf: oneuptime
+  partOf: storefront
   image:
     registry: registry.example.com
 component: api
@@ -84,13 +84,13 @@ class FactsTests(unittest.TestCase):
         info = app_facts.facts(self.repo)
         self.assertEqual(info["missing"], [])
         self.assertEqual(info["shape"], "service-with-chart")
-        self.assertEqual((info["chart"]["name"], info["chart"]["version"]), ("oneuptime-api", "1.4.0"))
+        self.assertEqual((info["chart"]["name"], info["chart"]["version"]), ("storefront-api", "1.4.0"))
         self.assertTrue(info["chart"]["serviceLibrary"])
-        self.assertEqual(info["image"], {"registry": "registry.example.com", "repository": "oneuptime/api",
+        self.assertEqual(info["image"], {"registry": "registry.example.com", "repository": "storefront/api",
                                          "derived": True})
         self.assertEqual(info["ci"]["pin"], "2.1.0")
         self.assertEqual(info["ci"]["publish"], {"CHART_DIR": "deploy/chart", "CHART_REGISTRY": "registry.example.com",
-                                                 "CHART_REPOSITORY": "helm", "IMAGE_REPOSITORY": "oneuptime/api"})
+                                                 "CHART_REPOSITORY": "helm", "IMAGE_REPOSITORY": "storefront/api"})
 
     def test_an_explicit_image_repository_wins_over_the_library_default(self):
         self.onboarded()
@@ -98,7 +98,7 @@ class FactsTests(unittest.TestCase):
                    .replace("component: api", "component: api\nsubComponent: worker"))
         self.assertEqual(app_facts.facts(self.repo)["image"]["repository"], "team/api-server")
         self.write("deploy/chart/values.yaml", VALUES.replace("component: api", "component: api\nsubComponent: worker"))
-        self.assertEqual(app_facts.facts(self.repo)["image"]["repository"], "oneuptime/api/worker")
+        self.assertEqual(app_facts.facts(self.repo)["image"]["repository"], "storefront/api/worker")
 
     def test_github_settings_come_from_library_job_inputs_without_credentials(self):
         self.write(".github/workflows/release.yml", GITHUB_RELEASE)
@@ -106,7 +106,7 @@ class FactsTests(unittest.TestCase):
         info = app_facts.facts(self.repo)
         self.assertEqual(info["shape"], "chart-only")
         self.assertEqual(info["ci"]["pin"], "3.0.0")
-        self.assertEqual(info["ci"]["publish"], {"image-registry": "ghcr.io", "chart-repository": "oneuptime/charts"})
+        self.assertEqual(info["ci"]["publish"], {"image-registry": "ghcr.io", "chart-repository": "storefront/charts"})
 
     def test_a_project_without_a_pin_or_artifacts_is_handed_to_platform_builder(self):
         self.write(".gitlab-ci.yml", "stages: [test]\n")
@@ -133,27 +133,27 @@ class PublishedTests(unittest.TestCase):
     def test_ready_when_the_listed_chart_and_its_image_tag_exist(self):
         with patch.object(app_facts.shutil, "which", which("crane")), \
                 patch.object(app_facts, "_run", side_effect=[(0, "1.3.0\n1.4.0"), (0, "{}")]) as run:
-            got = app_facts.published("oneuptime-api", "oci://registry.example.com/helm",
-                                      "registry.example.com/oneuptime/api")
+            got = app_facts.published("storefront-api", "oci://registry.example.com/helm",
+                                      "registry.example.com/storefront/api")
         self.assertEqual(got["status"], "ready")
         self.assertEqual((got["chart"]["version"], got["image"]["tag"]), ("1.4.0", "1.4.0"))
-        self.assertEqual(run.call_args_list[0].args[0], ["crane", "ls", "registry.example.com/helm/oneuptime-api"])
-        self.assertEqual(run.call_args_list[1].args[0], ["crane", "manifest", "registry.example.com/oneuptime/api:1.4.0"])
+        self.assertEqual(run.call_args_list[0].args[0], ["crane", "ls", "registry.example.com/helm/storefront-api"])
+        self.assertEqual(run.call_args_list[1].args[0], ["crane", "manifest", "registry.example.com/storefront/api:1.4.0"])
 
     def test_missing_before_the_first_publish(self):
         with patch.object(app_facts.shutil, "which", which("oras", "docker")), \
                 patch.object(app_facts, "_run", side_effect=[(0, ""), ]):
-            got = app_facts.published("oneuptime-api", "oci://registry.example.com/helm", None)
+            got = app_facts.published("storefront-api", "oci://registry.example.com/helm", None)
         self.assertEqual((got["status"], got["chart"]["found"]), ("missing", False))
         with patch.object(app_facts.shutil, "which", which("helm", "docker")), \
                 patch.object(app_facts, "_run", side_effect=[(0, "{}"), (1, "manifest unknown")]):
-            got = app_facts.published("oneuptime-api", "oci://registry.example.com/helm",
-                                      "registry.example.com/oneuptime/api", version="1.4.0")
+            got = app_facts.published("storefront-api", "oci://registry.example.com/helm",
+                                      "registry.example.com/storefront/api", version="1.4.0")
         self.assertEqual((got["status"], got["chart"]["found"], got["image"]["found"]), ("missing", True, False))
 
     def test_without_tools_or_a_version_it_could_not_check(self):
         with patch.object(app_facts.shutil, "which", which()):
-            got = app_facts.published("oneuptime-api", "oci://registry.example.com/helm", None)
+            got = app_facts.published("storefront-api", "oci://registry.example.com/helm", None)
         self.assertEqual(got["status"], "unknown")
         self.assertIn("--version", got["chart"]["tool"])
 

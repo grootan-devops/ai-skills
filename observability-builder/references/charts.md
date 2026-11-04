@@ -13,7 +13,7 @@ instead of editing the chart.
 | 1 | `observability.yml` from a ConfigMap, mounted at `/etc/observability/observability.yml`, with `OBSERVABILITY_CONFIG` pointing at it | one config file per environment ([config.md](config.md), [layout.md](layout.md)) |
 | 2 | backend tokens from Secrets, mounted as files (for example under `/var/run/secrets/observability/`) and referenced in the yml as `${file:/var/run/secrets/observability/<name>}` | secrets never sit in the ConfigMap or in literal env values |
 | 3 | downward-API env: pod name, pod UID, namespace and node name; where several clusters send to one backend, also the cluster's name (`K8S_CLUSTER_NAME`) from a cluster-level chart value, since the downward API doesn't provide it | the yml adds them to the resource, and the collector matches telemetry to its pod by UID |
-| 4 | pod annotations `resource.opentelemetry.io/service.name`, `…/service.namespace`, `…/service.version` and `…/deployment.environment.name`, rendered from the same values as the yml's resource, plus one for every other attribute the yml's `resource.attributes` sets beyond the pod identity (for example `…/oneuptime.label.<key>`) | collector-derived telemetry (stdout logs, scraped metrics, eBPF data) gets the same identity as the SDK's: the yml's resource reaches only what the SDK sends ([data-model.md](data-model.md)) |
+| 4 | pod annotations `resource.opentelemetry.io/service.name`, `…/service.namespace`, `…/service.version` and `…/deployment.environment.name`, rendered from the same values as the yml's resource, plus one for every other attribute the yml's `resource.attributes` sets beyond the pod identity (`…/<attribute>`) | collector-derived telemetry (stdout logs, scraped metrics, eBPF data) gets the same identity as the SDK's: the yml's resource reaches only what the SDK sends ([data-model.md](data-model.md)) |
 | 5 | a named metrics port (for example `http-metrics` on 9464) on the container and the Service, and a ServiceMonitor or PodMonitor for `/metrics` on it | Prometheus or the collector discovers and scrapes the endpoint the yml declares ([signals/metrics.md](signals/metrics.md)) |
 | 6 | colourised logs switched off | colour codes break `json` and `plain` parsing |
 | 7 | `/metrics` and the health endpoints kept off public ingress | they are internal; the ingress routes application paths only |
@@ -123,12 +123,6 @@ The resource carries nothing else ([data-model.md](data-model.md#resource)).
   metrics port and no monitor, because nothing scrapes a process that exits. Keep finished pods
   long enough for the collector to read their last log lines
   ([workloads/batch.md](workloads/batch.md)).
-- **Frontends served by nginx:** mount the runtime RUM config (`observability.json`) per
-  environment, and the nginx configuration with the JSON access log and the same-origin
-  `/telemetry/` routes to the collector; a replay key injected by nginx comes from a Secret
-  (`rum.session_replay.headers`), for example as an nginx include file holding the
-  `proxy_set_header` line. The proxy locations follow the tested snippet in
-  [workloads/spa.md](workloads/spa.md#the-nginx-proxy).
 - **Collector address:** endpoints default to the collector named in the yml; per-environment
   overrides go in through the `OBS_*_ENDPOINT` variables the yml interpolates.
 - **AI services on the collector route:** the Langfuse keys go to the collector's Secret

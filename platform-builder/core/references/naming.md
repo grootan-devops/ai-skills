@@ -21,10 +21,10 @@ generated names carry the label once.
 
 | Name | Rule | Example (label `edge-east`) |
 | --- | --- | --- |
-| Chart (root and `extras/`) | `<label>-<product>` | `edge-east-oneuptime` |
-| Branch | `<product>/<env>`, or `<product>` without an environment | `oneuptime/dev` |
-| Default namespace | `<product>-<env>` | `oneuptime-dev` |
-| Root Application | `<chart>-<env>-root`, or `<chart>-root` without an environment | `edge-east-oneuptime-dev-root` |
+| Chart (root and `extras/`) | `<label>-<product>` | `edge-east-storefront` |
+| Branch | `<product>/<env>`, or `<product>` without an environment | `storefront/dev` |
+| Default namespace | `<product>-<env>` | `storefront-dev` |
+| Root Application | `<chart>-<env>-root`, or `<chart>-root` without an environment | `edge-east-storefront-dev-root` |
 
 Child Application names are built by the library from the chart name, the app keys and the
 environment. Read them from `helm template`, never by hand.

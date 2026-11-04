@@ -321,7 +321,7 @@ class AppAddTests(unittest.TestCase):
             self.run_add("--app", "orders", *self.chart_args())
         self.assertIn("ships no docs/chart-contract.json", str(stop.exception))
 
-    def facts(self, status="ready", image_ref="registry.example.com/oneuptime/orders/dev"):
+    def facts(self, status="ready", image_ref="registry.example.com/storefront/orders/dev"):
         facts = {"chart": {"name": "orders", "dir": str(self.svc)},
                  "image": {"registry": "registry.example.com"},
                  "published": {"status": status,
@@ -340,14 +340,14 @@ class AppAddTests(unittest.TestCase):
                                                           "version": "1.4.0-rc.7-3", "name": "orders"})
         body = yaml.safe_load((self.root / "values" / "orders.yaml").read_text(encoding="utf-8"))
         self.assertEqual(body["containers"]["main"]["image"],
-                         {"repository": "oneuptime/orders/dev", "tag": "1.4.0-rc.7-3"})
+                         {"repository": "storefront/orders/dev", "tag": "1.4.0-rc.7-3"})
         self.assertNotIn("image", body["global"])
 
     def test_app_facts_name_another_registry_when_ci_pushed_elsewhere(self):
-        self.run_add("--app", "orders", "--app-facts", self.facts(image_ref="ghcr.io/oneuptime/orders"))
+        self.run_add("--app", "orders", "--app-facts", self.facts(image_ref="ghcr.io/storefront/orders"))
         body = yaml.safe_load((self.root / "values" / "orders.yaml").read_text(encoding="utf-8"))
         self.assertEqual(body["global"]["image"], {"registry": "ghcr.io"})
-        self.assertEqual(body["containers"]["main"]["image"]["repository"], "oneuptime/orders")
+        self.assertEqual(body["containers"]["main"]["image"]["repository"], "storefront/orders")
 
     def test_app_facts_of_an_unpublished_chart_stop(self):
         with self.assertRaises(SystemExit) as stop:

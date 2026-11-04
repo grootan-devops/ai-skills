@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from opentelemetry.proto.logs.v1 import logs_pb2
@@ -132,29 +132,6 @@ RESOURCE_KEYS = {"traces": "resourceSpans", "metrics": "resourceMetrics", "logs"
 
 def resources(payload) -> list[dict]:
     return [attributes((r.get("resource") or {}).get("attributes")) for r in payload.data.get(RESOURCE_KEYS[payload.signal], [])]
-
-
-def is_browser_resource(res: dict) -> bool:
-    """RUM is classified by the browser.* resource attributes (or the user agent)."""
-    return "user_agent.original" in res or any(str(key).startswith("browser.") for key in res)
-
-
-def split_browser(payloads) -> tuple[list, list]:
-    """(server payloads, browser payloads), split per resource; a mixed payload yields one of each."""
-    server, browser = [], []
-    for payload in payloads:
-        key = RESOURCE_KEYS[payload.signal]
-        groups = payload.data.get(key, [])
-        flags = [is_browser_resource(attributes((g.get("resource") or {}).get("attributes"))) for g in groups]
-        if not any(flags):
-            server.append(payload)
-        elif all(flags):
-            browser.append(payload)
-        else:  # never seen in practice: the browser's proxy forwards the browser's own requests
-            for want, out in ((False, server), (True, browser)):
-                data = {**payload.data, key: [g for g, flag in zip(groups, flags) if flag == want]}
-                out.append(replace(payload, data=data, raw=json.dumps(data).encode()))
-    return server, browser
 
 
 def spans(payloads) -> list[Span]:

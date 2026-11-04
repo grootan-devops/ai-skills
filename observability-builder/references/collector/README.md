@@ -44,7 +44,7 @@ node CPU (eBPF)        ─► pyroscope.ebpf ─────────┴─�
 | --- | --- | --- |
 | Receive | `otelcol.receiver.otlp` | gRPC on 4317 and HTTP on 4318, reachable inside the cluster only |
 | Limit memory | `otelcol.processor.memory_limiter` | the first processor; `limit_percentage` and `spike_limit_percentage` of the container's memory, so it triggers below the container limit; over the limit it refuses data, and senders retry or drop — applications never block |
-| Kubernetes identity | `otelcol.processor.k8sattributes` | `otel_annotations = true` in `extract`, so `resource.opentelemetry.io/*` annotations set `service.*`, `deployment.environment.name` and any extra attribute the chart annotates, such as a backend's label attributes (without it, a well-known label such as `app.kubernetes.io/instance` can win for `service.name`); extracts only `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid` and `k8s.node.name`; pods matched by `k8s.pod.uid`, then by the connection's IP. It can't provide `k8s.cluster.name`: where several clusters send to one backend, that comes from the app's env, set by the chart per cluster, and each cluster's collector adds it to what it collects itself (scraped metrics, file logs) with a `resource` processor (`action: upsert`) set from the same per-cluster value. Browser RUM bypasses it: a frontend's same-origin proxy forwards browser OTLP, so the connection's IP is the proxy pod's and would stamp that pod onto every browser; route resources with `browser.*` attributes around this processor |
+| Kubernetes identity | `otelcol.processor.k8sattributes` | `otel_annotations = true` in `extract`, so `resource.opentelemetry.io/*` annotations set `service.*`, `deployment.environment.name` and any extra attribute the chart annotates, such as a backend's label attributes (without it, a well-known label such as `app.kubernetes.io/instance` can win for `service.name`); extracts only `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid` and `k8s.node.name`; pods matched by `k8s.pod.uid`, then by the connection's IP. It can't provide `k8s.cluster.name`: where several clusters send to one backend, that comes from the app's env, set by the chart per cluster, and each cluster's collector adds it to what it collects itself (scraped metrics, file logs) with a `resource` processor (`action: upsert`) set from the same per-cluster value. |
 | Host and cloud identity | none | application telemetry carries only the standard's resource attributes, the eight plus `k8s.cluster.name` where it is used ([data-model.md](../data-model.md#resource)), so its pipelines run no `resourcedetection` |
 | Normalise | `otelcol.processor.transform` | maps legacy names and native fields; never masks or redacts — safe capture happens in code ([safe-capture.md](../safe-capture.md)) |
 | Batch | `otelcol.processor.batch` | the last processor before the exporters |
@@ -123,7 +123,7 @@ otelcol.processor.k8sattributes "default" {
 | Identity | the pod's resource, from the same annotations as SDK telemetry, extra attributes such as backend labels included |
 | Export | into the OTLP pipeline; `otelcol.receiver.loki` bridges the `loki.*` stages |
 
-The `json` format, mapped in Alloy (tested with Alloy 1.20 against OneUptime). The source's
+The `json` format, mapped in Alloy (tested with Alloy 1.20 against the local receiver). The source's
 labels (the pod's identity) become record attributes first; an `otelcol.processor.groupbyattrs`
 on the identity keys then moves them to the resource:
 
@@ -166,7 +166,7 @@ otelcol.processor.transform "lines" {
 }
 ```
 
-The `plain` format (tested with Alloy 1.20 against OneUptime, Java stack traces included) needs
+The `plain` format (tested with Alloy 1.20 against the local receiver, Java stack traces included) needs
 two additions. The multiline stage runs only on the plain sources, a separate `loki.process`
 fed by the pods or files that write `plain`: on a JSON source it would join every line into one
 record, because JSON lines don't start with a timestamp.
@@ -223,8 +223,8 @@ same name.
 - Engine metrics — an exporter scrape or a receiver — run in their own pipeline and are never
   merged with application telemetry.
 - Its `transform` deletes the scrape's `service.name` and `service.instance.id` and sets
-  `db.system.name`, `server.address`, `server.port` and any backend-specific identity, such as
-  OneUptime's `oneuptime.database.server.id` ([OneUptime](../backends/oneuptime.md#databases)).
+  `db.system.name`, `server.address`, `server.port` and any identity the backend needs for its
+  database views.
 - A database identity is never stamped onto application telemetry.
 
 ### Profiles
@@ -280,8 +280,8 @@ as orphans unless they match too, so excluding at the source is preferred.
 For services that send their AI spans to Langfuse through the collector
 (`genai.langfuse.export: collector`, with mode `hybrid` or `otel`; [signals/genai.md](../signals/genai.md),
 [backends/langfuse.md](../backends/langfuse.md)). The app exports as usual, content and the
-feature stamps included; the collector splits each trace into an ops copy, with content only
-for the services whose content destination is `ops`, and the AI part for Langfuse. Raise the
+feature stamps included; the collector splits each trace into an ops copy without content and
+the AI part for Langfuse. Raise the
 receiver's gRPC `max_recv_msg_size` (default 4 MiB) when the spans carry content. Content
 crosses the cluster in clear between the app and the collector.
 
@@ -289,15 +289,14 @@ crosses the cluster in clear between the app and the collector.
 The ops branch:
 
 - drops Langfuse event spans, experiment runs and `gen_ai.*` span events;
-- gives AI spans their user, team and conversation from the stamps, and their error type as the
-  status description;
+- gives AI spans their conversation from the stamps, and their error type as the status
+  description;
 - keeps only the allow-list on AI spans, and removes the AI keys from every other span;
-- deletes every `langfuse.*` key, and every content key except on the AI spans of the services
-  whose content destination is `ops` ([genai](../signals/genai.md#destination)).
+- deletes every `langfuse.*` key and every content key
+  ([genai](../signals/genai.md#content-stays-in-langfuse)).
 
 The Langfuse branch keeps the stamped spans of AI features and the spans of experiment items,
-minus non-AI client and producer spans, and drops the content of the `ops` services. Both
-branches list those services by `service.name`, in the same regex (`^$` while there are none):
+minus non-AI client and producer spans:
 
 ```alloy
 // Ops branch. The transform's traces output replaces the ops path's batch input.
@@ -324,19 +323,15 @@ otelcol.processor.transform "ops_genai" {
       // provider's message (it can quote the input). Before the allow-list, which drops the type keys.
       `set(span.status.message, span.attributes["error.type"]) where span.status.message != "" and span.attributes["error.type"] != nil and span.attributes["observability.ai_span"] == true`,
       `set(span.status.message, "") where span.status.message != "" and span.attributes["error.type"] == nil and span.attributes["observability.ai_span"] == true`,
-      // AI spans: the spender, team and conversation from the stamps, where LLM views read them.
-      `set(span.attributes["user.id"], span.attributes["langfuse.user.id"]) where span.attributes["observability.ai_span"] == true and span.attributes["langfuse.user.id"] != nil`,
-      `set(span.attributes["team.id"], span.attributes["langfuse.trace.metadata.team"]) where span.attributes["observability.ai_span"] == true and span.attributes["langfuse.trace.metadata.team"] != nil`,
+      // AI spans: the conversation from the stamps.
       `set(span.attributes["gen_ai.conversation.id"], span.attributes["langfuse.session.id"]) where span.attributes["observability.ai_span"] == true and span.attributes["gen_ai.conversation.id"] == nil and span.attributes["langfuse.session.id"] != nil`,
-      // AI spans keep only the allow-list and the GenAI conventions' content keys, so an unknown
-      // content key can't pass; the content keys go again below unless the destination is ops.
-      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|definitions|call\\.(id|arguments|result))|conversation\\.id|data_source\\.id|retrieval\\.(top_k|documents|query\\.text)|memory\\.(store\\.id|record\\.(id|count)|query\\.text|records)|input\\.messages|output\\.messages|system_instructions|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|openinference\\.span\\.kind|llm\\.(model_name|provider|system|token_count\\..+|request\\.type|usage\\.total_tokens)|traceloop\\.span\\.kind|mcp\\.(method\\.name|protocol\\.version|session\\.id|resource\\.uri)|jsonrpc\\.(request\\.id|protocol\\.version)|rpc\\.response\\.status_code|network\\.(transport|protocol\\.(name|version))|client\\.(address|port)|user\\.id|team\\.id|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+|observability\\.ai_span)$") where span.attributes["observability.ai_span"] == true`,
-      // Other spans: no AI keys, which would make OneUptime count them as AI calls.
+      // AI spans keep only the allow-list, so an unknown content key can't pass.
+      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|call\\.id)|conversation\\.id|data_source\\.id|retrieval\\.top_k|memory\\.(store\\.id|record\\.(id|count))|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|openinference\\.span\\.kind|llm\\.(model_name|provider|system|token_count\\..+|request\\.type|usage\\.total_tokens)|traceloop\\.span\\.kind|mcp\\.(method\\.name|protocol\\.version|session\\.id|resource\\.uri)|jsonrpc\\.(request\\.id|protocol\\.version)|rpc\\.response\\.status_code|network\\.(transport|protocol\\.(name|version))|client\\.(address|port)|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+|observability\\.ai_span)$") where span.attributes["observability.ai_span"] == true`,
+      // Other spans: no AI keys, which would make LLM views count them as AI calls.
       `delete_matching_keys(span.attributes, "^(gen_ai|llm|traceloop)\\..*") where span.attributes["observability.ai_span"] == nil`,
-      // Every span: no stamps, and no content except on the AI spans of the services whose
-      // genai.content.destination is ops, matched by service.name ("^$" while there are none).
+      // Every span: no stamps and no content.
       `delete_matching_keys(span.attributes, "^langfuse\\..*")`,
-      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$") where not (span.attributes["observability.ai_span"] == true and IsMatch(resource.attributes["service.name"], "^$"))`,
+      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$")`,
       `delete_key(span.attributes, "observability.ai_span")`,
     ]
   }
@@ -353,19 +348,6 @@ otelcol.processor.filter "langfuse" {
       `attributes["langfuse.trace.name"] == nil and attributes["langfuse.experiment.id"] == nil`,
       // scope ai_context; for ai_only, drop every span without a GenAI operation or type instead.
       `(kind == SPAN_KIND_CLIENT or kind == SPAN_KIND_PRODUCER) and attributes["gen_ai.operation.name"] == nil`,
-    ]
-  }
-  output { traces = [otelcol.processor.transform.langfuse_content.input] }
-}
-
-// The services whose content destination is ops (the same list as the ops branch's) send their
-// AI steps to Langfuse without content.
-otelcol.processor.transform "langfuse_content" {
-  error_mode = "ignore"
-  trace_statements {
-    context    = "span"
-    statements = [
-      `delete_matching_keys(span.attributes, "^(gen_ai\\.(input\\.messages|output\\.messages|system_instructions|tool\\.definitions|tool\\.call\\.(arguments|result)|retrieval\\.(documents|query\\.text)|memory\\.(query\\.text|records)|evaluation\\.explanation|prompt|completion)|gen_ai\\.prompt\\.[0-9]+\\..*|gen_ai\\.prompt\\.variable.*|gen_ai\\.completion\\..*|traceloop\\.entity\\.(input|output)|input\\.value|output\\.value|llm\\.(input|output)_messages\\..*|llm\\.prompts\\..*|llm\\.prompt_template\\.(template|variables)|llm\\.tools\\..*|retrieval\\.documents\\..*|reranker\\..*|embedding\\.embeddings\\..*|ai\\.prompt.*|ai\\.response\\.(text|object|toolCalls)|ai\\.toolCall\\.(args|result))$") where IsMatch(resource.attributes["service.name"], "^$")`,
     ]
   }
   output { traces = [otelcol.processor.batch.langfuse.input] }

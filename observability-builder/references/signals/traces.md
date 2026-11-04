@@ -58,7 +58,7 @@ traces are kept.
     attributes; sizes and summaries only. A path segment that holds an email is masked as
     `{email}` in `url.path` on `SERVER` spans and in `url.full` and `url.path` on `CLIENT` spans;
     ids stay visible. AI content (prompts, completions, tool arguments and results) goes only to
-    the content destination, Langfuse or the ops backend's AI views, through the content policy
+    Langfuse, through the content policy
     ([genai.md](genai.md#content)).
 
 ## Fields

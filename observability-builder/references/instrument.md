@@ -34,7 +34,7 @@ Run `python3 scripts/detect.py <project>` and read what it can't see. Establish:
   files (a mounted `application.yml` given with `--spring.config.location` replaces the packaged
   one), and the project's own agent rules.
 
-Classify the workload with the workload pages (`workloads/`) (API, worker, BFF, fullstack, SPA,
+Classify the workload with the workload pages (`workloads/`) (API, worker, BFF, fullstack,
 gateway, MCP server, AI agent, batch).
 
 ## 2. Ask
@@ -43,7 +43,7 @@ Suggest an answer for each question from what you found, then use what the user 
 
 | Question | Why it matters |
 | --- | --- |
-| Where does each signal go — a collector (endpoint) or directly to a backend (endpoint, auth header, token file path)? Do several clusters send to the same backend? | Sets every `exporter` block; tokens stay in mounted files; a backend shared by clusters needs `k8s.cluster.name` in the resource ([data-model.md](data-model.md#resource)); in OneUptime, profiles can't be told apart by cluster or environment within one project ([oneuptime.md](backends/oneuptime.md#profiles)) |
+| Where does each signal go — a collector (endpoint) or directly to a backend (endpoint, auth header, token file path)? Do several clusters send to the same backend? | Sets every `exporter` block; tokens stay in mounted files; a backend shared by clusters needs `k8s.cluster.name` in the resource ([data-model.md](data-model.md#resource)) |
 | Do logs go to stdout only, OTLP only, or both? | stdout-only needs a collector that ships pod logs; errors are reported from logs |
 | The ops metrics are served on `/metrics` on their own port (default 9464) for Prometheus or the collector to scrape: which port, and who scrapes it? Does the team want app metrics pushed over OTLP as well (off by default)? | The port needs a chart service port and monitor; ops metrics are the default set, app metrics are added only on request |
 | Log level per environment, and the slow-step threshold (`logging.application.slow_threshold`, e.g. `2s`)? | The level controls the volume; steps slower than the threshold log a WARN |
@@ -54,14 +54,12 @@ Suggest an answer for each question from what you found, then use what the user 
 | Function-span scope: the API work and every call to another service (default), or a narrower first pass? Which dependencies does the service call, and by what name should each appear (`service.peer.name`)? | Start-up code, helpers and middleware never get spans; peer names make dependencies readable in every backend |
 | Which request headers, response headers, named cookies and body fields may the access log carry? | Allow-lists only; nothing secret |
 | Which business attributes should the main functions record? Propose them from the enrichment catalogue ([enrichment.md](enrichment.md)). | Attributes are code, not config |
-| For frontends: which form fields are sensitive? Is there a consent tool? Which OneUptime host, app identifier and key type (Browser or Server) does RUM use? | Session replay and RUM masking are set in code and the replay policy; the key type decides whether the proxy passes `Origin` on |
 | For AI features: which features are there, under which names (kebab-case), and which entry points start each (routes, WebSocket message types, job names, queue consumers, MCP tool handlers)? | Feature names are the Langfuse trace names; the entry points are always sampled, because LLM views count spend from the spans they receive ([genai.md](signals/genai.md)) |
-| For AI features, who spent what: for each entry point, who does the AI work run for (the signed-in user, an API client or service account, the user behind a job, an MCP client's subject), and what group owns the spend (tenant, workspace, organisation, team, project, cost centre, or none)? What is the conversation id? Propose the answers from the app's auth, tenancy and billing code. | Nothing is fixed by the standard: the values come from the app's verified context and reach both LLM tools, as `user.id`, `team.id` and `gen_ai.conversation.id` on AI spans ([genai.md](signals/genai.md#who-spent-what)) |
-| Which tool shows AI content, Langfuse or the ops backend's AI views (OneUptime)? Never both. | Sets `genai.content.destination`; with `ops`, content lives in the ops backend under its project's access and retention ([genai.md](signals/genai.md#destination)) |
+| For AI features, who spent what: for each entry point, who does the AI work run for (the signed-in user, an API client or service account, the user behind a job, an MCP client's subject), and what group owns the spend (tenant, workspace, organisation, team, project, cost centre, or none)? What is the conversation id? Propose the answers from the app's auth, tenancy and billing code. | Nothing is fixed by the standard: the values come from the app's verified context and reach Langfuse as its trace context; AI spans on the ops path carry `gen_ai.conversation.id` ([genai.md](signals/genai.md#who-spent-what)) |
 | Does AI telemetry go to Langfuse too? Cloud (which region) or self-hosted (which URL)? One project per environment, or separate projects for production and non-production (recommended when non-production may hold real data)? The app route or the collector route? Where are the keys mounted? Which mode: `hybrid`, `sdk` (Python and TypeScript) or `otel` (no scores), and should environments switch between them? | Sets `genai.langfuse.*` and the handoff; keys stay in mounted files; app code is the same in every mode, so a variable can pick it per environment ([genai.md](signals/genai.md#modes)) |
 | Which content may each environment record (`full` only where data is synthetic)? Which features may record redacted content in production, with which redactor, signed off by whom? Media as references or uploads? | Content is the riskiest telemetry an AI service has; production defaults to `off` ([genai.md](signals/genai.md#content)) |
 | For MCP: does the service run an MCP server, call MCP servers, or both? Which transport (stdio, Streamable HTTP)? Does the SDK trace MCP itself? Which tools and prompts does the server register, and which servers does the client call? | One span source per side; the registered names bound the MCP metrics' `target` label ([mcp.md](workloads/mcp.md)) |
-| Which models does the service call that the LLM tools can't price (self-hosted, fine-tuned, gateway aliases, deployment names)? | Unpriced models cost 0 in both tools until the platform adds their prices: a handoff ([oneuptime.md](backends/oneuptime.md#ai--llm-monitoring), [langfuse.md](backends/langfuse.md#usage-cost-and-models)) |
+| Which models does the service call that the LLM tools can't price (self-hosted, fine-tuned, gateway aliases, deployment names)? | Unpriced models cost 0 in Langfuse until the platform adds their prices: a handoff ([langfuse.md](backends/langfuse.md#usage-cost-and-models)) |
 | Does the app use Langfuse prompt management, and where does it fetch? Which scores does the service send (user feedback, approval decisions, in-app evaluations)? Does any step wait for a person to approve? Should prompt or model changes be judged on a dataset first (experiments, and which datasets)? | Prompt management is the app's own: the instrumentation links each generation to the prompt it used and moves any Langfuse client into the module; scores need stable ids and score configs; approvals are three linked traces; an experiment runner is a command in the repository that runs where content may be `full` ([ai-agent.md](workloads/ai-agent.md)) |
 | When responses hide the outcome (a 2xx envelope with a status in the body, a catch-all 4xx for server errors): should the body's status be recorded and counted? | Status-based dashboards miss those failures; opting in adds `app.result.status`, the real-outcome access-log level and `app_request_results_total` ([errors.md](signals/errors.md#required-behaviour), item 11) |
 | Are breaking changes acceptable now (access-log format, log format, metric names, vendor SDK removal)? | Dashboards, alerts and parsers may depend on the old shape |
@@ -130,8 +128,7 @@ secret shipped in a bundle, an auth flow that puts a token in a URL, a dependenc
 belong to other review layers: leave them out. So do the app's own uses of Langfuse (how it
 fetches, caches and falls back on prompts, its datasets), which are the developers' call: at most a
 line in the handoff list. Where telemetry has to work around one, describe only the telemetry
-side, for example "query values are redacted on the auth callback route and replay starts after
-it".
+side, for example "query values are redacted on the auth callback route".
 
 ## 6. Implement
 
@@ -188,8 +185,8 @@ Work in this order so each step builds on the previous one:
     - the step helpers (retrieval, memory, tools, agents, workflows, guardrails, evaluations) and
       the content helper with the features' redactors, the size cap, and the turn's input and
       output for the trace;
-    - the ops guard around the ops exporter: identity onto AI spans, the allow-list, content
-      only at the `ops` destination, no AI keys on other spans; and, with Langfuse on, the
+    - the ops guard around the ops exporter: the conversation onto AI spans, the allow-list, no
+      content and no AI keys on other spans; and, with Langfuse on, the
       mode's wiring (the SDK's processor, or the module's OTLP exporter) on the same provider, on
       a transport that reads no `OTEL_EXPORTER_OTLP_*` variable, as the one span sender;
     - for MCP, the adapter or the SDK's own tracing, `params._meta` propagation and the MCP
@@ -206,22 +203,7 @@ Work in this order so each step builds on the previous one:
       `genai.experiment_item()` around the feature's own functions, fixture data for tools, the
       evaluators and their scores ([signals/genai.md](signals/genai.md#experiments)).
 13. Shutdown: flush on signals and before every explicit process exit.
-14. Frontends ([signals/rum.md](signals/rum.md), [workloads/fullstack.md](workloads/fullstack.md) or [workloads/spa.md](workloads/spa.md)):
-    - the browser module, started before the app renders: the web tracer, meter and logger
-      providers; document-load and fetch instrumentation; route-change spans with `app.route`
-      templates; error handlers; web vitals;
-    - the same-origin proxy routes for OTLP and session replay; the backend key stays on the
-      server;
-    - runtime-served configuration, never build-time variables;
-    - URL and exception-message cleaning before export;
-    - masking marks: `oneuptime-block` on inputs that take personal data and on elements whose
-      attributes or image sources carry it, `oneuptime-mask` on text that shows it;
-    - the replay recorder loaded after the web SDK, with `session.id` taken from it, and not on
-      login or OAuth callback pages;
-    - the proxy forwards no `Cookie`, `Referer` or `Authorization`.
-
-    Report the replay-policy settings the masking plan needs. The skill doesn't change them.
-15. `observability.yml` and the dependency manifest. Leave lockfiles to the project's normal
+14. `observability.yml` and the dependency manifest. Leave lockfiles to the project's normal
     install when it needs credentials you don't have, and say so.
 
 Follow the project's rules from step 1 throughout (env loading, error helpers, logging
@@ -290,28 +272,12 @@ sanitizers, test conventions).
   - OTLP metrics arrive only if `metrics.otlp` is on;
   - profiles arrive under the service name with the resource attributes as static labels.
 
-  For pages, run the receiver with `--replay-assets <dir>` and drive them in a headless browser:
-  - get the recorder files (`loader.js`, `recorder.js`, `manifest.json`) from the OneUptime host's
-    `/telemetry/session-replay/` routes or the deployment's image;
-  - Playwright with an installed Chrome is enough;
-  - load a page, navigate, type test values into the sensitive fields, call the API, trigger an
-    error; load the OAuth callback route with a test code in its query, and set a test session
-    cookie on the page's origin.
-
-  `summary.md` should then show:
-  - the browser resource and `session.id` on browser spans;
-  - route-change spans with templates;
-  - the API's `SERVER` span under the browser's fetch span;
-  - replay chunks.
-
-  The output folder keeps replay metadata only, so pass every test value to the receiver with
-  `--canaries <file>` (a JSON `{label: value}`): its summary and `canaries.json` name each value
-  that reached OTLP, Langfuse, replay events or requests, profiles or rejected requests, without
-  writing it. Also grep the app's and the proxy's logs for them.
+  Pass every test value seeded into the requests to the receiver with `--canaries <file>` (a
+  JSON `{label: value}`): its summary and `canaries.json` name each value that reached OTLP,
+  Langfuse, profiles or rejected requests, without writing it. Also grep the app's logs for them.
 
   For AI features, run the app twice against the model stub (`scripts/llm_stub.py`) and the
-  receiver's Langfuse stand-in, started with `--genai-content-destination` set to the service's
-  destination, once as a non-production environment with `full` content and once as production
+  receiver's Langfuse stand-in, once as a non-production environment with `full` content and once as production
   with `off`, with stray capture variables set to "on", and check the GenAI section of
   `summary.md` ([signals/genai.md](signals/genai.md#verification)). Run an experiment
   runner once over a dataset the stand-in serves (`--langfuse-datasets`). Never use a real

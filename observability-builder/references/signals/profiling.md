@@ -74,21 +74,20 @@ Samples get the `span_id` and `trace_id` of the span they ran under (an integrat
 | Node.js | the module's labels: its heavy-section helper adds the active span's ids next to `controller` (`setLabels` or `wrapWithLabels`, synchronous only) | the labelled heavy sections. Pyroscope has no Node.js span profiles: its labels have no async context, so they can't follow a request across `await` |
 
 The ids are unbounded, so turn the integration on only for a backend that indexes them apart
-from its labels. OneUptime does: `trace_id` and `span_id` sample labels become span links
-(verified end to end with OneUptime 14 on Go, Python, Java and Node.js). For another backend, check how it stores
-sample labels first; where it would turn them into series labels, leave span profiles out.
+from its labels. Check how the backend stores sample labels first; where it would turn them into
+series labels, leave span profiles out.
 
 ## Backend format limits
 
 Backends differ in the profile formats they accept; check the backend's ingest docs.
 
-- **JFR:** some backends can't ingest it (e.g. OneUptime). The service still profiles itself: the
+- **JFR:** some backends can't ingest it. The service still profiles itself: the
   Java agent keeps recording JFR and an exporter in the module converts each snapshot to pprof
   with the JDK's JFR reader, one upload per event type, labels and span ids kept
   (`assets/java/PprofExporter.java`, [sdk-notes.md](../sdk-notes.md#java)). A collector-side
   profiler is no substitute for the service's own profiles.
-- **One sample type per pprof upload:** some backends keep only one type from a combined upload
-  (e.g. OneUptime). Multi-type profiles, such as a heap profile with several sample types, are
+- **One sample type per pprof upload:** some backends keep only one type from a combined upload.
+  Multi-type profiles, such as a heap profile with several sample types, are
   split into one upload per type, each keeping its units.
 - **Upload size:** proxies and gateways in front of the backend must accept the profiler's
   upload size.

@@ -391,8 +391,7 @@ def detect(root: Path, max_files: int = 20000) -> dict:
                     route = "/" + "/".join(segments)
                     if HEALTH_RE.search(f'"{route}"'):
                         health.add(route)
-        for name in ("instrumentation.ts", "instrumentation.js", "src/instrumentation.ts", "instrumentation-client.ts",
-                     "src/instrumentation-client.ts", "app/layout.tsx", "src/app/layout.tsx", "proxy.ts", "middleware.ts"):
+        for name in ("instrumentation.ts", "instrumentation.js", "src/instrumentation.ts", "proxy.ts", "middleware.ts"):
             if (root / name).is_file() and name not in result["entrypoints"]:
                 result["entrypoints"].append(name)
     result["health_paths"] = sorted(health)[:50]
@@ -401,11 +400,9 @@ def detect(root: Path, max_files: int = 20000) -> dict:
     ssr = {"nextjs", "sveltekit", "nuxt", "react-router", "remix", "angular-ssr", "astro"}
     servers = {"express", "fastify", "nestjs", "koa", "hapi", "hono"}
     if frameworks & ssr or (frameworks & ui and frameworks & servers):
-        # A server-rendered framework, or a server that also serves the pages: the proxy lives in the app.
+        # A server-rendered framework, or a server that also serves the pages: the server side is instrumented.
         result["workload"] = "fullstack"
-    elif frameworks & ui:
-        result["workload"] = "spa"
-    elif frameworks:
+    elif frameworks - ui - {"vite"}:  # a page-only project has no server to instrument
         result["workload"] = "api"
     return result
 

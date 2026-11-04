@@ -1,9 +1,9 @@
 # Langfuse
 
 Langfuse is the standard's LLM-observability destination: it receives the AI part of each
-trace, with content where the [content policy](../signals/genai.md#content) allows it and the
-content destination is `langfuse` ([destination](../signals/genai.md#destination)), and holds
-prompts and scores. It takes traces only; metrics, logs, profiles and the content-free copy of
+trace, with content where the [content policy](../signals/genai.md#content) allows it (content
+goes nowhere else: [content stays in Langfuse](../signals/genai.md#content-stays-in-langfuse)),
+and holds prompts and scores. It takes traces only; metrics, logs, profiles and the content-free copy of
 every trace go to the ops backend as usual. What to emit is in
 [signals/genai.md](../signals/genai.md); this page covers ingestion, the routes, what Langfuse
 reads from a span, and the platform work that stays in Langfuse.
@@ -276,19 +276,8 @@ for the module's side). Verified with Langfuse 4.55: experiments are built from 
 
 Base64 images, audio and files in observations are uploaded to Langfuse's media store and
 replaced by reference strings when the SDK handles them. Under the standard, media is a
-reference (type, size, hash) unless `genai.content.media: upload`, the feature's mode is
-`full` and the destination is `langfuse` ([signals/genai.md](../signals/genai.md#modes)).
-
-## Without content
-
-With `genai.content.destination: ops`, content goes to the ops backend's AI views instead, and
-Langfuse receives the AI steps without it:
-
-- **What arrives:** the structure, types, usage, cost, timing, levels, prompt links and the trace
-  context.
-- **No content:** the module's content guard removes every content key on the Langfuse path, as
-  in mode `off`.
-- **Experiments** need the `langfuse` destination.
+reference (type, size, hash) unless `genai.content.media: upload` and the feature's mode is
+`full` ([signals/genai.md](../signals/genai.md#modes)).
 
 ## Environments and projects
 

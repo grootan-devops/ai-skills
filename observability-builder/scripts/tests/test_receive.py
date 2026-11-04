@@ -2,13 +2,10 @@
 import contextlib
 import io
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
-import gzip
 import http.client
 import sys
 
@@ -37,14 +34,6 @@ def post(port, path, body, headers, chunked=False):
         conn.close()
 
 
-def frame(envelope: dict, events: list, encoding: str = "gzip") -> bytes:
-    """One `<envelope JSON> \\n<payload>` frame as the recorder writes it."""
-    data = json.dumps(events).encode()
-    payload = gzip.compress(data) if encoding == "gzip" else data
-    envelope = {**envelope, "payloadEncoding": encoding, "payloadBytes": len(payload)}
-    return json.dumps(envelope).encode() + b" \n" + payload
-
-
 def span(name, kind, sid, parent="", **attrs):
     return {"traceId": "5b8efff798038103d269b633813fc60c", "spanId": sid, "parentSpanId": parent, "name": name,
             "kind": kind, "startTimeUnixNano": str(1544712660000000000 + int(sid[-2:], 16)),
@@ -63,8 +52,7 @@ class ReceiverRun(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / "telemetry"
-        with mock.patch.dict(os.environ, {"OBS_RECEIVER_REPLAY_ASSETS": "", "OBS_HARNESS_REPLAY_ASSETS": ""}):  # no recorder unless a test gives one
-            self.receiver = receive.Receiver(self.out)
+        self.receiver = receive.Receiver(self.out)
         self.endpoints = self.receiver.start()
 
     def tearDown(self):
@@ -124,34 +112,6 @@ class ReceiverRun(unittest.TestCase):
         self.assertIn("logs/grpc 1", summary)
         self.assertIn("- ERROR trace=yes 'request failed'", summary)
 
-    def test_session_replay_summary_without_event_content(self):
-        from receiver import replay
-        envelope = {"sessionId": "5f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5", "chunkIndex": 0, "eventCount": 2, "hasFullSnapshot": True,
-                    "isFinal": False, "maskingMode": "MaskSensitiveInputsOnly", "url": "http://127.0.0.1:1/"}
-        events = [{"type": 4, "data": {"href": "http://127.0.0.1:1/"}}, {"type": 2, "data": {"text": "typed-secret-value"}}]
-        status, _, _ = post(self.port("otlp_http"), replay.CHUNK, frame(envelope, events),
-                            {replay.TOKEN_HEADER: "t", replay.APP_HEADER: "orders-web"})
-        self.assertEqual(status, 202)
-        self.receiver.flush()
-        summary = (self.out / "summary.md").read_text()
-        self.assertIn("## Session replay (1 sessions, 1 chunks)", summary)
-        self.assertIn("| 5f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5 | 1 | yes | no | MaskSensitiveInputsOnly | 2 / 2 |", summary)
-        self.assertIn(f"Chunks with {replay.TOKEN_HEADER}: 1/1", summary)
-        chunks = json.loads((self.out / "replay" / "chunks.json").read_text())
-        self.assertEqual((chunks[0]["events"], chunks[0]["token_ok"]), (2, None))
-        for text in (summary, (self.out / "replay" / "chunks.json").read_text()):
-            self.assertNotIn("typed-secret-value", text)
-
-    def test_replay_recorder_needs_assets(self):
-        from receiver import replay
-        import http.client
-        conn = http.client.HTTPConnection("127.0.0.1", self.port("otlp_http"), timeout=5)
-        conn.request("GET", replay.LOADER)
-        self.assertEqual(conn.getresponse().status, 404)
-        conn.close()
-        self.receiver.flush()
-        self.assertIn(f"GET {replay.LOADER} 404 x1", (self.out / "summary.md").read_text())
-
     def test_rejections_are_listed(self):
         post(self.port("otlp_http"), "/v1/nothing", b"x", {"Content-Type": "application/x-protobuf"})
         self.receiver.flush()
@@ -190,9 +150,8 @@ class LangfuseStandIn(unittest.TestCase):
         (root / "datasets.json").write_text(json.dumps([
             {"name": "golden", "items": [{"input": {"message": "Where is o-1001?"}, "expectedOutput": {"answer": "shipped"}},
                                          {"id": "item-2", "input": {"message": "Refunds?"}, "metadata": {"topic": "returns"}}]}]))
-        with mock.patch.dict(os.environ, {"OBS_RECEIVER_REPLAY_ASSETS": "", "OBS_HARNESS_REPLAY_ASSETS": ""}):
-            self.receiver = receive.Receiver(self.out, langfuse_keys=root / "keys", langfuse_prompts=root / "prompts.json",
-                                             langfuse_datasets=root / "datasets.json")
+        self.receiver = receive.Receiver(self.out, langfuse_keys=root / "keys", langfuse_prompts=root / "prompts.json",
+                                         langfuse_datasets=root / "datasets.json")
         self.endpoints = self.receiver.start()
         self.port = int(self.endpoints["otlp_http"].rsplit(":", 1)[1])
         self.headers = {"Content-Type": "application/json", "Authorization": basic(KEYS),
@@ -330,14 +289,13 @@ class LangfuseStandIn(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DEPS, "needs grpcio, protobuf and opentelemetry-proto (run with uv, see README.md)")
-class OpsDestinationSpendAndMcp(unittest.TestCase):
-    """The ops content destination, who spent what, AI keys on other spans, retrieval, MCP and span senders."""
+class OpsStreamAndMcp(unittest.TestCase):
+    """Content and conversation ids in the ops stream, AI keys on other spans, retrieval, MCP and span senders."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name) / "telemetry"
-        with mock.patch.dict(os.environ, {"OBS_RECEIVER_REPLAY_ASSETS": "", "OBS_HARNESS_REPLAY_ASSETS": ""}):
-            self.receiver = receive.Receiver(self.out, content_destination="ops")
+        self.receiver = receive.Receiver(self.out)
         self.port = int(self.receiver.start()["otlp_http"].rsplit(":", 1)[1])
         self.json = {"Content-Type": "application/json"}
 
@@ -349,7 +307,7 @@ class OpsDestinationSpendAndMcp(unittest.TestCase):
         self.receiver.flush()
         return (self.out / "summary.md").read_text()
 
-    def test_content_spend_and_stray_keys_in_the_ops_stream(self):
+    def test_content_conversations_and_stray_keys_in_the_ops_stream(self):
         canary = "CANARY-OPS-6161"
         entry = span("POST /api/chat", 2, "00000000000000b1", **{"user.id": "u-1", "gen_ai.conversation.id": "c-1"})
         chat = span("chat m", 3, "00000000000000b2", "00000000000000b1", **{
@@ -361,22 +319,14 @@ class OpsDestinationSpendAndMcp(unittest.TestCase):
             "gen_ai.conversation.id": "c-1"})
         post(self.port, "/v1/traces", traces(entry, chat, retrieval, tool), self.json)
         summary = self.summary()
-        self.assertIn("Content on AI calls in the ops stream (the ops destination): gen_ai.input.messages x1", summary)
-        self.assertIn("CONTENT OUTSIDE AI CALLS IN THE OPS STREAM", summary, "input.value isn't the conventions' key")
-        self.assertNotIn("CONTENT IN THE OPS STREAM", summary)
-        self.assertIn("Who spent what on the 2 AI calls in the ops stream: user.id 1/2, team.id 1/2, "
-                      "gen_ai.conversation.id 2/2", summary)
+        self.assertIn("content keys: gen_ai.input.messages x1, input.value x1", summary)
+        self.assertIn("CONTENT IN THE OPS STREAM", summary)
+        self.assertIn("Conversation ids on the 2 AI calls in the ops stream: gen_ai.conversation.id 2/2", summary)
         self.assertIn("AI keys on spans that aren't AI calls: gen_ai.conversation.id x1, gen_ai.data_source.id x1", summary)
         self.assertIn("AI KEYS ON OTHER SPANS", summary)
         self.assertIn("Retrieval steps: 1, with gen_ai.operation.name=retrieval 0", summary)
         self.assertIn("RETRIEVAL STEPS WITHOUT THEIR OPERATION", summary)
         self.assertNotIn(canary, summary)
-
-    def test_content_in_langfuse_with_the_ops_destination(self):
-        headers = {**self.json, "Authorization": basic(KEYS), "x-langfuse-ingestion-version": "4"}
-        post(self.port, LANGFUSE, traces(span("chat m", 3, "00000000000000c1", **{
-            "gen_ai.operation.name": "chat", "gen_ai.output.messages": "[]"})), headers)
-        self.assertIn("CONTENT IN THE LANGFUSE STREAM", self.summary())
 
     def test_two_langfuse_span_senders(self):
         headers = {**self.json, "Authorization": basic(KEYS)}
@@ -433,8 +383,7 @@ class CanaryScan(unittest.TestCase):
         root = Path(self.tmp.name)
         (root / "canaries.json").write_text(json.dumps(self.CANARIES))
         self.out = root / "telemetry"
-        with mock.patch.dict(os.environ, {"OBS_RECEIVER_REPLAY_ASSETS": "", "OBS_HARNESS_REPLAY_ASSETS": ""}):
-            self.receiver = receive.Receiver(self.out, canaries=root / "canaries.json")
+        self.receiver = receive.Receiver(self.out, canaries=root / "canaries.json")
         self.endpoints = self.receiver.start()
         self.http = int(self.endpoints["otlp_http"].rsplit(":", 1)[1])
 
@@ -443,21 +392,18 @@ class CanaryScan(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_reports_where_each_canary_went_without_writing_values(self):
-        from receiver import replay
         leaky = span("GET", 3, "00000000000000d1",
                      **{"url.full": "https://app.example.com/auth/callback?code=CANARYCODE7781"})
         post(self.http, "/v1/traces", traces(leaky), {"Content-Type": "application/json"})
-        envelope = {"sessionId": "5f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5", "chunkIndex": 0, "eventCount": 1,
-                    "hasFullSnapshot": True, "isFinal": False}
-        events = [{"type": 3, "data": {"text": "canary.person@example.invalid"}}]  # typed in lower case
-        post(self.http, replay.CHUNK, frame(envelope, events), {replay.TOKEN_HEADER: "t", replay.APP_HEADER: "web"})
+        typed = span("chat m", 3, "00000000000000d2", **{"input.value": "canary.person@example.invalid"})  # lower case
+        post(self.http, LANGFUSE, traces(typed), {"Content-Type": "application/json"})
         self.receiver.flush()
         found = json.loads((self.out / "canaries.json").read_text())
-        self.assertEqual(found, {"typed-email": ["replay events"], "callback-code": ["OTLP"], "search": [], "cookie": []})
+        self.assertEqual(found, {"typed-email": ["Langfuse"], "callback-code": ["OTLP"], "search": [], "cookie": []})
         summary = (self.out / "summary.md").read_text()
         self.assertIn("## Canaries (4 checked; values are never written)", summary)
         self.assertIn("| callback-code | OTLP |", summary)
-        self.assertIn("| typed-email | replay events |", summary)
+        self.assertIn("| typed-email | Langfuse |", summary)
         # The scan's own outputs never hold a value; the payload files and the span tree show what the app
         # sent, which is the leak being reported.
         scan_outputs = (summary[summary.index("## Canaries"):] + (self.out / "canaries.json").read_text()).lower()

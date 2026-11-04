@@ -1,8 +1,8 @@
 # Acceptance
 
 How a service proves it meets the standard: language-neutral, black-box checks against the running
-service, with a local OTLP receiver, real requests, a `/metrics` scrape, stdout capture, a headless
-browser for RUM, and fault injection between the service, the collector and the backend. The
+service, with a local OTLP receiver, real requests, a `/metrics` scrape, stdout capture and
+fault injection between the service, the collector and the backend. The
 instrument workflow runs them in its verify step ([instrument.md](instrument.md), step 7).
 
 A service conforms when every check that applies to its workload passes through the collector,
@@ -15,8 +15,8 @@ its root span, job log and, when it pushes them, its job metrics are checked ins
 Check the real exports with the skill's receiver, `scripts/receive.py`: it runs OTLP/gRPC,
 OTLP/HTTP and Pyroscope sinks on free local ports and writes what arrives, decoded, plus a
 `summary.md` (resources, one tree per trace, metric names and units, log records, profile labels,
-session replay, rejected requests). With `--canaries <file>` (JSON `{label: value}`) it also
-reports which test values reached which stream, replay events included, by label only.
+rejected requests). With `--canaries <file>` (JSON `{label: value}`) it also reports which test
+values reached which stream, by label only.
 
 ```bash
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
@@ -36,7 +36,7 @@ makes every export fail, and only a real receiver shows it.
 
 The receiver shows what the service exports; the collector and the backend can still change it
 on the way. Run the same requests once through the real collector into a disposable instance of
-the backend (for OneUptime, its community edition with Alloy in front), and check the stored data:
+the backend (for the Grafana stack, its single-binary components with Alloy in front), and check the stored data:
 
 | Check | Passes when |
 | --- | --- |
@@ -44,7 +44,6 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 | Scraped identity | scraped metrics carry the service's resource, without `service.instance.id` or the scrape's address attributes |
 | Shipped logs | stdout records arrive with native severity, body, trace and span ids that point at stored spans, no unparsed JSON bodies and no collector attributes |
 | Exceptions | each failure is one exception, linked to its trace, with release and environment set |
-| RUM application | the browser's spans, web vitals and session replays belong to one RUM application |
 | Span profiles | where a span-profile integration is on, profile samples link to stored traces |
 
 ## Identity
@@ -69,7 +68,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 | Unsampled requests | produce no spans but still their access log |
 | Job runs | each run of a scheduled job is a root span `job {name}` with `app.job.name`, `app.job.trigger` and the item counts, one `job_run` record or one ERROR record, and the job metrics; work that continues after a response is a new root linked to the request ([workloads/batch.md](workloads/batch.md)) |
 | WebSocket | the handshake is a root SERVER span `WS {path}` (for example `WS /ws`); each message other than a ping is a root SERVER span `WS {type}` linked to it; a rejected client leaves the span UNSET with a WARN record and isn't counted in the connection counters; connected and disconnected records at INFO ([workloads/api.md](workloads/api.md#websocket)) |
-| Propagation | one trace ID runs from the browser through the API and downstream services to the database; only allow-listed baggage keys travel, and none appear as metric labels, profile labels or resource attributes |
+| Propagation | one trace ID runs from the edge through the API and downstream services to the database; only allow-listed baggage keys travel, and none appear as metric labels, profile labels or resource attributes |
 
 ## Logs
 
@@ -111,10 +110,9 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 | Secret canaries | a fake JWT, a bearer token, a test API key, a password field, a session cookie and a test card number — sent through headers, cookies, query strings, bodies, database parameters, exception messages, function arguments, messaging and GenAI attributes, and baggage — never appear in exported OTLP, stdout logs, profiles or the collector's output |
 | Visible fields | client IP, user, tenant and session IDs and the selected body fields do appear, as-is |
 | No bodies on spans | no span attribute contains a request or response body |
-| Audit | the telemetry-safety audit reports nothing on the instrumented service; on a deliberately unsafe sample (a body as a span attribute, a user ID as a metric label, a token in baggage, an input value captured in RUM, raw SQL literals, header capture switched on in auto-instrumentation, a prompt logged, AI content set around the content helper, AI capture switched on in code) it reports every case with file, line and fix ([safe-capture.md](safe-capture.md)) |
+| Audit | the telemetry-safety audit reports nothing on the instrumented service; on a deliberately unsafe sample (a body as a span attribute, a user ID as a metric label, a token in baggage, raw SQL literals, header capture switched on in auto-instrumentation, a prompt logged, AI content set around the content helper, AI capture switched on in code) it reports every case with file, line and fix ([safe-capture.md](safe-capture.md)) |
 | Content canaries | a canary in a prompt, a tool argument and a retrieved document reaches the Langfuse stream only in a run with `full` content, and appears nowhere in a production run ([GenAI](#genai)) |
-| Fail closed | with a masking helper forced to fail, the value is omitted and the service keeps serving; with replay masking broken, session replay doesn't start |
-| RUM masking | canary values typed into every sensitive field and URL query never appear in OTLP payloads, browser logs, URLs or replay chunks, while non-sensitive fields still record |
+| Fail closed | with a masking helper forced to fail, the value is omitted and the service keeps serving |
 
 ## Config wrapper
 
@@ -128,8 +126,7 @@ the backend (for OneUptime, its community edition with Alloy in front), and chec
 ## GenAI
 
 For services that call a model ([signals/genai.md](signals/genai.md)), run twice against the
-model stub and the Langfuse stand-in, with the receiver told the service's content destination
-(`--genai-content-destination`): a non-production environment with `full` content, and
+model stub and the Langfuse stand-in: a non-production environment with `full` content, and
 production with `off` (or `redacted` for the features with a redactor), each with stray
 `TRACELOOP_*`, `OPENINFERENCE_*` and `LANGFUSE_*` capture variables set to "on".
 
@@ -138,11 +135,11 @@ production with `off` (or `redacted` for the features with a redactor), each wit
 | Transport | Langfuse-bound spans use OTLP over HTTP to `/api/public/otel/v1/traces` with Basic auth, and any exporter other than a Langfuse SDK sends `x-langfuse-ingestion-version: 4` |
 | Structure | each AI request is one trace in both destinations, with one root observation in Langfuse (the entry span); the steps have the names, kinds and Langfuse types of the [step kinds](signals/genai.md#step-kinds); with scope `ai_context`, no database, cache, HTTP or queue client span reaches Langfuse |
 | Trace context | every Langfuse-bound observation carries the feature as trace name, the user, the conversation as session and the release; none of them in baggage; on the ops path no `langfuse.*` key |
-| Who spent what | every AI span on the ops path carries `user.id`, `team.id` (where the app has a team) and `gen_ai.conversation.id`, with the values the plan agreed; no other span carries a `gen_ai.*`, `llm.*` or `traceloop.*` key |
+| Who spent what | every Langfuse-bound span carries the user, team (where the app has one) and conversation the plan agreed, and every AI span on the ops path carries `gen_ai.conversation.id`; no other span carries a `gen_ai.*`, `llm.*` or `traceloop.*` key |
 | Steps | retrieval steps carry `gen_ai.operation.name=retrieval`; a sub-agent call is one `invoke_agent` span; MCP calls follow [workloads/mcp.md](workloads/mcp.md#verification) |
 | Model and usage | generations and embeddings carry the response model and usage, streams included; streamed generations have a time to first chunk |
 | Status and level | the failing step is ERROR with `error.type`, and its status description on the ops path is that type, never the provider's message; degraded steps are WARNING with a constant status message; no span is OK; a streamed answer adds no ERROR record |
-| Content | the `full` run has content at the destination only, within `max_chars`: the Langfuse path with `langfuse`, AI spans of the ops stream with `ops` (the conventions' keys only, never on other spans); the production run has no content key anywhere and only redacted values for redacting features; the stray variables change nothing; logs, metrics, span events and the other destination never hold content, not even from a provider error that quotes the input (the stub's errors do) |
+| Content | the `full` run has content on the Langfuse path only, within `max_chars`; the production run has no content key anywhere and only redacted values for redacting features; the stray variables change nothing; the ops path, logs, metrics and span events never hold content, not even from a provider error that quotes the input (the stub's errors do) |
 | Prompt links | generations that used a managed prompt (fetched by the app's own code through the module's client) link to its version; a fallback is WARNING and unlinked |
 | Scores | in `hybrid` and `sdk`, feedback sent twice for one message is one score, sent by the server, with the resource's environment; in `otel`, no request reaches Langfuse's API |
 | Modes | the same app, switched by `genai.langfuse.mode` alone, passes every row above in `hybrid`, `sdk` (generations from the Langfuse SDK, no GenAI instrumentation span) and `otel` (exports with the ingestion header, no Langfuse SDK loaded); each run has one span sender |
@@ -169,26 +166,9 @@ SIGTERM with telemetry still queued.
 
 Telemetry must never become a production dependency.
 
-## Browser RUM and session replay
-
-For apps with web pages ([rum.md](signals/rum.md)), drive the pages in a headless browser against the
-receiver started with `--replay-assets <dir>`; its session-replay stand-in speaks OneUptime's protocol:
-
-| Check | Passes when |
-| --- | --- |
-| Transport | browser telemetry and replay reach the backend through the app's same-origin proxy, which adds the key; the page never holds it |
-| Identity | the browser resource carries the server's service name, version and environment plus the `browser.*` attributes |
-| Pages and routes | page loads and client-side route changes produce spans with `app.route` templates |
-| Browser → API | the API's `SERVER` span continues the browser's fetch span |
-| Session | `session.id` on browser spans and logs is the replay session, and API requests carry its `tracestate` |
-| Errors | one sanitised exception record per browser error |
-| Web vitals | LCP, FCP, TTFB, CLS and INP arrive once each for a page that is hidden, closed or left by a full navigation. A scripted click is too fast to count for INP (under 40 ms), so the test slows clicks with an injected capturing click listener that busies the main thread for about 250 ms |
-| Replay masking | replay chunks arrive with a full snapshot and carry none of the values typed into sensitive fields |
-| Safe capture | no typed value, query value or fragment in any browser payload |
-
 ## Backend swap
 
-One service is re-pointed from one backend to another — for example from OneUptime to Tempo,
+One service is re-pointed from one backend to another — for example from Dynatrace to Tempo,
 Loki, Prometheus and Pyroscope — by changing only the yml and the collector configuration. The
 same checks pass, and the change contains no application code ([backends](backends/README.md),
 [collector](collector/README.md)).

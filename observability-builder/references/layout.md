@@ -16,8 +16,7 @@ files a project needs are created.
    ops metrics and the `/metrics` server), profiling (with the controller-label helper), jobs
    (the job-run helper, when the service runs jobs), errors, genai (when the service calls a
    model: [below](#per-workload)), and `adapters/` holding only the frameworks the project
-   actually uses. Frontends add RUM; fullstack apps add the
-   same-origin telemetry proxy routes.
+   actually uses.
 4. **Business code** uses only the OpenTelemetry API and the module's helpers: the span
    wrapper or decorator, the controller-label helper and the logger.
 5. **`observability.yml`** sits at the repository root for local runs and is mounted at
@@ -108,22 +107,9 @@ Instrumentation files go under `src/` when the project uses a `src/` folder.
 
 ```text
 instrumentation.ts                   # register(): Node-runtime server setup; onRequestError
-instrumentation-client.ts            # RUM bootstrap before hydration
 src/observability/
 ├── server/                          # config.ts tracing.ts access-log-processor.ts logger.ts metrics.ts profiling.ts
-├── client/                          # rum.ts web-vitals.ts route-spans.ts errors.ts replay.ts
 └── shared/                          # attributes.ts sanitize-url.ts
-app/telemetry/v1/[signal]/route.ts               # same-origin OTLP proxy
-app/telemetry/session-replay/[version]/[artifact]/route.ts   # session-replay proxy
-app/error.tsx, app/global-error.tsx              # report through client/errors.ts
-```
-
-### Single-page app (React, Vue, Angular with Vite) served by nginx
-
-```text
-src/observability/                   # rum.ts web-vitals.ts route-spans.ts errors.ts replay.ts config.ts
-public/observability.json            # runtime RUM config, mounted per environment by the chart
-nginx default.conf                   # JSON access log with $http_traceparent; /telemetry/ → collector (chart file mount)
 ```
 
 ## Per workload

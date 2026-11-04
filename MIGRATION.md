@@ -7,6 +7,47 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 3.0.0
+
+### Required
+
+- **OneUptime is no longer a supported backend.** Point each service's telemetry at a remaining
+  backend (the Grafana stack, Dynatrace, New Relic or AWS) by changing only `observability.yml`
+  and the collector configuration ([backends](observability-builder/references/backends/README.md)):
+  - remove the OneUptime exporter, its `x-oneuptime-token` auth and the
+    `deployment.environment` transform from collectors;
+  - remove `x-oneuptime-token` headers and `oneuptime.label.*` resource attributes from
+    `observability.yml` and from the chart's `resource.opentelemetry.io/*` annotations;
+  - remove `oneuptime.database.server.id` stamping from database-engine pipelines.
+- **Delete `rum:` and `genai.content.destination` from every `observability.yml`.** The schema
+  rejects both keys now, and `validate.py` reports them as errors.
+- **Remove browser RUM and session replay from frontends:** the browser telemetry module
+  (`instrumentation-client.ts` or `src/observability/client/` and `rum.ts`), the replay
+  recorder and its `oneuptime-*` masking classes, the same-origin `/telemetry/` proxy routes or
+  nginx locations, the runtime `observability.json` and the RUM secrets the chart mounts.
+- **Collectors with GenAI routing:** update the ops branch from
+  `observability-builder/references/collector/README.md`. It no longer copies `user.id` and
+  `team.id` onto AI spans, keeps no content keys, and has no list of `ops` services; the Langfuse
+  branch goes straight to its batch processor (the `langfuse_content` transform is gone).
+- **Scripts:** drop `--replay-assets` and `--genai-content-destination` from any
+  `scripts/receive.py` invocation.
+
+### Recommended
+
+- Services that set `genai.content.destination: ops` now send no content anywhere unless
+  Langfuse is on: turn Langfuse on where prompts and answers must be read.
+- Dashboards or queries that read `user.id` or `team.id` from AI spans read them from the
+  entry span (ops backend) or from Langfuse's trace context instead.
+
+### Verify
+
+- `python3 -m unittest discover -s observability-builder/scripts/tests` passes, and the receiver
+  tests pass with `uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf
+  --with pyyaml python -m unittest discover -s scripts/tests -p "test_receive.py"` from
+  `observability-builder/`.
+- `python3 observability-builder/scripts/validate.py <project>/observability.yml` reports no
+  `rum` or `genai.content.destination` key.
+
 ## 2.0.0
 
 ### Required

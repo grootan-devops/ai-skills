@@ -1,17 +1,17 @@
 ---
 name: observability-builder
 description: >-
-  Add end-to-end observability to any service or frontend — access logs, structured
-  application logs, OpenTelemetry traces with nested function spans, ops metrics on a
-  Prometheus /metrics port, error logs, Pyroscope profiling, browser RUM and session replay,
-  and LLM, agent, RAG and MCP telemetry (GenAI spans, token and cost data, who spent what,
-  Langfuse or OneUptime's AI / LLM views) — driven by one observability.yml, for any language,
+  Add end-to-end observability to any service — access logs, structured application logs,
+  OpenTelemetry traces with nested function spans, ops metrics on a Prometheus /metrics port,
+  error logs, Pyroscope profiling, and LLM, agent, RAG and MCP telemetry (GenAI spans, token
+  and cost data, who spent what, in Langfuse) — driven by one observability.yml, for any language,
   framework or OTLP backend, and audit existing telemetry for unsafe capture. Use whenever
   someone asks to add, fix or standardise observability, OpenTelemetry, tracing, logging,
-  metrics, profiling, RUM, APM or LLM monitoring in an application, to trace LLM calls,
+  metrics, profiling, APM or LLM monitoring in an application, to trace LLM calls,
   agents, RAG or MCP servers and clients, to see LLM spend per user or team, to send
-  telemetry to OneUptime, Grafana/Tempo, Dynatrace, New Relic or Langfuse, to replace vendor
+  telemetry to Grafana/Tempo, Prometheus, Loki, Pyroscope, Dynatrace, New Relic or Langfuse, to replace vendor
   APM SDKs with OpenTelemetry, or to check telemetry for leaked secrets or prompts; not for
+  browser RUM or session replay,
   Helm charts, Dockerfiles or CI pipelines (platform-builder), dashboards and alerts,
   Langfuse prompt, dataset or evaluator management, or installing a collector or backend.
 ---
@@ -72,12 +72,12 @@ project's package manager before adding anything.
   baggage ([references/safe-capture.md](./references/safe-capture.md)). There is no redactor to
   clean up afterwards; the audit will flag what slips through.
 - **AI content is the riskiest telemetry.** Prompts, completions, tool arguments and
-  retrieved documents go to one tool only, Langfuse or OneUptime's AI views
-  (`genai.content.destination`), through the module's content policy: `full` only where the
+  retrieved documents go to Langfuse only, never the ops backend, through the module's content
+  policy: `full` only where the
   data is synthetic, `off` in production unless a feature's redactor is signed off; never in
   logs or metrics ([references/signals/genai.md](./references/signals/genai.md)). Who spent
   what (user, team, conversation) comes from the app's own verified context, decided per entry
-  point, and AI spans carry it to both tools. Never call a real model
+  point, and Langfuse-bound spans carry it. Never call a real model
   provider while verifying: point the client at `scripts/llm_stub.py` with a dummy key.
   Platform work in Langfuse (prompts, datasets, evaluators, score configs) follows Langfuse's
   own agent skill and live docs ([references/backends/langfuse.md](./references/backends/langfuse.md)).
@@ -93,8 +93,7 @@ project's package manager before adding anything.
   `${env:…}` interpolation. Never read credential files (`.npmrc`, `.env`, token files), not
   even to install a private dependency for a test
   ([instrument step 7](./references/instrument.md#7-verify)). Browser code never holds a
-  backend key: RUM and session replay go through the app's same-origin proxy
-  ([references/signals/rum.md](./references/signals/rum.md)).
+  telemetry backend key.
 - **Your processes only.** When checking the app locally, stop exactly the processes you
   started, by PID, never by a name pattern. Point every exporter at the receiver or at an
   unused address before you break the config on purpose, so a failure test never reaches a real
@@ -113,7 +112,7 @@ python3 scripts/audit.py <project> --module <observability-module-path>
 python3 scripts/contract.py record|compare --base <url> --requests <file> ...   # API responses before vs after
 python3 scripts/hold_port.py <port>                        # take a port on every address
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
-  scripts/receive.py --out <scratch>/telemetry [--canaries <file>]   # real OTLP + Pyroscope + session-replay + Langfuse receiver
+  scripts/receive.py --out <scratch>/telemetry [--canaries <file>]   # real OTLP + Pyroscope + Langfuse receiver
 python3 scripts/llm_stub.py                                # OpenAI- and Anthropic-compatible model stub for AI features
 ```
 

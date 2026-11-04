@@ -11,7 +11,7 @@ captured ([safe capture](safe-capture.md)).
 | Location | What belongs there |
 | --- | --- |
 | Resource attributes | Identity of the producer: the eight standard attributes [below](#resource), the service and its pod, plus the cluster's name where several clusters send to one backend. Created once per process and shared by its traces, logs, OTLP metrics and profiles. |
-| Span attributes | Details of one operation: an HTTP request, a database query, a message, an RPC, a GenAI or MCP call, an application function, a job run, a WebSocket message. AI content (prompts, completions, tool arguments and results) only through the content policy, at the one content destination: Langfuse, or the ops backend's AI views ([genai](signals/genai.md#destination)). |
+| Span attributes | Details of one operation: an HTTP request, a database query, a message, an RPC, a GenAI or MCP call, an application function, a job run, a WebSocket message. AI content (prompts, completions, tool arguments and results) only through the content policy, and only on the Langfuse path ([genai](signals/genai.md#content-stays-in-langfuse)). |
 | Log attributes | Details of one log event, including exception information. |
 | Metric labels | Short, bounded labels of a measurement: method, route, status code, dependency, job, outcome. |
 | Profile labels | Static identity labels and bounded dynamic labels such as `controller`. |
@@ -43,11 +43,6 @@ wherever the chart doesn't set it. Nothing else goes in the resource:
 - **`service.instance.id` is not set:** the pod name and UID identify the instance.
 - **Build and deployment details** (commit, branch, pipeline run) stay out: `service.version`
   identifies the release.
-- **One backend exception:** a service exporting straight to OneUptime adds the older
-  `deployment.environment`, with the same value, because OneUptime files exceptions under it and
-  no collector copies it there ([oneuptime.md](backends/oneuptime.md#exceptions)).
-
-A web page has a resource of its own, for RUM ([below](#rum-and-profiling)).
 
 ### Cross-signal identity
 
@@ -82,9 +77,7 @@ process emits; it can't change per request. Request facts the middleware learns 
 the local root (`SERVER` or `CONSUMER`), and on its access log. Child spans stay lean: their own
 operation's attributes, result and status. Repeating the request context on every span would
 multiply storage without adding information, since backends join child spans to the entry span by
-trace ID. AI spans are the one exception: they carry `user.id` and `team.id`, because LLM views
-such as OneUptime's attribute each call's cost on the call's own span
-([genai](signals/genai.md#who-spent-what)).
+trace ID.
 
 Another service gets the request context only through allow-listed baggage, which its own
 middleware puts on *its* entry span. Values are written as they are, IDs and client IP included,
@@ -126,9 +119,9 @@ only HTTP. How spans are produced per framework: [traces](signals/traces.md).
 | Database or cache | kind `CLIENT`, name `{db.query.summary}` or `{db.operation.name} {db.collection.name}` | `db.system.name`, `server.address`, `server.port` (integer), `db.namespace`, `db.operation.name`, `db.collection.name`, `db.query.summary`, `db.query.text` (optional; parameterised or sanitised, never parameter values) | `db.response.status_code`, `db.response.returned_rows`, `error.type` |
 | Messaging | kind `PRODUCER` to publish, `CONSUMER` to process; links for batches | `messaging.system`, `messaging.destination.name`, `messaging.operation.type`, `messaging.operation.name`, `messaging.consumer.group.name`, `messaging.destination.partition.id`, `messaging.message.id`, `server.address`, `server.port`; trace context travels in message headers | `messaging.batch.message_count`, `error.type` |
 | RPC, gRPC | kind `SERVER` or `CLIENT`, name `{rpc.method}` | `rpc.system.name`, `rpc.method`, `server.address`, `server.port` (release-candidate names through the `rpc` stability opt-in; legacy `rpc.system` and `rpc.service` accepted) | `rpc.response.status_code`, `error.type` |
-| GenAI model call or embedding ([genai](signals/genai.md#step-kinds)) | kind `CLIENT`, name `{gen_ai.operation.name} {gen_ai.request.model}` (`chat gpt-4o-mini`, `embeddings text-embedding-3-small`) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and parameters, `gen_ai.conversation.id`, `gen_ai.prompt.name`, `app.genai.prompt.version`; content only through the content policy, at the content destination | `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, `gen_ai.response.time_to_first_chunk`, `error.type`; a WARNING level for a degraded success |
+| GenAI model call or embedding ([genai](signals/genai.md#step-kinds)) | kind `CLIENT`, name `{gen_ai.operation.name} {gen_ai.request.model}` (`chat gpt-4o-mini`, `embeddings text-embedding-3-small`) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and parameters, `gen_ai.conversation.id`, `gen_ai.prompt.name`, `app.genai.prompt.version`; content only through the content policy, on the Langfuse path | `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, `gen_ai.response.time_to_first_chunk`, `error.type`; a WARNING level for a degraded success |
 | GenAI agent, tool, retrieval, memory, planning, workflow, guardrail or evaluation step | kind `INTERNAL` (`CLIENT` for a remote store or agent), names `invoke_agent {agent}`, `execute_tool {tool}`, `retrieval {data source}`, `{memory operation}`, `plan {agent}`, `invoke_workflow {name}`, `guardrail {name}`, `evaluate {name}` | `gen_ai.operation.name` (`retrieval` on retrieval steps), `gen_ai.agent.*`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.data_source.id`, `gen_ai.retrieval.top_k`, `gen_ai.memory.store.id`, `gen_ai.memory.record.count`, `gen_ai.workflow.name`, `gen_ai.evaluation.*`, the module's `app.genai.*` and `app.rag.*` attributes; the Langfuse type where the operation doesn't imply it | `error.type`; status ERROR only for the step's own failure |
-| AI trace context (every span of an AI feature) | — | `langfuse.trace.name` (the feature), `langfuse.user.id`, `langfuse.session.id` (the conversation), `langfuse.trace.metadata.team`, `langfuse.release`, `langfuse.trace.tags`, `langfuse.trace.metadata.*`, stamped by the module on every span started inside the feature: the one scoped exception to request context on the entry span only, because Langfuse filters per observation | on the ops path AI spans get `user.id`, `team.id` and `gen_ai.conversation.id` from the stamps, because OneUptime attributes spend per AI span, and every span loses the stamps; never baggage |
+| AI trace context (every span of an AI feature) | — | `langfuse.trace.name` (the feature), `langfuse.user.id`, `langfuse.session.id` (the conversation), `langfuse.trace.metadata.team`, `langfuse.release`, `langfuse.trace.tags`, `langfuse.trace.metadata.*`, stamped by the module on every span started inside the feature: the one scoped exception to request context on the entry span only, because Langfuse filters per observation | on the ops path AI spans get `gen_ai.conversation.id` from the stamps, and every span loses the stamps; never baggage |
 | MCP ([mcp](workloads/mcp.md)) | kind `CLIENT` on the caller, `SERVER` on the server; name `{mcp.method.name} {target}`, the target being the tool or prompt name, or the method alone; one span with the agent's `execute_tool` span when its framework already made one | `mcp.method.name`, `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name` on `tools/call`, `gen_ai.prompt.name` on `prompts/get`, `mcp.resource.uri` (sanitised, or its template), `jsonrpc.request.id`, `mcp.protocol.version`, `mcp.session.id`, `network.transport` (`pipe` for stdio, `tcp`), `network.protocol.name`, `network.protocol.version`, `server.address` and `server.port` on the client, `client.address` and `client.port` on the server; context from `params._meta` | `rpc.response.status_code`, `error.type` (`tool_error` for a tool result with `isError`); the client marks every JSON-RPC error ERROR, the server leaves the caller's errors (-32700, -32600, -32601, -32602, -32002) UNSET |
 | Application function ([functions](functions.md)) | kind `INTERNAL`, name `{Class}.{method}` or `{module}.{function}` | `code.function.name`, `code.file.path`, `code.line.number`, `thread.name`, allow-listed argument summaries, [enrichment](enrichment.md) attributes | result summary (count, size, status), `error.type`; status ERROR on failure |
 | Job run ([batch](workloads/batch.md)) | kind `INTERNAL`, a root span named `job {name}`; a link to the request that started it, if any | `app.job.name`, `app.job.trigger` (`cron`, `manual` or `internal`) | `app.job.items.processed`, `app.job.items.failed`, `error.type`; status ERROR when the run failed |
@@ -137,12 +130,12 @@ only HTTP. How spans are produced per framework: [traces](signals/traces.md).
 | GraphQL | name `{graphql.operation.type} {graphql.operation.name}` | `graphql.operation.name`, `graphql.operation.type`; document text off by default | the errors list mapped to `error.type` |
 | Cloud SDK or object storage | kind `CLIENT` | `rpc.system.name` (e.g. `aws-api`), `rpc.method`, `cloud.region`, service attributes such as `aws.s3.bucket` (object keys only if they are not sensitive) | `http.response.status_code`, `error.type` |
 | Serverless invocation | kind `SERVER` or `CONSUMER` | `faas.trigger`, `faas.invocation_id`, `faas.coldstart` | `error.type` |
-| Request context (each service's entry span only) | — | `user.id`, `tenant.id`, `session.id`, `correlation.id`, `http.route`, client app and version, set by the middleware on the `SERVER` or `CONSUMER` span as they are; `client.address` from the trusted-proxy resolver; child spans don't repeat them, except AI spans, which carry `user.id` and `team.id` for spend ([genai](signals/genai.md#who-spent-what)) | never resource attributes, never metric labels |
+| Request context (each service's entry span only) | — | `user.id`, `tenant.id`, `session.id`, `correlation.id`, `http.route`, client app and version, set by the middleware on the `SERVER` or `CONSUMER` span as they are; `client.address` from the trusted-proxy resolver; child spans don't repeat them | never resource attributes, never metric labels |
 
 `tenant.id` and `correlation.id` are this standard's own names, not OpenTelemetry's. The
 correlation ID comes from a valid incoming `x-correlation-id` header or is generated
 ([hooks](hooks.md)). `gen_ai.conversation.id` is the AI conversation or thread, while
-`session.id` stays the login or replay session; neither is derived from the other.
+`session.id` stays the login session; neither is derived from the other.
 
 Native span fields (`traceId`, `spanId`, `parentSpanId`, a low-cardinality name, kind, start and
 end time, status `{code, message}`, events, links, `traceState`, flags) are generated by the SDK.
@@ -207,22 +200,13 @@ Rules:
   attributes, the SDK's cardinality limit set in code, and the temporality from
   `metrics.otlp.temporality` (cumulative, or delta where a backend requires it).
 
-## RUM and profiling
+## Profiling
 
 | Signal | Metadata |
 | --- | --- |
-| Browser RUM resource | `service.name`, `service.version`, `deployment.environment.name`, `browser.platform`, `browser.language`, `browser.brands`, `browser.mobile`, `user_agent.original` |
-| Browser spans and logs | `app.route` (the route template), `session.id` (the same value as the replay session), `correlation.id`, HTTP client attributes on fetch and XHR spans; exceptions with `exception.*` |
-| Web vitals | `web_vital.lcp`, `web_vital.inp`, `web_vital.cls`, `web_vital.fcp`, `web_vital.ttfb` histograms with explicit buckets; dimensions `web_vital.rating`, `app.route` |
-| Browser to backend | `traceparent` and `tracestate` on same-origin requests and allow-listed origins only, never a match-all pattern; the backend's CORS policy allows `traceparent`, `tracestate` and `baggage` |
-| Session replay (OneUptime) | the recorder's session ID is `session.id`; a replay entry in `tracestate` links each session to its backend traces |
-| Sensitive-input masking | replay uses the provider's masking mode and mask, block and ignore selectors on sensitive fields; the OpenTelemetry browser SDK never records input values or element text, strips query and fragment from `url.full` except allow-listed parameters, and sanitises exception messages ([details](safe-capture.md#browser-and-session-replay)) |
 | Profiles | application name = `service.name`; the other resource attributes as static labels in Pyroscope syntax, dots replaced by underscores (`service_namespace`, `service_version`, `deployment_environment_name`, `k8s_namespace_name`, `k8s_pod_name`, `k8s_pod_uid`, `k8s_node_name`, and `k8s_cluster_name` when set); a `span_id` sample label only from a supported span-profile integration (none for Node.js); dynamic labels bounded ([profiling labels](functions.md#profiling-labels)) |
 
-RUM is standardised on OneUptime: the OpenTelemetry Web SDK plus OneUptime session replay, with RUM
-classified by the `browser.*` resource attributes. Its OTLP destination and keys still come from
-configuration. Sessions, replay and profiles need their own instrumentation; resource attributes
-alone record nothing.
+Profiles need their own instrumentation; resource attributes alone record nothing.
 
 Trace and span IDs are never set by hand as profile labels, because each value would create a
 profile series per request. Only a supported span-profile integration attaches them, where the

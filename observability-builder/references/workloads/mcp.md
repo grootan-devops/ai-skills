@@ -109,7 +109,7 @@ message handling and the client's send, through the middleware or hooks the SDK 
   feature context.
 - **Content:** tool arguments and results (`gen_ai.tool.call.arguments`,
   `gen_ai.tool.call.result`) and prompt arguments are content. They are recorded only through the
-  content helper, at the content destination ([genai](../signals/genai.md#content)). Resource
+  content helper, on the Langfuse path only ([genai](../signals/genai.md#content)). Resource
   contents are never recorded.
 
 ## Metrics
@@ -139,7 +139,7 @@ Both sides record the duration where each message completes, so unsampled traffi
 A `tools/call` span carries `execute_tool`, so it is an AI span, and the ops allow-list keeps its
 MCP keys ([genai](../signals/genai.md#the-ops-allow-list)). Other MCP spans keep their
 attributes, except that `prompts/get` loses `gen_ai.prompt.name`: a span that isn't an AI call
-carries no `gen_ai.*` key, so OneUptime doesn't count it as one. The span name keeps the prompt
+carries no `gen_ai.*` key, so LLM views don't count it as one. The span name keeps the prompt
 name.
 
 ## Verification

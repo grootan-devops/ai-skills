@@ -12,12 +12,12 @@ function, the observations, the trace context, the content mode, the levels and 
   once, after authentication (`genai.feature(name, user, conversation)`), and every span inside
   carries the trace context.
 - **Content:** `full` outside production, `off` in production; `redacted` only for a feature
-  with a redactor and the owner's sign-off ([modes](../signals/genai.md#modes)). It goes to one
-  tool, Langfuse or OneUptime's AI views, never both
-  ([destination](../signals/genai.md#destination)).
+  with a redactor and the owner's sign-off ([modes](../signals/genai.md#modes)). It goes to
+  Langfuse only ([content stays in Langfuse](../signals/genai.md#content-stays-in-langfuse)).
 - **Who spent what:** the spender, the team and the conversation come from the app's own
   verified context, decided per entry point while planning
-  ([who spent what](../signals/genai.md#who-spent-what)); AI spans carry them to both tools.
+  ([who spent what](../signals/genai.md#who-spent-what)); Langfuse-bound spans carry them, and
+  AI spans on the ops path carry the conversation.
 - **The usual signals stay:** the access log, step logs, one ERROR record per failure, the job
   helper for jobs ([batch.md](batch.md)), and the GenAI metrics on `/metrics`
   ([metrics](../signals/metrics.md#genai-metrics)).
@@ -145,10 +145,6 @@ and [backends/langfuse.md](../backends/langfuse.md#experiments).
   client in the first event, so feedback works before the stream ends.
 - **WebSocket chat:** each user message is a root `WS {type}` span that declares the feature
   ([api.md](api.md#websocket)).
-- **Session replay** blocks the transcript and the input box (`oneuptime-block`): replay would
-  otherwise record what the user and the model wrote ([rum.md](../signals/rum.md#safe-capture-in-the-browser)).
-- **Browser telemetry** never records prompts or answers; the browser's fetch span to the chat
-  API continues into the backend trace as usual.
 
 ## Planned
 
@@ -163,8 +159,7 @@ stub and the Langfuse stand-in. For the functions on this page, also check:
 
 - a chat turn: the feature context on every observation, the prompt link, and WARNING on a
   truncated answer (send a small `max_tokens`);
-- the ops stream: `user.id`, `team.id` (where the app has one) and `gen_ai.conversation.id` on
-  every AI span, the `retrieval` operation on retrieval steps, and no `gen_ai.*`, `llm.*` or
+- the ops stream: `gen_ai.conversation.id` on every AI span, the `retrieval` operation on retrieval steps, and no `gen_ai.*`, `llm.*` or
   `traceloop.*` key on any other span;
 - a tool call: the tool observation with arguments and result only in the non-production run,
   and its outbound calls absent from the Langfuse path;

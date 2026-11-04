@@ -128,16 +128,14 @@ OBS_ENV_PREFIX = r"(?:OTEL|LANGFUSE|TRACELOOP|OPENINFERENCE)_"
 OTEL_ENV = re.compile(rf"""process\.env(\.|\[\s*['"]){OBS_ENV_PREFIX}|os\.environ[^\n]*['"]{OBS_ENV_PREFIX}"""
                       rf"""|os\.getenv\s*\(\s*['"]{OBS_ENV_PREFIX}|os\.Getenv\s*\(\s*"{OBS_ENV_PREFIX}|System\.getenv\s*\(\s*"{OBS_ENV_PREFIX}""")
 XFF = re.compile(r"""x-forwarded-for""", re.IGNORECASE)
-# Browser code: a backend key, propagation to every origin, typed values or page text in telemetry.
-BROWSER_KEY = re.compile(r"""x-oneuptime-(token|service-token|ingestion-key)""", re.IGNORECASE)
+# Browser code: a telemetry backend key in code that runs in the page.
+BROWSER_KEY = re.compile(r"""['"`]Api-Token\s""")  # Dynatrace's auth scheme; other keys show up as PUBLIC_KEY names
 # A telemetry key in a build-time public variable or in public runtime config: bundlers ship these to the page.
 # Only telemetry credentials count; other secrets in a bundle belong to another review, not this audit.
-TELEMETRY_HINT = r"(?:ONEUPTIME|OTEL|OTLP|TELEMETRY|RUM|REPLAY|PYROSCOPE|OBSERVABILITY|INGESTION)"
+TELEMETRY_HINT = r"(?:OTEL|OTLP|TELEMETRY|PYROSCOPE|OBSERVABILITY|INGESTION)"
 PUBLIC_KEY = re.compile(
     rf"""\b(?:(?:NEXT_|NUXT_)?PUBLIC_|VITE_|REACT_APP_|NG_APP_)\w*{TELEMETRY_HINT}\w*(?:TOKEN|SECRET|KEY)"""
     rf"""|\.public\.\w*{TELEMETRY_HINT}\w*(?:token|secret|key)""", re.IGNORECASE)
-PROPAGATE_ALL = re.compile(r"""propagateTraceHeaderCorsUrls[^\n]*(/\.\*/|/\.\+/|RegExp\(\s*['"]\.[*+]['"])""")
-PAGE_VALUE = re.compile(r"""\.(value|textContent|innerText|innerHTML)\b""")
 
 # GenAI (references/signals/genai.md). Content keys: prompts, completions, tool arguments and results,
 # retrieved documents, in the GenAI conventions and in Langfuse, OpenLLMetry and OpenInference.
@@ -231,8 +229,7 @@ ANGULAR_IMPORT = re.compile(r"""from\s+['"]@angular/""")
 
 def is_browser_file(rel: str, lines: list[str]) -> bool:
     """Code that runs in the page: a `'use client'` module, `instrumentation-client`, a `.vue` or `.svelte`
-    component, a `*.client.*` module (SvelteKit `hooks.client`, Nuxt client plugins), Angular app code,
-    observability client code, or public/."""
+    component, a `*.client.*` module (SvelteKit `hooks.client`, Nuxt client plugins), Angular app code or public/."""
     first = next((line.strip() for line in lines if line.strip()), "")
     parts = rel.split("/")
     name = parts[-1]
@@ -241,19 +238,14 @@ def is_browser_file(rel: str, lines: list[str]) -> bool:
     return (first.strip(";") in ("'use client'", '"use client"') or name.startswith("instrumentation-client.")
             or name.endswith((".vue", ".svelte")) or ".client." in name
             or any(ANGULAR_IMPORT.search(line) for line in lines[:40])
-            or "public" in parts[:-1] or ("client" in parts[:-1] and "observability" in parts))
+            or "public" in parts[:-1])
 
 
 def browser_findings(line: str, loc: str) -> list[Finding]:
     found = []
     if BROWSER_KEY.search(line) or PUBLIC_KEY.search(line):
-        found.append(Finding("P0", "browser-key", loc, "backend key or key header in code that runs in the page; "
-                             "send RUM and replay through the same-origin proxy, which adds the key"))
-    if PROPAGATE_ALL.search(line):
-        found.append(Finding("P1", "rum-propagate-all", loc, "trace headers propagated to every origin; list the API origins explicitly"))
-    if (ATTR_SINK.search(line) or LOG_SINK.search(line)) and PAGE_VALUE.search(line):
-        found.append(Finding("P1", "rum-input-capture", loc, "an input value or page text goes into browser telemetry; "
-                             "record the action, not what the user typed or read"))
+        found.append(Finding("P0", "browser-key", loc, "telemetry backend key or key header in code that runs in "
+                             "the page; telemetry keys stay on the server"))
     return found
 
 
@@ -984,8 +976,8 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
                 direct += browser_findings(text, loc)
             elif PUBLIC_KEY.search(text):
                 direct.append(Finding("P1", "public-key-var", loc, "telemetry key named as a public build variable or "
-                                      "public runtime config; bundlers ship these to the page, so the same-origin proxy "
-                                      "holds it"))
+                                      "public runtime config; bundlers ship these to the page, so it stays a server-only "
+                                      "variable"))
             findings.extend(direct)
             refs = code_refs(text)
             reported = any(f.rule == "secret-capture" for f in direct)

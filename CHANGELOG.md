@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-04
+
+### Changed
+
+- `observability-builder`: AI spans on the ops path no longer get `user.id` and `team.id` from the feature stamps; request identity stays on the entry span, and Langfuse keeps the user and team in its own trace context. AI spans keep `gen_ai.conversation.id`, and spans that aren't AI calls still lose stray `gen_ai.*`, `llm.*` and `traceloop.*` keys. The collector's GenAI routing drops content on the ops branch unconditionally.
+- `observability-builder`: `detect.py` reports no workload for a project that is only pages (no `spa`); fullstack apps are instrumented on the server side only.
+- `platform-builder`: the example product in docs and tests is `storefront` instead of `oneuptime`.
+
+### Removed
+
+- `observability-builder`: OneUptime as a backend: `backends/oneuptime.md`, its collector exporter and identity stamping, and the OneUptime examples in the other pages. The Grafana stack, Dynatrace, New Relic, AWS and Langfuse remain (see MIGRATION.md).
+- `observability-builder`: browser RUM and session replay: `signals/rum.md`, `workloads/spa.md`, the `rum` key in `observability.yml`, the receiver's session-replay stand-in and `--replay-assets`, the `rum-propagate-all` and `rum-input-capture` audit rules, and the browser parts of the fullstack workload.
+- `observability-builder`: `genai.content.destination` and the receiver's `--genai-content-destination`. AI content goes to Langfuse only, never to the ops backend.
+
 ## [2.0.0] - 2026-11-01
 
 ### Added

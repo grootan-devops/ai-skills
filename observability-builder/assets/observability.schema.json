@@ -381,101 +381,8 @@
         }
       }
     },
-    "rum": {
-      "description": "Browser RUM and session replay. Configuration is served to the browser at runtime.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "$ref": "#/$defs/boolean",
-          "default": false
-        },
-        "exporter": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "endpoint": {
-              "description": "Backend OTLP base URL the same-origin proxy forwards to (the browser posts to /telemetry/v1/<signal> on its own origin).",
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            "headers": {
-              "description": "Added server-side by the proxy; never sent to the browser.",
-              "$ref": "#/$defs/headers"
-            }
-          }
-        },
-        "app_identifier": {
-          "description": "Identifier of the browser application in the RUM backend.",
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "session_replay": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "description": "Record sessions. Starts only with input masking in place.",
-              "$ref": "#/$defs/boolean",
-              "default": false
-            },
-            "host": {
-              "description": "Origin of the replay backend the proxy forwards to; the recorder appends /telemetry/session-replay/... itself.",
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            "headers": {
-              "description": "Headers the replay proxy adds, e.g. the replay backend's key, when rum.exporter goes to a collector that holds the OTLP key; defaults to rum.exporter.headers. Never sent to the browser.",
-              "$ref": "#/$defs/headers"
-            }
-          }
-        },
-        "sample_ratio": {
-          "description": "The browser's root sampling ratio (traceidratio).",
-          "$ref": "#/$defs/ratio",
-          "default": 1.0
-        }
-      },
-      "if": {
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "const": true
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "exporter",
-          "app_identifier"
-        ],
-        "properties": {
-          "exporter": {
-            "required": [
-              "endpoint"
-            ]
-          },
-          "session_replay": {
-            "if": {
-              "required": [
-                "enabled"
-              ],
-              "properties": {
-                "enabled": {
-                  "const": true
-                }
-              }
-            },
-            "then": {
-              "required": [
-                "host"
-              ]
-            }
-          }
-        }
-      }
-    },
     "genai": {
-      "description": "LLM and agent telemetry: the GenAI client metrics, the AI feature context, the content policy and Langfuse as a second trace destination; OneUptime's AI views read the same spans. Off by default; see references/signals/genai.md.",
+      "description": "LLM and agent telemetry: the GenAI client metrics, the AI feature context, the content policy and Langfuse as a second trace destination, the only one that receives content. Off by default; see references/signals/genai.md.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -485,7 +392,7 @@
           "default": false
         },
         "content": {
-          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on spans bound for the one content destination, never in logs or metrics.",
+          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on Langfuse-bound spans, never on the ops path, in logs or in metrics.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -506,22 +413,6 @@
               ],
               "default": "off"
             },
-            "destination": {
-              "description": "The one tool that receives content: langfuse (Langfuse-bound spans; the ops path carries none) or ops (AI spans on the ops path, for an ops backend with AI views such as OneUptime's; Langfuse, when on, gets no content). ops needs Langfuse mode hybrid or otel, or Langfuse off.",
-              "type": "string",
-              "anyOf": [
-                {
-                  "enum": [
-                    "langfuse",
-                    "ops"
-                  ]
-                },
-                {
-                  "$ref": "#/$defs/interpolated"
-                }
-              ],
-              "default": "langfuse"
-            },
             "sample_ratio": {
               "description": "Share of traces that carry content, decided from the trace id.",
               "$ref": "#/$defs/ratio",
@@ -533,7 +424,7 @@
               "default": 20000
             },
             "media": {
-              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full and the langfuse destination).",
+              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full).",
               "type": "string",
               "anyOf": [
                 {

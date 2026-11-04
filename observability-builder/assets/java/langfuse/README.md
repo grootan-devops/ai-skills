@@ -25,9 +25,7 @@ The exporter brings the OkHttp sender. Where the service pins another OkHttp, ex
 Then:
 
 - **Build the guard.** Implement `ContentGuard.Decide` from the feature registry and the yml's
-  content ceiling. An experiment item may hold content whenever the ceiling is `full`. With
-  `genai.content.destination: ops`, `Decide` always refuses: content then goes to the ops
-  backend's AI views, and Langfuse gets none.
+  content ceiling. An experiment item may hold content whenever the ceiling is `full`.
 - **Wire it per mode** (`genai.langfuse.mode`, export `app`):
   - `hybrid`: `BatchSpanProcessor.builder(LangfuseExporter.create(...))` on the module's
     `SdkTracerProvider`, next to the ops processor, plus one `LangfuseClient` for app prompts and

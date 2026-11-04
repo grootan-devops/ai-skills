@@ -29,8 +29,7 @@ squatted and wrong-publisher packages are rejected, and the sources used are rec
 
 **Outputs are standardised, code is not.** Each project produces the same telemetry in its own
 idioms. Black-box checks prove it against the running application: a local OTLP receiver
-(`scripts/receive.py`), real requests, a `/metrics` scrape, stdout capture and a headless browser
-for RUM. They assert the data model and the safe-capture rules, inject collector and backend
+(`scripts/receive.py`), real requests, a `/metrics` scrape and stdout capture. They assert the data model and the safe-capture rules, inject collector and backend
 failures, and show that switching backends needs configuration changes only.
 
 ## Vendor neutrality
@@ -49,14 +48,12 @@ Applications speak open protocols, and the collector adapts them to each backend
 
 Endpoints, authentication, TLS, protocols, metric temporality, label prefixes and backend-specific
 attributes are configuration: `observability.yml` on the application side, or the collector's
-exporters. Moving between backends (OneUptime, a Grafana stack with Tempo, Dynatrace, New Relic)
+exporters. Moving between backends (a Grafana stack with Tempo, Dynatrace, New Relic)
 is a configuration change, and the conformance checks confirm that nothing else changes. The collector may
 send one signal to several backends. The profile format is the one per-backend difference an
 application may see.
 
-The exception is **RUM and session replay**, which target OneUptime; browsers send OTLP over HTTP.
-Their destination and keys still come from configuration. **LLM observability** is the second:
-the AI part of each trace, with prompts and completions where the content policy allows them,
+The exception is **LLM observability**: the AI part of each trace, with prompts and completions where the content policy allows them,
 goes to Langfuse as well, from a processor on the same tracer provider or from the collector.
 The module keeps every Langfuse-specific key in one translation table, so the rest of the trace
 stays plain OpenTelemetry ([signals/genai.md](signals/genai.md)).
@@ -71,14 +68,14 @@ before the SDK, agent or framework starts. OpenTelemetry then works unchanged, a
 documentation stays valid.
 
 - Only features OpenTelemetry has no setting for (the access log, path exclusions, the
-  `/metrics` server, the slow-step threshold, profiling, RUM, and GenAI's content policy and
+  `/metrics` server, the slow-step threshold, profiling, and GenAI's content policy and
   Langfuse destination) read their own sections of the file.
 - Agents that read environment variables when they start get their values by running the loader
   first, in the entrypoint.
 - The file is the single source. Environment variables enter only through `${...}`; the loader
   overwrites stray `OTEL_*` values with the file's and logs a warning.
 - The file holds connection details, static attributes, toggles and the access-log and exclusion
-  lists. Span attributes, enrichment, function wrappers, step logs, profiling labels and RUM masking
+  lists. Span attributes, enrichment, function wrappers, step logs, and profiling labels
   are code.
 
 Details: [configuration](config.md).
@@ -109,8 +106,7 @@ same identity as the SDK's telemetry ([cross-signal identity](data-model.md#cros
 - **Delivery fails open.** If the exporter, the collector or a backend fails, the application keeps
   serving; telemetry is retried, held in bounded queues and eventually dropped.
 - **Safety fails closed.** If sanitising a value fails, the value is omitted, never written raw.
-  Session replay starts only when its masking is in place, and AI content is left out when its
-  redactor fails.
+  AI content is left out when its redactor fails.
 
 Telemetry becomes less detailed, never less safe. Safety is a property of the instrumentation code,
 not of a filter further down the pipeline ([safe capture](safe-capture.md)).

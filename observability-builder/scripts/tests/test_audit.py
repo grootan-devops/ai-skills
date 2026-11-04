@@ -154,41 +154,30 @@ class AuditTests(unittest.TestCase):
 
     def test_browser_code_rules(self):
         write(self.root, "app/orders/form.tsx", "'use client';\nexport function Form() {\n"
-              "  const headers = { 'x-oneuptime-token': process.env.NEXT_PUBLIC_ONEUPTIME_TOKEN };\n"
-              "  span.setAttribute('app.note', event.target.value);\n}\n")
-        write(self.root, "instrumentation-client.ts", "new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/.*/] });\n")
-        write(self.root, "app/telemetry/v1/[signal]/route.ts", "headers['x-oneuptime-token'] = config.token;\n")
-        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "rum-"))]
-        self.assertIn(("browser-key", "app/orders/form.tsx:3"), found)
-        self.assertIn(("rum-input-capture", "app/orders/form.tsx:4"), found)
-        self.assertIn(("rum-propagate-all", "instrumentation-client.ts:1"), found)
-        self.assertFalse([f for f in found if f[1].startswith("app/telemetry")], "the server proxy may hold the key")
+              "  const headers = { Authorization: 'Api-Token ' + process.env.NEXT_PUBLIC_OTLP_TOKEN };\n}\n")
+        write(self.root, "app/api/export/route.ts", "headers.Authorization = 'Api-Token ' + config.token;\n")
+        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith("browser-")]
+        self.assertEqual(found, [("browser-key", "app/orders/form.tsx:3")])
 
     def test_browser_rules_in_other_frontends(self):
         write(self.root, "src/routes/orders/new/+page.svelte",
-              "<script>\n  const headers = { 'x-oneuptime-token': token };\n</script>\n")
-        write(self.root, "src/hooks.client.ts", "span.setAttribute('app.email', input.value);\n")
-        write(self.root, "app/components/OrderForm.vue", "const key = useRuntimeConfig().public.oneuptimeToken;\n")
-        write(self.root, "plugins/rum.client.ts", "new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/.*/] });\n")
+              "<script>\n  const headers = { Authorization: 'Api-Token ' + token };\n</script>\n")
+        write(self.root, "app/components/OrderForm.vue", "const key = useRuntimeConfig().public.otlpToken;\n")
         write(self.root, "src/app/order-form.component.ts",
-              "import { Component } from '@angular/core';\nconst t = import.meta.env.NG_APP_ONEUPTIME_TOKEN;\n")
-        write(self.root, "src/main.ts", "const key = import.meta.env.VITE_ONEUPTIME_API_KEY;\n")
-        for proxy in ("src/routes/telemetry/v1/[signal]/+server.ts", "server/api/telemetry.post.ts", "server.ts",
-                      "src/lib/rum.server.ts"):
-            write(self.root, proxy, "headers['x-oneuptime-token'] = config.token;\n")
-        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "rum-", "public-"))]
+              "import { Component } from '@angular/core';\nconst t = import.meta.env.NG_APP_OTLP_TOKEN;\n")
+        write(self.root, "src/main.ts", "const key = import.meta.env.VITE_TELEMETRY_API_KEY;\n")
+        for server in ("server/api/telemetry.post.ts", "server.ts", "src/lib/export.server.ts"):
+            write(self.root, server, "headers.Authorization = 'Api-Token ' + config.token;\n")
+        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "public-"))]
         self.assertIn(("browser-key", "src/routes/orders/new/+page.svelte:2"), found)
-        self.assertIn(("rum-input-capture", "src/hooks.client.ts:1"), found)
         self.assertIn(("browser-key", "app/components/OrderForm.vue:1"), found)
-        self.assertIn(("rum-propagate-all", "plugins/rum.client.ts:1"), found)
         self.assertIn(("browser-key", "src/app/order-form.component.ts:2"), found)
         self.assertIn(("public-key-var", "src/main.ts:1"), found)
         write(self.root, "src/i18n.ts", "const tolgee = import.meta.env.VITE_APP_TOLGEE_API_KEY;\n")
         write(self.root, "src/app/pay.client.ts", "const stripe = process.env.NEXT_PUBLIC_STRIPE_KEY;\n")
         others = [(rule, loc) for sev, rule, loc in self.rules() if loc.startswith(("src/i18n.ts", "src/app/pay.client.ts"))]
         self.assertEqual(others, [], "only telemetry keys are this audit's concern")
-        self.assertFalse([f for f in found if "server" in f[1] or f[1].startswith("src/routes/telemetry")],
-                         "server-side proxies may hold the key")
+        self.assertFalse([f for f in found if "server" in f[1]], "server-side code may hold the key")
 
     def test_body_in_span_and_logged_headers(self):
         write(self.root, "src/c.ts", 'span.setAttribute("payload", JSON.stringify(req.body));\nlogger.info("in", req.headers);\n')

@@ -121,8 +121,8 @@ from spans, so unsampled requests count too:
   response model never makes new series. `provider` is the `gen_ai.provider.name` value;
   `operation` the `gen_ai.operation.name` value.
 - **No feature, user, team or conversation label.** Cost and quality per feature, user or team
-  are questions for the LLM tool, which reads them off each AI span: Langfuse, or OneUptime's
-  AI views ([genai.md](genai.md#who-spent-what)).
+  are questions for the LLM tool, which reads them off each AI span: Langfuse
+  ([genai.md](genai.md#who-spent-what)).
 - **One path per series.** With OTLP push on, the instrumentations' own `gen_ai.client.*`
   metrics are dropped with a view.
 - **App metrics on request:** feedback, guardrail decisions, tool calls, agent steps, approvals

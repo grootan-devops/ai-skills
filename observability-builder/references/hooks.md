@@ -179,7 +179,7 @@ These are rules, not recipes; the framework's own docs say how to apply them.
   parent-based sampling.
 - **Backend capabilities** come from the backend's docs: accepted protocols (e.g. Dynatrace
   takes `http/protobuf` only), metric temporality (Dynatrace and New Relic want delta), auth
-  style, attribute limits and profile formats (e.g. OneUptime can't ingest JFR).
+  style, attribute limits and profile formats (some can't ingest JFR).
   OpenTelemetry is deprecating span events, so prefer log-based exceptions.
 
 [Documentation index](README.md)

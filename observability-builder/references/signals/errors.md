@@ -30,7 +30,7 @@ separate error SDK.
    ([genai.md](genai.md)).
 6. **`exception.*` only on the error record.** The keys belong to the one ERROR record per
    failure. A warning about a retry, a fallback or a telemetry upload that failed carries
-   `error.type` and a sanitised `app.error.message` instead: backends such as OneUptime turn any
+   `error.type` and a sanitised `app.error.message` instead: some backends turn any
    record with an `exception.*` key into an exception, whatever its severity.
 7. **Responses keep their format.** The global error handler records the failure, then returns
    the response the application returned before: the existing error format is an API contract.
