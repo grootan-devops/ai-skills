@@ -19,6 +19,9 @@ class Exchange:
     error: str | None = None
     started_ns: int = 0
     ended_ns: int = 0
+    # The identity the scenario authenticated this request as ({"user.id": ..., "tenant.id": ...}); {} for an
+    # anonymous request; None when the scenario doesn't say. The conformance checks compare, never print, the values.
+    identity: dict | None = None
 
     @property
     def path_only(self) -> str:
@@ -85,6 +88,23 @@ class Payload:
     @property
     def name(self) -> str:
         return f"otlp/{self.seq:04d}-{self.signal}-{self.transport}.json"
+
+
+@dataclass
+class FaroPayload:
+    """One Grafana Faro batch posted to /collect (browser RUM)."""
+
+    seq: int
+    data: dict  # the JSON body: meta plus exceptions, logs, events, measurements, traces
+    raw: bytes
+    header_names: list = field(default_factory=list)
+    received_at: float = 0.0
+    api_key: bool = False  # an X-API-Key header was present; its value is never kept
+    origin: str = ""  # the browser's Origin header
+
+    @property
+    def name(self) -> str:
+        return f"faro/{self.seq:04d}.json"
 
 
 @dataclass

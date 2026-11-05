@@ -1,9 +1,9 @@
 # Observability Builder
 
-An AI agent skill that instruments any service for end-to-end observability —
+An AI agent skill that instruments any service or web frontend for end-to-end observability —
 access logs, structured logs, OpenTelemetry traces with nested function spans, metrics,
-error logs, profiling, and LLM and agent telemetry with Langfuse — and
-audits telemetry for unsafe capture.
+error logs, profiling, browser RUM with Grafana Faro, and LLM and agent telemetry with
+Langfuse — and audits telemetry for unsafe capture.
 It is self-contained: the workflow, the observability standard it applies, the
 `observability.yml` schema and the checking scripts are all in this folder.
 
@@ -39,8 +39,11 @@ ln -s "$(pwd)/observability-builder" ~/.claude/skills/observability-builder
 | `assets/observability.schema.json` | JSON Schema for `observability.yml` |
 | `assets/java/PprofExporter.java` | Template: the Java profiler's JFR snapshots as pprof, for backends without JFR |
 | `assets/go/langfuse/`, `assets/java/langfuse/` | Templates: the Langfuse exporter (export scope, content guard) and REST client (scores, prompts, datasets) for stacks without a Langfuse SDK |
+| `assets/js/faro/` | Templates for browser RUM with Grafana Faro: runtime config, start-up with every self-hosted feature and the three transports, the `beforeSend` scrubber, the React router and error hooks |
+| `assets/grafana/rum-dashboard.json` | The Grafana OSS dashboard for Faro data in Loki and Tempo: 68 panels covering every field the frontend sends (overview, Core Web Vitals and their attribution, page loads and resources, errors and console, user journeys and frustration, API calls and traces, CSP and custom signals) |
 | `assets/js/langfuse/` | Templates for Node and TypeScript: the export scope, the content guard, the guarded processor proxy, env-free OTLP transports and the score client, around Langfuse's JS SDK |
 | `scripts/` | The tools below |
+| `docs/attribute-standard-design.md` | Maintainer notes: how the M/C/R/O/P attribute and label classification was designed, with the approved tables and the rollout plan; not read by the agent |
 
 ## Scripts
 
@@ -53,17 +56,32 @@ Python 3.10+ with PyYAML; `jsonschema` is used when installed.
 | `scripts/audit.py <project> --module <path>` | Static findings with severities: safe capture, layout, logging that bypasses the app's logger, schedulers without a job span, patched SDK internals, AI content outside the content policy, capture switches, Langfuse keys; `--strict` exits 1 on any finding, a P0 always exits 2 |
 | `scripts/contract.py record\|compare` | Records API responses before a change and compares them after; never prints header values |
 | `scripts/hold_port.py <port>` | Holds a port on every IPv4 and IPv6 address, to test the "port taken" failure mode |
-| `scripts/receive.py --out <dir>` | Local OTLP/gRPC, OTLP/HTTP, Pyroscope and Langfuse receiver; writes decoded payloads and a `summary.md` (with content keys per stream, never values). Run with `uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml` |
+| `scripts/overhead.py --cmd … --url … --requests … --out <dir>` | Runs the app with telemetry off (`OTEL_SDK_DISABLED=true`) and on under the same request mix, and compares latency, CPU, memory, errors and shutdown time against the overhead budget; exits 1 over budget |
+| `scripts/rum_overhead.mjs --on <url> --off <url>` | Browser overhead: loads the page with RUM on and off under a CPU slowdown and compares FCP, LCP, blocking time, interaction latency, console errors and (with `--on-dist`/`--off-dist`) gzip bundle sizes against the budget; Playwright from the project |
+| `scripts/receive.py --out <dir>` | Local OTLP/gRPC, OTLP/HTTP, Pyroscope, Grafana Faro (`/collect`) and Langfuse receiver; writes decoded payloads, a `summary.md` (with content keys per stream, never values) and `conformance.json`, the data-model checks (`--platform` names the platform when the resource can't tell). Run with `uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml` |
 | `scripts/llm_stub.py` | Deterministic OpenAI-compatible (chat with tools, streaming with usage, embeddings) and Anthropic Messages stub with failure, rate-limit and slow triggers, so AI features run without a provider key; standard library only |
 
 ## Changes
 
+- 2026-11-05, browser RUM with Grafana Faro (release 3.0.0).
+  - **Pages:** the `spa` workload is back and fullstack apps get their page side. Grafana Faro is
+    the only browser SDK, with every self-hosted feature on. It starts from runtime config
+    without blocking the render, and the tracing chunk is lazy. Every item goes through a
+    fail-closed `beforeSend` scrubber, `user.id` is the only user field, `traceparent` goes to
+    exact API origins only, and source maps stay hidden.
+  - **Transports:** `faro` (direct to a public `faro.receiver`, the default), `proxy` (same
+    origin, the key in a Secret; `instrument` always asks whether it is needed) and `otlp` (the
+    experimental Faro OTLP transport). All three are tested end to end against Alloy 1.21, Loki
+    3.7 and Tempo 3.1.
+  - **Tools:** the `rum` key in the schema and `validate.py`; twelve `faro-*` audit rules and `rum-access-log-query`; a Faro
+    `/collect` endpoint, conformance checks and canary stream in the receiver;
+    `scripts/rum_overhead.mjs`; the `assets/js/faro` templates; a Grafana dashboard for every Faro field.
 - 2026-11-04, OneUptime, RUM and session replay removed (release 3.0.0).
   - **Backends:** the OneUptime page, its collector wiring and its examples are gone; the Grafana
     stack, Dynatrace, New Relic, AWS and Langfuse remain.
-  - **Browser:** browser RUM, session replay, the `rum` key, the single-page-app workload, the
-    replay stand-in in the receiver (`--replay-assets`) and the RUM audit rules are removed. The
-    fullstack workload covers the server side only.
+  - **Browser:** the OneUptime browser RUM, session replay, the replay stand-in in the receiver
+    (`--replay-assets`) and its audit rules are removed; browser RUM came back on Grafana Faro
+    the next day (above).
   - **GenAI:** content goes to Langfuse only; `genai.content.destination` and the receiver's
     `--genai-content-destination` are removed. AI spans on the ops path no longer get `user.id`
     and `team.id`; they keep `gen_ai.conversation.id`, and other spans still lose stray
@@ -121,7 +139,8 @@ Python 3.10+ with PyYAML; `jsonschema` is used when installed.
       the header variables into their own and take the TLS files and compression. Go's took the
       ops protocol. Langfuse's SDK processors build such an exporter by default. So the Langfuse
       path gets a transport that reads no variables, and the loader passes headers as options.
-    - **Span attribute limit:** at least `genai.content.max_chars`, because SDKs cut values blindly.
+    - **Span attribute limit:** 8192, with `genai.content.max_chars` (8000) at or below it,
+      because SDKs cut values blindly; both are raised together or not at all.
     - **Baggage:** the allow-listed propagator works on extract and inject, because Langfuse's JS
       tracing writes `langfuse_trace_id`.
     - **Feature declaration** has a form per language.

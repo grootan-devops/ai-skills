@@ -12,10 +12,13 @@ OpenTelemetry API and the logger ([layout](layout.md)).
 ## What a wrapper does
 
 1. **Span.** Start an `INTERNAL` child span named `{Class}.{method}` (or `{module}.{function}`)
-   with `code.function.name`, `code.file.path`, plus `code.line.number` and `thread.name` where the
-   runtime provides them without capturing a stack per call, the function's own
-   [enrichment](enrichment.md) attributes, and argument summaries chosen in code, never raw
-   arguments or payloads ([safe capture](safe-capture.md)). Context flows into async work
+   with `code.function.name`, fully qualified (M); `code.file.path` and `code.line.number` (R)
+   where the runtime provides them without capturing a stack per call; and, where useful (O),
+   `thread.name`, the function's own [enrichment](enrichment.md) attributes and allow-listed
+   argument summaries chosen in code. Raw arguments, payloads, the request context and the
+   deprecated `code.namespace` are never set on it (P); personal values in a summary go through
+   the shared masking helper ([safe capture](safe-capture.md#pii-masking),
+   [operations](data-model.md#operations)). Context flows into async work
    (executors, goroutines, tasks, promises), so children nest under the right parent instead of
    starting new traces.
 2. **Profiling, heavy work only.** Code that is slow or heavy on CPU, memory or locks also runs
@@ -34,7 +37,11 @@ OpenTelemetry API and the logger ([layout](layout.md)).
 5. **Failure.** Set `error.type` and status ERROR with a sanitised message. The exception is
    recorded once: inner layers mark their span, write their DEBUG `failed` step log and rethrow,
    and the boundary that handles the failure writes the one ERROR log with `exception.*`.
-   Logging errors at every layer would turn one failure into several error reports.
+   Logging errors at every layer would turn one failure into several error reports. An exception
+   that maps to a 4xx response (FastAPI or Starlette `HTTPException` 4xx, Express `next(err)`
+   with a 4xx status, Spring `ResponseStatusException` 4xx) is a handled client error: the span
+   stays UNSET, `error.type` optional. Only server failures (5xx or unhandled) mark spans ERROR
+   ([traces](signals/traces.md#status)).
 6. **Always** end the span and restore the labels, in `finally` or `defer`, so an exception or an
    early return can't leak a span or leave labels on the thread.
 
@@ -55,7 +62,8 @@ traced(function, name = "{Class}.{method}", attributes, heavy = false, threshold
     if duration > threshold: log WARN "<name> slower than threshold" with app.function.duration
     return result
   on error:
-    set error.type and status ERROR (sanitised message) on span
+    if error maps to a 4xx response: status stays UNSET (error.type optional)
+    else: set error.type and status ERROR (sanitised message) on span
     log DEBUG "<name> failed" with app.function.duration and error.type
     rethrow                          # the boundary that handles it writes the ERROR log
   finally:
@@ -95,7 +103,9 @@ Not wrapped, because the spans would have no request meaning:
   functions, synchronous helper methods on service classes;
 - plumbing that isn't request work: middleware and filters (the framework instrumentation is
   set to skip them too, [hooks](hooks.md)), logging and error classes, decorators, schema and
-  type modules, generated code, getters, setters and constructors.
+  type modules, generated code, getters, setters and constructors;
+- GraphQL resolvers: the GraphQL operation has the span, and resolver spans stay off in the
+  GraphQL instrumentation too ([operations](data-model.md#operations)).
 
 Wrappers create a span only inside an existing trace (a request, a job run or a WebSocket
 message), so code that runs at start-up or in the background never produces stray root spans;
@@ -119,18 +129,19 @@ dependency was called, for what, how long it took and how it ended:
 - **The client's own span.** The module that talks to a dependency (an SDK wrapper, an API client,
   a repository for a remote store) wraps each operation in a `CLIENT` span named
   `{peer} {operation}`, for example `payments charges.create` or `identity users.get`.
-  `service.peer.name` is the dependency's stable name. `server.address` and `server.port` come
-  from its configured endpoint. Safe operation attributes are added, such as the bucket rather
+  `service.peer.name`, the dependency's stable name, and `server.address` are M; `server.port`
+  (from its configured endpoint) and `network.transport` (for a non-HTTP transport) are C;
+  arguments and payloads are P. Safe operation attributes are added, such as the bucket rather
   than the object key, a result count or an idempotency key. A vendor SDK that builds its own
   HTTP client is invisible to the HTTP instrumentation: use its public transport hook if it has
   one (one decorator covers every call site), otherwise wrap each call site
   ([sdk-notes.md](sdk-notes.md)).
 - **HTTP calls underneath.** The HTTP client instrumentation's span nests under it, named
   `{method} {url.template}`, with `service.peer.name` from a map of the configured dependency
-  hosts kept in code. `url.template` replaces ids and emails in the path with placeholders. In
-  `url.full` and `url.path` ids stay visible, an email in the path becomes `{email}`, and
-  storage object keys and other content in paths never appear
-  ([safe capture](safe-capture.md)).
+  hosts kept in code. `url.template` replaces ids and personal values in the path with
+  placeholders. In `url.full` and `url.path` ids stay visible, personal data in the path goes
+  through the masking helper (an email becomes `j***@example.com`), and storage object keys and
+  other content in paths never appear ([safe capture](safe-capture.md#pii-masking)).
 - **Domain conventions first.** Where semantic conventions define the call, use them: GenAI
   (`gen_ai.*`, usually from the GenAI instrumentation), database (`db.*`), messaging
   (`messaging.*`), RPC (`rpc.*`), MCP.
@@ -152,7 +163,11 @@ dependency was called, for what, how long it took and how it ended:
 
 ## Profiling labels
 
-Only code that is slow or heavy on CPU, memory or locks gets profiling labels, for example:
+Only code that is slow or heavy on CPU, memory or locks gets profiling labels; the classes per
+operation are in the [data model](data-model.md#which-operations-get-a-controller-label). A heavy
+application function gets `controller` = `{Class}.{method}` (C), a job run `job {name}` (R), an
+HTTP entry the route template only when the service is CPU-bound per route (O), and client calls
+and I/O-bound functions never get one (P). Heavy code is, for example:
 
 - file parsing and conversion, report and image generation;
 - virus scans and uploads, PII redaction, prompt assembly, tokenisation and LLM stream parsing;
@@ -172,9 +187,10 @@ are kept for the places where CPU, memory or lock time needs attributing.
   conversion, regex redaction, serialisation), never a whole async function or an async job
   body; an I/O-bound async function gains nothing from a label, because its samples are idle
   time. Other runtimes differ ([profiling](signals/profiling.md#labels-per-runtime)).
-- Label values are bounded (code locations and fixed operation names), never IDs or secrets.
-- Static identity labels are set once when the profiler starts
-  ([data model](data-model.md#profiling)).
+- Label values are bounded (code locations and fixed operation names), never IDs, routes with
+  IDs, free text or secrets.
+- Static identity labels (the M and C resource rows) are set once when the profiler starts
+  ([data model](data-model.md#profile-labels)).
 - `trace_id` and `span_id` are never set by hand. Where the runtime supports span profiles, the
   span-profile integration links samples to spans; Node.js has none.
 

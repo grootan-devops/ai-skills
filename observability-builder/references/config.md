@@ -48,11 +48,11 @@ resource:                                    # who is sending; shared by every s
     namespace: "${OBS_SERVICE_NAMESPACE:-}"  # the application group: the deployment's partOf name
     version: "${OBS_SERVICE_VERSION}"        # required; from the build, never a default
   environment: "${OBS_ENVIRONMENT}"          # required; becomes deployment.environment.name
-  attributes:                                # the pod identity from the downward API, plus the
-                                             #   cluster's name where it is used; nothing else
+  attributes:                                # Kubernetes only: the pod identity from the downward
+                                             #   API, plus the cluster's name where it is used;
+                                             #   other platforms come from detectors, not the yml
     k8s.namespace.name: "${K8S_NAMESPACE_NAME:-}"   # empty values are dropped (local runs)
     k8s.pod.name: "${K8S_POD_NAME:-}"
-    k8s.pod.uid: "${K8S_POD_UID:-}"
     k8s.node.name: "${K8S_NODE_NAME:-}"
     k8s.cluster.name: "${K8S_CLUSTER_NAME:-}"       # optional: several clusters, one backend;
                                                     #   set by the chart per cluster
@@ -60,11 +60,12 @@ resource:                                    # who is sending; shared by every s
 tracing:
   enabled: true
   exporter:                                  # OTLP exporter block, same shape for every signal
-    endpoint: "${OBS_TRACES_ENDPOINT:-http://alloy:4317}"   # default http://localhost:4317
+    endpoint: "${OBS_TRACES_ENDPOINT:-http://alloy:4317}"   # in-cluster collector, NetworkPolicy-limited; default http://localhost:4317
     protocol: grpc                           # grpc | http/protobuf
     compression: gzip                        # gzip | none
     timeout: 10s
-    insecure: false
+    insecure: false                          # plaintext only on a private hop: loopback, a sidecar,
+                                             #   or an in-cluster collector behind a NetworkPolicy or mesh mTLS
     tls: {}                                  # ca_file, cert_file, key_file: mounted PEM paths
     headers: {}                              # backend auth when sending direct
   sampler:
@@ -78,7 +79,8 @@ metrics:
   enabled: true
   prometheus:                                # pull: the ops metrics on their own port, from the
     enabled: true                            #   stack's Prometheus client library
-    host: 0.0.0.0
+    host: 0.0.0.0                            # scraped across the network (Kubernetes pod scrape);
+                                             #   127.0.0.1 when the scraper shares the pod, task or VM
     port: 9464
     path: /metrics
     exclude_paths: [/health, /ready, /live, /metrics, /status]   # failures are still counted;
@@ -143,7 +145,8 @@ genai:                                       # LLM and agent telemetry (signals/
     capture: "${OBS_GENAI_CONTENT:-off}"     # off | redacted | full: the most this environment
                                              #   allows; full only where the data is synthetic
     sample_ratio: 1.0                        # share of traces with content, decided by trace id
-    max_chars: 20000                         # per content attribute, after redaction
+    max_chars: 8000                          # per content attribute, after redaction; at most the
+                                             #   span attribute value limit (8192)
     media: reference                         # reference | upload (upload only with full, to Langfuse)
   metrics:
     enabled: true                            # gen_ai_client_* on /metrics
@@ -159,12 +162,28 @@ genai:                                       # LLM and agent telemetry (signals/
     flush_interval: 5s
     scores:
       enabled: false                         # feedback, approval and evaluation scores (hybrid, sdk)
+
+rum:                                         # browser RUM with Grafana Faro (signals/rum.md)
+  enabled: false                             # the page's own switch; a service without pages omits rum
+  transport: faro                            # faro | proxy | otlp
+  endpoint: "${OBS_RUM_ENDPOINT}"            # required when on; faro: https://faro.example.com/collect,
+                                             #   proxy: /telemetry/faro/collect, otlp: the collector base URL
+  api_key: "${OBS_RUM_PUBLIC_KEY:-}"         # faro and otlp: the receiver's public spam-filter key
+  api_key_file: ""                           # proxy only: mounted key file the proxy adds; never sent to pages
+  upstream: ""                               # proxy only: the in-cluster receiver, e.g. http://alloy.observability:12347/collect
+  session_sample_rate: 1.0                   # share of sessions that send anything
+  propagate_trace_origins: []                # exact API origins that get traceparent, e.g. https://api.example.com
+  console_disabled_levels: [trace, debug, log]
+  ignore_urls: []                            # URLs never traced or timed, as regular expressions
+  allowed_query_params: []                   # query parameters whose values may stay in URLs
+  track_resources: true                      # every resource timing, not only fetch and XHR
+  track_navigation: true                     # soft navigations (Faro's experimental.trackNavigation)
 ```
 
 Each section is described on its signal page: [traces](signals/traces.md),
 [metrics](signals/metrics.md), [application logs](signals/app-logs.md),
 [access log](signals/access-log.md), [errors](signals/errors.md),
-[profiling](signals/profiling.md) and [GenAI](signals/genai.md).
+[profiling](signals/profiling.md), [GenAI](signals/genai.md) and [browser RUM](signals/rum.md).
 
 ### Exporter blocks
 
@@ -225,6 +244,25 @@ path, other than a 404, is reported as a failed probe ([hooks.md](hooks.md)). Th
 docs paths (the Swagger UI and the OpenAPI document) go in all three lists, like the probes.
 Profiling samples the whole process and can't exclude paths.
 
+### RUM
+
+The `rum` block is the page's configuration. The server never reads it for its own telemetry:
+the deployment (a single-page app's mounted `observability.json`) or the server (a fullstack
+app's rendered config script) hands the page the `service` block and the `rum` block, with
+`${...}` resolved and without `api_key_file` and `upstream`
+([signals/rum.md](signals/rum.md#configuration-at-run-time)).
+
+| Key | Rule |
+| --- | --- |
+| `transport` | `faro` posts to a public `faro.receiver`; `proxy` posts to the page's own origin, and nginx or a route handler adds the key from `api_key_file` and forwards to `upstream`; `otlp` posts OTLP/HTTP to a collector (experimental Faro package) |
+| `api_key` | public by design in `faro` and `otlp`; empty in `proxy` |
+| `api_key_file`, `upstream` | `proxy` only, read by the proxy, never by the page |
+| `propagate_trace_origins` | exact `scheme://host[:port]` origins; no wildcard, no regular expression |
+| `session_sample_rate` | 0 to 1; unsampled sessions send nothing and no trace context |
+
+`validate.py` reports a wildcard origin, a key file or upstream outside `proxy`, a missing
+endpoint while RUM is on, and an `http://` endpoint other than loopback.
+
 ### GenAI
 
 `genai.enabled` switches on the GenAI client metrics, the AI feature context and, when
@@ -263,6 +301,41 @@ Not in the section, on purpose: the environment and release, which Langfuse take
 resource; a Langfuse sample rate (the trace sampler decides, and the feature registry keeps
 AI entry points); headers; any switch that puts AI context in baggage.
 
+## Resource per platform
+
+The resource is the producer's identity, classified per row in
+[data-model.md](data-model.md#resource). The yml sets the four service rows everywhere. The
+platform rows come from the platform itself: on Kubernetes from the downward API through
+`resource.attributes`, everywhere else from the SDK's resource detectors. The yml has no
+platform key: the loader detects the platform from the process environment at start-up, before
+the SDK starts, and never probes the network to do it.
+
+| Platform | Detected by | Platform rows come from | Instance identity |
+| --- | --- | --- | --- |
+| Kubernetes | `KUBERNETES_SERVICE_HOST` is set | downward-API env in `resource.attributes`: `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name`; `k8s.cluster.name` from a chart value where several clusters send to one backend. Workload names come from the collector ([collector](collector/README.md)) | `k8s.pod.name` with the namespace |
+| ECS / Fargate | `ECS_CONTAINER_METADATA_URI_V4` is set | the ECS detector: `cloud.provider`, `cloud.platform`, `cloud.region`, `aws.ecs.cluster.arn`, `aws.ecs.task.arn`, `aws.ecs.launchtype` | `aws.ecs.task.arn` |
+| Lambda | `AWS_LAMBDA_FUNCTION_NAME` is set | the Lambda detector: `cloud.*`, `faas.name`, `faas.version`, `faas.instance` | `faas.instance` |
+| Cloud Run service | `K_SERVICE` is set | the GCP detector: `cloud.*`, `faas.name`, `faas.version`, `faas.instance` | `faas.instance` |
+| Cloud Run job | `CLOUD_RUN_JOB` is set | the GCP detector: `cloud.*`, `faas.name`, `gcp.cloud_run.job.execution`, `gcp.cloud_run.job.task_index` | execution and task index |
+| Plain Docker | none of the above, and `/.dockerenv` exists or the cgroup names a container | the host and container detectors: `host.name`, `container.id` | `container.id` |
+| VM | none of the above | the host detector: `host.name`; on a cloud VM (the DMI vendor in `/sys/class/dmi/id/sys_vendor` names the provider) also that provider's detector for `cloud.*` | `host.name` |
+
+On every platform the loader keeps the SDK's own rows: `telemetry.sdk.language`,
+`telemetry.sdk.version`, `process.runtime.name`, `process.runtime.version` and `os.type`. It never
+adds the rows the standard leaves out: `process.pid`, `process.command_line`,
+`process.command_args`, `process.executable.*`, `vcs.*`, `service.instance.id`, `k8s.pod.uid`,
+`host.id` and `deployment.id`. A detector that brings one of them is either turned off or its
+result filtered to the allowed keys; how per SDK is in [sdk-notes.md](sdk-notes.md#resource-detectors).
+A platform detector runs only on its own platform, so a local run, a test or a VM never waits on
+a metadata endpoint that isn't there.
+
+The profiler's static labels are the M and C rows of the same resource, written once at profiler
+start ([profiling](signals/profiling.md)). The R and O rows are not profile labels.
+
+Per-request values (`user.id`, `tenant.id`, `session.id`, `correlation.id`, routes, trace IDs)
+never go into `resource.attributes` or `OTEL_RESOURCE_ATTRIBUTES`: the resource is fixed for the
+life of the process.
+
 ## Interpolation
 
 - **Grammar.** `${VAR}` and `${env:VAR}` read an environment variable. `${VAR:-default}` uses
@@ -292,7 +365,15 @@ variables it overwrote or removed, never their values. It owns the `LANGFUSE_*`,
 and `OPENINFERENCE_*` variables the same way, whether GenAI is on or not. A stray variable can
 therefore neither redirect telemetry nor switch on capture in an auto-instrumentation. The one
 exception is `OTEL_SDK_DISABLED=true`, which stays the standard off switch (the overhead
-baseline in [acceptance.md](acceptance.md) uses it).
+baseline in [acceptance.md](acceptance.md#overhead-and-load) uses it).
+
+Operator-set exporter headers are not dropped silently. An `OTEL_EXPORTER_OTLP_HEADERS` (or a
+per-signal `_HEADERS`) value often carries the collector's auth, set by the platform rather
+than the app. The loader either maps it into the matching exporter block's `headers`, where the
+yml has none of its own, or reports it in the WARN by variable name, so the operator moves it
+into the yml through `${file:...}` or `${env:...}`. The report says which it did. Values are
+never logged
+([overhead-and-security.md](overhead-and-security.md#credentials)).
 
 ## What the loader writes
 
@@ -317,7 +398,7 @@ baseline in [acceptance.md](acceptance.md) uses it).
 | `genai.content.capture`, `genai.enabled` | The content switches of every GenAI instrumentation, written even with GenAI off: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (`SPAN_ONLY` with `full`, otherwise `NO_CONTENT`), `OTEL_INSTRUMENTATION_GENAI_EMIT_EVENT=false`, `TRACELOOP_TRACE_CONTENT`, the `OPENINFERENCE_HIDE_*` set (embedding vectors always hidden) and `LANGFUSE_OBSERVE_DECORATOR_IO_CAPTURE_ENABLED`, all on only with `full`. Under `redacted`, only the module's content helper records content. Where a library has no variable, the module passes the option in code (for example `recordInputs`/`recordOutputs`, or a callback handler's capture flags) |
 | `genai.metrics.enabled` | No standard variable. The module records `gen_ai_client_*` at each model call and serves them on `/metrics` ([signals/metrics.md](signals/metrics.md)) |
 | `genai.langfuse.*` | No standard variable. The module's Langfuse span processor or exporter (app route) and its client (scores, and the app's prompts and datasets) take the base URL, keys, timeout, flush interval and scope as constructor options; the JS score client reads its flush settings from `LANGFUSE_FLUSH_AT` and `LANGFUSE_FLUSH_INTERVAL` only ([sdk-notes.md](sdk-notes.md#genai-and-langfuse)) |
-| fixed in code, not in the yml | `OTEL_PROPAGATORS=tracecontext,baggage`, `OTEL_SEMCONV_STABILITY_OPT_IN` (e.g. `http,database`, plus `gen_ai_latest_experimental` when GenAI is on), an SDK resource without the default detectors where the SDK allows it ([sdk-notes.md](sdk-notes.md)), SDK batching, retry and queue defaults, attribute limits, the cardinality limit when OTLP metric push is on, and Langfuse's OTLP path and ingestion header |
+| fixed in code, not in the yml | `OTEL_PROPAGATORS=tracecontext,baggage`, `OTEL_SEMCONV_STABILITY_OPT_IN` (e.g. `http,database`, plus `gen_ai_latest_experimental` when GenAI is on), the resource detectors for the detected platform, filtered to the allowed keys ([resource per platform](#resource-per-platform), [sdk-notes.md](sdk-notes.md#resource-detectors)), the allow-listed baggage propagator with its limits (at most 8 keys and 512 bytes), SDK batching, retry and queue defaults, attribute limits, the cardinality limit when OTLP metric push is on, and Langfuse's OTLP path and ingestion header |
 
 Conversions:
 
@@ -331,8 +412,11 @@ Conversions:
   environment. Every OTLP exporter in the process reads the header variables, and Python's and
   JS's merge them into their own headers, so a header written as a variable would also reach
   Langfuse or any other second exporter.
-- The endpoint's scheme decides TLS. The loader writes `_INSECURE` only for an endpoint without
-  a scheme. Some SDKs let an explicit `_INSECURE=false` force TLS onto an `http://` endpoint;
+- The endpoint's scheme decides TLS. TLS is the default for any endpoint that is not loopback
+  or a sidecar in the same pod or task; an `http://` or `insecure` endpoint to another host
+  needs a yml comment naming the sidecar it reaches, and the audit flags it otherwise
+  (`plaintext-remote-endpoint`; [overhead-and-security.md](overhead-and-security.md#transport)).
+  The loader writes `_INSECURE` only for an endpoint without a scheme. Some SDKs let an explicit `_INSECURE=false` force TLS onto an `http://` endpoint;
   the export to a plaintext collector then fails on every request.
 
 ### SDK differences
@@ -399,7 +483,9 @@ section for them:
 | Trusted proxies for `client.address` | the framework's own proxy settings, [hooks.md](hooks.md) |
 | Correlation id header and validity rules | fixed, [hooks.md](hooks.md) |
 | Propagators, semconv opt-ins, batching, retries, limits | fixed in code (table above) |
-| `service.instance.id`, the SDK detectors' attributes | not set: the resource holds only the standard's eight attributes, plus `k8s.cluster.name` where several clusters send to one backend ([data-model.md](data-model.md#resource)) |
+| The platform rows outside Kubernetes | detected, never configured ([resource per platform](#resource-per-platform)) |
+| `service.instance.id`, `k8s.pod.uid`, `host.id`, `process.pid`, command lines, executables, `vcs.*`, `deployment.id` | never set ([data-model.md](data-model.md#resource)) |
+| Baggage keys and limits | code: an allow-list of at most 8 keys and 512 bytes; never secrets, authorisation or AI context ([data-model.md](data-model.md#trace-context)) |
 | AI features: names, tags, metadata, content opt-in and redactors, which AI entry points are always sampled | code, the feature registry ([signals/genai.md](signals/genai.md)) |
 | Prompts, score configs, model prices, evaluators, annotation queues | Langfuse itself, as a platform handoff ([backends/langfuse.md](backends/langfuse.md)) |
 | The content key families, the ops allow-list for AI spans | fixed by the standard, [signals/genai.md](signals/genai.md) |

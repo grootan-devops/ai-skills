@@ -1,19 +1,17 @@
 ---
 name: observability-builder
 description: >-
-  Add end-to-end observability to any service — access logs, structured application logs,
-  OpenTelemetry traces with nested function spans, ops metrics on a Prometheus /metrics port,
-  error logs, Pyroscope profiling, and LLM, agent, RAG and MCP telemetry (GenAI spans, token
-  and cost data, who spent what, in Langfuse) — driven by one observability.yml, for any language,
-  framework or OTLP backend, and audit existing telemetry for unsafe capture. Use whenever
-  someone asks to add, fix or standardise observability, OpenTelemetry, tracing, logging,
-  metrics, profiling, APM or LLM monitoring in an application, to trace LLM calls,
-  agents, RAG or MCP servers and clients, to see LLM spend per user or team, to send
-  telemetry to Grafana/Tempo, Prometheus, Loki, Pyroscope, Dynatrace, New Relic or Langfuse, to replace vendor
-  APM SDKs with OpenTelemetry, or to check telemetry for leaked secrets or prompts; not for
-  browser RUM or session replay,
-  Helm charts, Dockerfiles or CI pipelines (platform-builder), dashboards and alerts,
-  Langfuse prompt, dataset or evaluator management, or installing a collector or backend.
+  Add end-to-end observability to any service or web frontend: access logs, structured app logs,
+  OpenTelemetry traces with nested function spans, Prometheus ops metrics, error logs, Pyroscope
+  profiling, browser RUM with Grafana Faro (web vitals, errors, sessions, user actions, traces
+  into the API), and LLM, agent, RAG, MCP and A2A telemetry (spend per user or team, in Langfuse),
+  from one observability.yml for any language, framework, platform or OTLP backend; and audit
+  existing telemetry for unsafe capture. Use whenever someone asks to add, fix or standardise
+  observability, OpenTelemetry, tracing, logging, metrics, profiling, APM, RUM, frontend or
+  real-user monitoring, Faro or LLM monitoring, to send telemetry to Grafana, Loki, Tempo,
+  Prometheus, Pyroscope, Dynatrace, New Relic or Langfuse, to replace vendor APM or RUM SDKs, or
+  to check telemetry for leaked secrets, PII or prompts. Not for Helm charts, Dockerfiles or CI
+  (platform-builder), Langfuse prompt or dataset management, or installing a collector.
 ---
 
 # Observability Builder
@@ -24,12 +22,14 @@ Everything it needs is in this folder:
 | Folder | What it holds |
 | --- | --- |
 | `references/` | The standard (what every service emits and how it must behave) and the two workflows. [references/README.md](./references/README.md) is the index. |
-| `assets/` | `observability.schema.json`, the JSON Schema for `observability.yml`; `java/PprofExporter.java`, a template that uploads the Java profiler's JFR as pprof ([sdk-notes](references/sdk-notes.md#java)) |
-| `scripts/` | Stack detection, yml validation, the safety audit, API contract comparison, port holding, a local telemetry receiver (with a Langfuse stand-in) and a model-provider stub |
+| `assets/` | `observability.schema.json`, the JSON Schema for `observability.yml`; `java/PprofExporter.java`, a template that uploads the Java profiler's JFR as pprof ([sdk-notes](references/sdk-notes.md#java)); tested Langfuse pieces (`js/`, `go/`, `java/langfuse`); the browser RUM pieces for Grafana Faro (`js/faro`); a starter RUM dashboard (`grafana/rum-dashboard.json`) |
+| `scripts/` | Stack detection, yml validation, the safety audit, API contract comparison, the overhead tests (service and browser), port holding, a local telemetry receiver (with Faro and Langfuse stand-ins) and a model-provider stub |
 
 The skill ships no per-framework templates on purpose: frameworks and SDKs change faster than
 any template, so research the project's language, framework and libraries at run time from
-official docs and package registries, and make the *output* match the standard.
+official docs and package registries, and make the *output* match the standard. The exceptions
+are the small, tested pieces in `assets/` that are hard to get right (the Langfuse exporters, the
+Faro start-up and scrubber); check them against the installed versions before copying.
 
 ## Check for updates first
 
@@ -68,9 +68,22 @@ project's package manager before adding anything.
   Charts, Dockerfiles and CI belong to platform-builder — hand them over as an exact list
   ([references/charts.md](./references/charts.md)) instead of editing them.
 - **Safe by construction.** Write instrumentation that never captures secrets, raw bodies in
-  spans, IDs as metric labels, emails in URL paths, values in log messages or unapproved
-  baggage ([references/safe-capture.md](./references/safe-capture.md)). There is no redactor to
-  clean up afterwards; the audit will flag what slips through.
+  spans, IDs as metric labels, unmasked emails in URL paths, values in log messages or unapproved
+  baggage (an allow-list of at most 8 keys and 512 bytes)
+  ([references/safe-capture.md](./references/safe-capture.md)). Personal data reaches telemetry
+  only masked, through the module's shared masking helper. There is no redactor to clean up
+  afterwards; the audit will flag what slips through.
+- **Never cost the service its performance or security.** Stay within the overhead budget,
+  proven by the overhead test, and follow the transport, credential and exposed-port rules
+  ([references/overhead-and-security.md](./references/overhead-and-security.md)).
+- **Every field has a class.** Each attribute, field and label is mandatory, conditional,
+  recommended, optional or prohibited per location, with an owner
+  ([references/data-model.md](./references/data-model.md#classification)). Identity (user,
+  tenant, session) comes from trusted auth or tenant middleware after authentication, never
+  from raw client headers; other identity rows are a reference catalogue, added only where the
+  code has the value. Platform identity (Kubernetes, ECS or Fargate, Lambda, Cloud Run, VM,
+  plain Docker) is detected, not configured
+  ([references/config.md](./references/config.md#resource-per-platform)).
 - **AI content is the riskiest telemetry.** Prompts, completions, tool arguments and
   retrieved documents go to Langfuse only, never the ops backend, through the module's content
   policy: `full` only where the
@@ -94,6 +107,11 @@ project's package manager before adding anything.
   even to install a private dependency for a test
   ([instrument step 7](./references/instrument.md#7-verify)). Browser code never holds a
   telemetry backend key.
+- **Pages get Grafana Faro only.** Every self-hosted Faro feature on, started from runtime
+  config without blocking the render, every item through the `beforeSend` scrubber, the opaque
+  user id only, `traceparent` to exact API origins only, hidden source maps. Ask which transport
+  and always whether a same-origin proxy is needed
+  ([references/signals/rum.md](./references/signals/rum.md)).
 - **Your processes only.** When checking the app locally, stop exactly the processes you
   started, by PID, never by a name pattern. Point every exporter at the receiver or at an
   unused address before you break the config on purpose, so a failure test never reaches a real
@@ -111,8 +129,10 @@ python3 scripts/validate.py <project>/observability.yml   # schema check (bundle
 python3 scripts/audit.py <project> --module <observability-module-path>
 python3 scripts/contract.py record|compare --base <url> --requests <file> ...   # API responses before vs after
 python3 scripts/hold_port.py <port>                        # take a port on every address
+python3 scripts/overhead.py --help                         # overhead test: telemetry on vs OTEL_SDK_DISABLED=true, against the budget
+node scripts/rum_overhead.mjs --help                       # browser overhead: RUM on vs off (Playwright from the project)
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
-  scripts/receive.py --out <scratch>/telemetry [--canaries <file>]   # real OTLP + Pyroscope + Langfuse receiver
+  scripts/receive.py --out <scratch>/telemetry [--canaries <file>]   # real OTLP + Pyroscope + Faro (/collect) + Langfuse receiver
 python3 scripts/llm_stub.py                                # OpenAI- and Anthropic-compatible model stub for AI features
 ```
 
@@ -125,5 +145,6 @@ platform-builder, the migration note, functions skipped by the wrappers and open
 observability risks (never security or code issues outside telemetry: other review layers
 own those), plus the telemetry inventory in
 [instrument step 8](./references/instrument.md#8-report): metrics and labels, logging that
-bypasses the logger, work outside the API, the resource and span attributes, and, for AI
-features, the features, content modes, Langfuse route and handoff.
+bypasses the logger, work outside the API, the resource and span attributes, browser RUM
+(transport, features, views, budget), and, for AI features, the features, content modes,
+Langfuse route and handoff.

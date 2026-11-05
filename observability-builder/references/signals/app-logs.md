@@ -1,7 +1,7 @@
 # Application logs
 
 The service's own log records: step logs, completed requests and job runs, business
-milestones, warnings and the error records. They go through the app's logger, carry native
+milestones, warnings, the error records and the [audit records](#audit-log). They go through the app's logger, carry native
 trace and span ids, and go to stdout by default, where the collector ships them.
 
 ## Required behaviour
@@ -24,7 +24,9 @@ trace and span ids, and go to stdout by default, where the collector ships them.
    ([message templates](../functions.md#message-templates)). A log sanitiser never sanitises
    message text, so never interpolate emails, file paths or object keys, original file names,
    cache keys, search text or upstream response text into a message. `correlation.id` is on
-   every record; the full request context is on the access log and optional here.
+   every record (M); the identity context (`user.id`, `tenant.id`, `session.id` and the other
+   rows the code has) is optional here (O) and complete on the access log; the HTTP request
+   attributes belong to the access log and are never set here (P).
 6. **Levels** follow the [log-level policy](../functions.md#log-level-policy):
    - DEBUG: function steps started, finished or failed, with the duration (every wrapped
      function writes them);
@@ -44,7 +46,10 @@ trace and span ids, and go to stdout by default, where the collector ships them.
    a backend without a log-shipping collector uses `otlp`, or `[stdout, otlp]` to keep stdout
    for local reading. A record is never shipped twice: a pod whose logs go over OTLP is not also
    tailed into the same backend.
-8. **Safe by construction.** Secrets never reach a log. A code helper logs selected headers,
+8. **Safe by construction.** Secrets never reach a log, not even masked. Any other personal
+   value (an email, a phone number, a name, an address) is written only through the shared
+   masking helper, and dropped if masking fails; internal ids stay as they are
+   ([PII masking](../data-model.md#pii-masking)). A code helper logs selected headers,
    cookies and body fields through the same allow-lists as the access log
    ([safe-capture.md](../safe-capture.md)). AI content (prompts, completions, tool arguments
    and results, retrieved documents) never reaches a log either: AI steps log ids, counts,
@@ -73,7 +78,7 @@ with the same name.
 | `message` | `body` | the constant message |
 | `logger` | instrumentation scope name | the logger's name |
 | `trace_id`, `span_id`, `trace_flags` | `traceId`, `spanId`, `flags` | omitted outside a span or when the span context is invalid (all zeros); `trace_flags` is the W3C flags byte, where bit 0 is *sampled*. SDKs that set the random-trace-id flag (bit 1) write `03` for a sampled trace, so test bit 0, never the whole byte |
-| `event_name` | `eventName` | only on event records: `exception`, `access_log`, `health.probe.failed`, `job_run`, business events |
+| `event_name` | `eventName` | only on event records: `exception`, `access_log`, `audit.<action>`, `health.probe.failed`, `job_run`, business events |
 | any other key | attribute | names from [data-model.md](../data-model.md), e.g. `correlation.id`, `exception.type` |
 
 An error record, pretty-printed here and written as one line:
@@ -124,12 +129,46 @@ PaymentDeclined: provider declined the capture
     at OrderController.checkout (order_controller.ts:88:5)
 ```
 
+## Audit log
+
+A service whose code performs actions someone may later need to account for (a login, a
+permission or role change, a data export, a deletion, a change to another user's data) writes
+one audit record per action, through the app's logger, where the code decides the outcome.
+It is a log kind of its own, next to the application, access and error records:
+
+| Field | Class | Value |
+| --- | --- | --- |
+| `eventName` | M | `audit.<action>`, a bounded action name such as `audit.user.role_changed` |
+| `app.audit.action` | M | the same action name |
+| `app.audit.outcome` | M | a bounded value such as `success`, `denied` or `failure` |
+| `app.audit.target.type` | M | the kind of thing acted on, such as `user`, `order` or `report` |
+| `correlation.id` | M | as on every record |
+| `user.id`, `client.address` | M | the actor and where the call came from; the IP is kept unmasked here |
+| `tenant.id` | M (multi-tenant) | |
+| `session.id`, `user.roles`, organisation or account ids | C | when the code has the value |
+| `app.auth.method`, `app.auth.result` | C | on authentication events |
+| HTTP request attributes | C | when the action is an HTTP request |
+| `traceId`, `spanId`, `flags` | C | inside a span |
+| `exception.type`, `exception.message` | C | when the action failed with an exception; the ERROR record is still written separately |
+
+The record is INFO and is written whether or not the trace is sampled. It carries ids, the
+outcome and the target's type, never the changed data itself; any personal value goes through
+the masking helper like everywhere else. The full field list is in
+[data-model.md](../data-model.md#logs-errors-and-trace-correlation).
+
 ## Fields
 
 The native fields (timestamp, severity, body, trace id, span id, flags, event name, scope) and
-the attributes (`code.function.name`, `code.file.path`, `code.line.number`, `thread.id`,
-`thread.name`, `exception.*`, `correlation.id`, enrichment attributes) are defined in
-[data-model.md](../data-model.md).
+the attributes are defined in [data-model.md](../data-model.md#logs-errors-and-trace-correlation),
+with a class per log kind. For an application record:
+
+| Class | Fields |
+| --- | --- |
+| M | `timeUnixNano`, `severityNumber`, `severityText`, `body`, the resource, the logger scope, `correlation.id` |
+| C | `traceId`, `spanId`, `flags` (inside a span); personal values, masked |
+| R | `observedTimeUnixNano`, `code.function.name`, `code.file.path`, `code.line.number` |
+| O | `eventName`, `thread.id`, `thread.name`, the identity context the code has, enrichment attributes |
+| P | secrets, HTTP request attributes, allow-listed headers and cookies (access log only), `app.audit.*`, `app.auth.*` |
 
 ## Configuration
 

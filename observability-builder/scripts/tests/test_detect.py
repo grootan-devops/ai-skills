@@ -159,14 +159,19 @@ class DetectOtherStacks(unittest.TestCase):
             "nuxt": ({"nuxt": "4", "vue": "3"}, "fullstack"),
             "react-router": ({"@react-router/node": "7", "react": "19"}, "fullstack"),
             "angular-express": ({"@angular/core": "20", "express": "5"}, "fullstack"),
-            "vue-spa": ({"vue": "3", "vite": "7"}, None),
+            "vue-spa": ({"vue": "3", "vite": "7"}, "spa"),
+            "react-spa": ({"react": "19", "react-dom": "19", "@grafana/faro-react": "2.13.0"}, "spa"),
+            "vite-only": ({"vite": "7"}, None),
             "fastify": ({"fastify": "5"}, "api"),
         }
         with tempfile.TemporaryDirectory() as tmp:
             for name, (deps, workload) in cases.items():
                 write(Path(tmp), f"{name}/package.json", json.dumps({"dependencies": deps}))
                 write(Path(tmp), f"{name}/src/App.vue", "<template><div /></template>\n")
-                self.assertEqual(detect.detect(Path(tmp) / name)["workload"], workload, name)
+                result = detect.detect(Path(tmp) / name)
+                self.assertEqual(result["workload"], workload, name)
+                self.assertEqual(result.get("frontend", False), workload in ("spa", "fullstack"), name)
+            self.assertIn("faro", detect.detect(Path(tmp) / "react-spa")["telemetry"])
 
 
 class DetectGenAI(unittest.TestCase):

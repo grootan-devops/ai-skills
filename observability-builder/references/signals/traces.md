@@ -25,8 +25,9 @@ traces are kept.
 4. **Nested spans for API work and calls to other services.** Handlers, services and
    repositories get `INTERNAL` child spans through the module's wrapper, and every call to a
    third-party or internal service gets a `CLIENT` span with `service.peer.name`. Start-up code,
-   helpers and middleware get none, and nothing outside a request, a job run or a WebSocket
-   message starts a trace ([functions.md](../functions.md)).
+   helpers and middleware get none, GraphQL resolvers get none (the GraphQL operation has the
+   span), and nothing outside a request, a job run or a WebSocket message starts a trace
+   ([functions.md](../functions.md)).
 5. **No framework middleware spans.** The framework instrumentation is configured to skip its
    middleware, router and handler layers, which keeps `http.route` on the `SERVER` span; the
    module's wrappers span the handlers instead ([hooks.md](../hooks.md)).
@@ -35,9 +36,15 @@ traces are kept.
    are root `SERVER` spans, the messages linked to the connection
    ([WebSocket](../workloads/api.md#websocket)). Work that continues after a response is a new
    root span linked to the request, never a child of it.
-7. **Request attributes on entry spans.** User, tenant, session, client and `correlation.id` go
-   on each service's entry span, the local root (`SERVER` or `CONSUMER`), and nowhere else:
-   child spans stay lean, and these values are never resource attributes or metric labels
+7. **Request attributes on entry spans.** The request and identity context goes on each
+   service's entry span, the local root (`SERVER` or `CONSUMER`), and nowhere else. The core rows
+   are `correlation.id` (M), `http.route` (M for HTTP), `user.id` (C, authenticated request),
+   `tenant.id` (C, multi-tenant request), `session.id` (C, session-based request),
+   `client.address` (C, HTTP and WebSocket), `user_agent.original` and the client app (R). Other
+   identity rows (roles, user type, plan, organisation or account ids, `app.auth.*`) are added
+   only when the service's code has the value; nothing is fabricated, and `request.id` is not
+   used ([data model](../data-model.md#request-and-identity-context)). These values are P on
+   child spans, in the resource and as metric or profile labels
    ([enrichment.md](../enrichment.md)). The one exception is the AI trace context, which the
    module stamps on every span of an AI feature for Langfuse and strips on the ops path
    ([genai.md](genai.md#trace-context)).
@@ -47,24 +54,46 @@ traces are kept.
 9. **Status and errors** follow the [rules below](#status): UNSET by default, ERROR only when the
    span's own operation failed, never OK.
 10. **Propagation** is W3C tracecontext plus allow-listed baggage ([below](#propagation)).
-11. **Resource** is the eight standard attributes in the [data model](../data-model.md#resource),
-    from the yml and the downward API, plus `k8s.cluster.name` from the chart where several
-    clusters send to one backend. The SDK's default detectors are left out where the SDK allows
-    it ([sdk-notes.md](../sdk-notes.md)). Never a trace id in the resource.
-12. **Limits.** The SDK's attribute value length limit is set in code, and attribute values
-    respect it. With GenAI content on, the limit is at least `genai.content.max_chars`: SDKs cut a
-    longer value blindly, which breaks JSON before the content cap can shorten it.
+11. **Resource** follows the [data model](../data-model.md#resource): the four service and
+    deployment attributes (M) from the yml; the platform's rows (C), which on Kubernetes come
+    from the downward API, plus `k8s.cluster.name` from the chart where several clusters send to
+    one backend, and elsewhere from the SDK's platform detectors (`cloud.*`, `aws.ecs.*`,
+    `faas.*`, `gcp.cloud_run.job.*`, `host.name`, `container.id`); and the SDK, runtime and OS
+    rows `telemetry.sdk.language`, `telemetry.sdk.version`, `process.runtime.name`,
+    `process.runtime.version` and `os.type` (R), which the SDK's detectors provide. Attributes
+    the data model doesn't list, such as process ids and command lines or VCS data, are not
+    added ([sdk-notes.md](../sdk-notes.md)). Never a trace id or any per-request value in the
+    resource.
+12. **Limits.** The SDK's attribute value length limit is set in code, 8192 by default, and
+    attribute values respect it. With GenAI content on, `genai.content.max_chars` (8000 by
+    default) stays at or below it: SDKs cut a longer value blindly, which breaks JSON before the
+    content cap can shorten it. A project that needs longer content raises both together, the
+    limit equal to `max_chars`, and records the exception in the report.
 13. **No content on spans.** No request or response bodies, raw arguments or payloads in span
-    attributes; sizes and summaries only. A path segment that holds an email is masked as
-    `{email}` in `url.path` on `SERVER` spans and in `url.full` and `url.path` on `CLIENT` spans;
-    ids stay visible. AI content (prompts, completions, tool arguments and results) goes only to
+    attributes; sizes and summaries only. Personal data in a span attribute, a path segment
+    included, is written only through the shared masking helper (an email becomes
+    `j***@example.com` in `url.path` and `url.full`), and dropped if masking fails; internal ids
+    stay visible and secrets are never written
+    ([PII masking](../data-model.md#pii-masking)). AI content (prompts, completions, tool arguments and results) goes only to
     Langfuse, through the content policy
     ([genai.md](genai.md#content)).
 
 ## Fields
 
 Attributes per operation, request context and native span fields are defined in
-[data-model.md](../data-model.md). Kinds and names in short:
+[data-model.md](../data-model.md), each with a class per location
+([classification](../data-model.md#classification)):
+
+| Class | On a span |
+| --- | --- |
+| M | set on every span of that operation |
+| C | set when the stated condition holds (a response arrived, a retry, an authenticated user); absent otherwise, never fabricated |
+| R | set when the instrumentation provides it |
+| O | set only where it is useful for the service |
+| P | never set on that span: raw query strings, `Authorization`, `Cookie`, bodies, payloads, parameter values, request context on child spans |
+
+The audit checks the M, C and P rows of [operations](../data-model.md#operations) and
+[trace context](../data-model.md#trace-context). Kinds and names in short:
 
 | Operation | Kind | Name |
 | --- | --- | --- |
@@ -72,11 +101,15 @@ Attributes per operation, request context and native span fields are defined in
 | HTTP client | `CLIENT` | `{method} {url.template}` |
 | Call to another service | `CLIENT` | `{service.peer.name} {operation}` |
 | Database or cache | `CLIENT` | `{db.query.summary}`, or `{db.operation.name} {db.collection.name}` |
-| Messaging | `PRODUCER` to publish, `CONSUMER` to process | per the messaging conventions; batches use links |
+| Messaging | `PRODUCER` to publish, `CONSUMER` (root) to process | `send {destination}`, `process {destination}`; batches use links |
 | RPC, gRPC | `SERVER` or `CLIENT` | `{rpc.method}` |
+| GraphQL operation | `SERVER` or `INTERNAL` | `{graphql.operation.type} {graphql.operation.name}` |
+| GraphQL resolver | none | resolvers get no spans |
+| Serverless invocation | `SERVER` or `CONSUMER`, root | per the FaaS conventions, with `faas.trigger` |
 | GenAI model call or embedding | `CLIENT` | `{gen_ai.operation.name} {gen_ai.request.model}` |
 | GenAI agent, tool, retrieval, memory, planning, workflow, guardrail, evaluation | `INTERNAL` (`CLIENT` for a remote store or agent) | `invoke_agent {agent}`, `execute_tool {tool}`, `retrieval {data source}`, `{memory operation}`, `plan {agent}`, `invoke_workflow {name}`, `guardrail {name}`, `evaluate {name}` ([genai](genai.md#step-kinds)) |
 | MCP | `CLIENT` on the sender, `SERVER` on the receiver | `{mcp.method.name} {target}`, the target being the tool or prompt name, or the method alone ([mcp](../workloads/mcp.md)) |
+| A2A | `CLIENT` on the caller, `SERVER` on the remote agent | `invoke_agent {remote agent}` on the caller, `{a2a method}` on the remote agent ([data model](../data-model.md#a2a-agent-to-agent-protocol)) |
 | Application function | `INTERNAL` | `{Class}.{method}` or `{module}.{function}` |
 | Job run | `INTERNAL`, root | `job {name}` |
 | WebSocket connection (handshake and authentication) | `SERVER`, root | `WS {path}`, the endpoint's route (`WS /ws`) |
@@ -96,7 +129,7 @@ it is never set to OK:
 | HTTP client | the response is 4xx or 5xx, or no response arrived | UNSET |
 | Database, messaging, RPC, GenAI | the operation failed | UNSET |
 | MCP | the client: any JSON-RPC error, a tool result with `isError`, a timeout; the server: its own failure or an `isError` result | UNSET, the caller's errors on the server included (-32700, -32600, -32601, -32602, -32002) |
-| Application function | the function failed: it threw, or returned an error | UNSET |
+| Application function | the function failed: it threw, or returned an error, other than one that maps to a 4xx response | UNSET, a client error included (an exception that maps to 4xx, such as an HTTP exception with a 4xx status; `error.type` optional) |
 | Job run | the run failed: its body threw | UNSET, a run with some failed items included |
 | WebSocket connection | the server failed during the handshake | UNSET, client rejections included (bad origin, failed authentication: a WARN record) |
 | WebSocket message | handling the message failed | UNSET |
@@ -109,6 +142,10 @@ Every failure sets `error.type` (the exception type, or the status code as a str
 status message without payloads or credentials. Success leaves the status UNSET, the
 OpenTelemetry default that backends read as success. A caller that an exception passes through
 failed too and is marked ERROR; a caller that handles the failure and carries on stays UNSET.
+A framework HTTP exception for a client error (FastAPI or Starlette `HTTPException` 4xx, Express
+`next(err)` with a 4xx status, Spring `ResponseStatusException` 4xx) is handled: the function
+spans it passes through stay UNSET like the SERVER span. Only server failures (5xx or unhandled)
+mark spans ERROR.
 Inner layers mark their span and rethrow; only the boundary that handles the failure writes the
 ERROR log.
 
@@ -116,15 +153,18 @@ ERROR log.
 
 - **Propagators** are fixed in code: W3C `tracecontext` and `baggage`.
 - **Baggage is allow-listed.** The middleware puts allow-listed incoming keys on its entry span,
-  and outbound calls send only allow-listed keys; never secrets, request content or, by default,
-  ids. The allow-list is code, not configuration ([enrichment.md](../enrichment.md)). The baggage
+  and outbound calls send only allow-listed keys, at most 8 keys and 512 bytes; never secrets,
+  authorisation values, request content, the AI trace context or, by default, ids. The
+  allow-list is code, not configuration ([enrichment.md](../enrichment.md)). The baggage
   propagator applies it itself, on extract and inject, because libraries write baggage too:
   Langfuse's JS tracing puts `langfuse_trace_id` there and reads `langfuse_*` keys back as span
   attributes ([sdk-notes.md](../sdk-notes.md#genai-and-langfuse)).
 - **Messaging** carries the context in message headers; a consumer that processes a batch links
   to each message's context.
 - **Browsers:** a backend that serves browsers allows `traceparent`, `tracestate` and `baggage`
-  in its CORS policy, so browser and API spans join one trace.
+  in its CORS policy, so browser and API spans join one trace. The page (Grafana Faro) sends
+  them only to the API origins listed in `rum.propagate_trace_origins`, and none for a session
+  outside the sample ([rum.md](rum.md#trace-context)).
 - **Public edges** (gateway, BFF, public API) keep the incoming trace id, so browser-to-API
   traces still join, but don't trust the incoming sampled flag: they decide with a root sampler
   such as `traceidratio` instead of a `parentbased_*` one. Internal hops keep `parentbased_*`.

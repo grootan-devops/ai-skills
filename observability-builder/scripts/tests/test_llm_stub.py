@@ -154,7 +154,7 @@ class LlmStubTests(unittest.TestCase):
         self.assertEqual(usage["completion_tokens_details"]["reasoning_tokens"], 5)
         self.assertEqual(usage["completion_tokens"], len(reply["choices"][0]["message"]["content"].split()) + 5)
         _, _, reply = self.post("/v1/messages", {"model": "stub-claude", "max_tokens": 100, "system": "Be brief.",
-                                                 "messages": [{"role": "user", "content": "[[cache]] [[cache_write]] " + "w " * 10}]})
+                                                 "messages": [{"role": "user", "content": "[[cache]] [[cache_creation]] " + "w " * 10}]})
         usage = reply["usage"]
         self.assertEqual((usage["cache_read_input_tokens"], usage["cache_creation_input_tokens"]), (7, 3))
         self.assertEqual(usage["input_tokens"] + usage["cache_read_input_tokens"] + usage["cache_creation_input_tokens"], 14)

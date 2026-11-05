@@ -1,0 +1,3966 @@
+{
+  "title": "Browser RUM (Grafana Faro)",
+  "uid": "browser-rum-faro",
+  "tags": [
+    "rum",
+    "faro",
+    "frontend"
+  ],
+  "description": "Every signal the Faro Web SDK sends through faro.receiver to Loki and Tempo (references/signals/rum.md)",
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 2,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "loki",
+        "type": "datasource",
+        "query": "loki",
+        "label": "Loki"
+      },
+      {
+        "name": "tempo",
+        "type": "datasource",
+        "query": "tempo",
+        "label": "Tempo"
+      },
+      {
+        "name": "app",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "${loki}"
+        },
+        "label": "App",
+        "refresh": 2,
+        "query": {
+          "qryType": 1,
+          "query": "label_values(app_name)",
+          "refId": "app"
+        }
+      },
+      {
+        "name": "env",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "${loki}"
+        },
+        "label": "Environment",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "query": {
+          "qryType": 1,
+          "query": "label_values({app_name=\"$app\"}, app_environment)",
+          "refId": "env"
+        }
+      },
+      {
+        "name": "view",
+        "type": "textbox",
+        "label": "View (regex)",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        }
+      },
+      {
+        "name": "browser",
+        "type": "textbox",
+        "label": "Browser (regex)",
+        "query": ".*",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Sessions started",
+      "description": "session_start events; resumed and extended sessions are not new sessions",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"session_start\" [$__range]))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Page loads",
+      "description": "Full page loads (faro.performance.navigation)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" [$__range]))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Views",
+      "description": "Route changes inside the app (view_changed)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"view_changed\" [$__range]))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Exceptions",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__range]))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Exceptions per 100 page loads",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "100 * sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__range])) / sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" [$__range]))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Signed-in users",
+      "description": "Distinct opaque user ids",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (user_id) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | user_id!=\"\" [$__range])))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Activity",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" [$__auto]))",
+          "legendFormat": "page loads",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"view_changed\" [$__auto]))",
+          "legendFormat": "view changes",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.user.action\" [$__auto]))",
+          "legendFormat": "user actions",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__auto]))",
+          "legendFormat": "exceptions",
+          "queryType": "range"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=~\"faro.frustration.*\" [$__auto]))",
+          "legendFormat": "frustrated clicks",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "piechart",
+      "title": "Records by kind",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (kind) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" [$__range]))",
+          "legendFormat": "{{kind}}",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "${__field.labels.kind}"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Core Web Vitals (p75)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "LCP p75",
+      "description": "Good below 2500, poor above 4000 (web.dev thresholds)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap lcp [$__range]) by (app_name)",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 2500
+              },
+              {
+                "color": "red",
+                "value": 4000
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "INP p75",
+      "description": "Good below 200, poor above 500 (web.dev thresholds)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap inp [$__range]) by (app_name)",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 200
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "CLS p75",
+      "description": "Good below 0.1, poor above 0.25 (web.dev thresholds)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | cls!=\"\" | unwrap cls [$__range]) by (app_name)",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "FCP p75",
+      "description": "Good below 1800, poor above 3000 (web.dev thresholds)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | fcp!=\"\" | unwrap fcp [$__range]) by (app_name)",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1800
+              },
+              {
+                "color": "red",
+                "value": 3000
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "TTFB p75",
+      "description": "Good below 800, poor above 1800 (web.dev thresholds)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap ttfb [$__range]) by (app_name)",
+          "legendFormat": "",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "LCP, FCP and TTFB p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap lcp [$__auto]) by (app_environment)",
+          "legendFormat": "LCP {{app_environment}}",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | fcp!=\"\" | unwrap fcp [$__auto]) by (app_environment)",
+          "legendFormat": "FCP {{app_environment}}",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap ttfb [$__auto]) by (app_environment)",
+          "legendFormat": "TTFB {{app_environment}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "INP p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap inp [$__auto]) by (app_environment)",
+          "legendFormat": "{{app_environment}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "CLS p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | cls!=\"\" | unwrap cls [$__auto]) by (app_environment)",
+          "legendFormat": "{{app_environment}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Ratings per vital",
+      "description": "Reports per rating (good / needs-improvement / poor), as web-vitals rates each one",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_rating) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" [$__range]))",
+          "legendFormat": "LCP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_rating) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" [$__range]))",
+          "legendFormat": "INP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_rating) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | cls!=\"\" [$__range]))",
+          "legendFormat": "CLS",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_rating) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | fcp!=\"\" [$__range]))",
+          "legendFormat": "FCP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_rating) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" [$__range]))",
+          "legendFormat": "TTFB",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "LCP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "LCP",
+              "Value #B": "INP",
+              "Value #C": "CLS",
+              "Value #D": "FCP",
+              "Value #E": "TTFB"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Vitals p75 by view",
+      "description": "view_name is the route template, so this is per route",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 8,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap lcp [$__range]) by (view_name)",
+          "legendFormat": "LCP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap inp [$__range]) by (view_name)",
+          "legendFormat": "INP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | cls!=\"\" | unwrap cls [$__range]) by (view_name)",
+          "legendFormat": "CLS",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "LCP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "LCP",
+              "Value #B": "INP",
+              "Value #C": "CLS"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Web vital attribution",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "LCP breakdown p75",
+      "description": "Where LCP time goes; resource phases appear only when the LCP element is an image or video",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap time_to_first_byte [$__auto]) by (app_name)",
+          "legendFormat": "time to first byte",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | resource_load_delay!=\"\" | unwrap resource_load_delay [$__auto]) by (app_name)",
+          "legendFormat": "resource load delay",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | resource_load_duration!=\"\" | unwrap resource_load_duration [$__auto]) by (app_name)",
+          "legendFormat": "resource load duration",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap element_render_delay [$__auto]) by (app_name)",
+          "legendFormat": "element render delay",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "LCP elements",
+      "description": "CSS selector of the largest element",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | unwrap lcp [$__range]) by (context_element)",
+          "legendFormat": "p75 LCP",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (context_element) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" [$__range]))",
+          "legendFormat": "reports",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 LCP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 LCP",
+              "Value #B": "reports"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "table",
+      "title": "LCP resources",
+      "description": "trackAttributionSources: the LCP resource (query stripped by the scrubber)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | lcp!=\"\" | context_resource_url!=\"\" | unwrap lcp [$__range]) by (context_resource_url, context_resource_initiator_type, context_resource_delivery_type)",
+          "legendFormat": "p75 LCP",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 LCP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 LCP",
+              "Value": "p75 LCP"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "INP breakdown p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap input_delay [$__auto]) by (app_name)",
+          "legendFormat": "input delay",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap processing_duration [$__auto]) by (app_name)",
+          "legendFormat": "processing",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap presentation_delay [$__auto]) by (app_name)",
+          "legendFormat": "presentation delay",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | total_script_duration!=\"\" | unwrap total_script_duration [$__auto]) by (app_name)",
+          "legendFormat": "script (LoAF)",
+          "queryType": "range"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | total_style_and_layout_duration!=\"\" | unwrap total_style_and_layout_duration [$__auto]) by (app_name)",
+          "legendFormat": "style and layout (LoAF)",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "table",
+      "title": "Slowest interactions",
+      "description": "Target is a CSS selector",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | unwrap inp [$__range]) by (context_interaction_type, context_interaction_target, view_name)",
+          "legendFormat": "p75 INP",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 INP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 INP",
+              "Value": "p75 INP"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "table",
+      "title": "INP longest scripts",
+      "description": "trackAttributionSources: the script behind the slowest interactions",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | inp!=\"\" | context_longest_script_invoker!=\"\" | unwrap inp [$__range]) by (context_longest_script_invoker, context_longest_script_source_url, context_longest_script_source_function_name)",
+          "legendFormat": "p75 INP",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 INP",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 INP",
+              "Value": "p75 INP"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "TTFB breakdown p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 53
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap cache_duration [$__auto]) by (app_name)",
+          "legendFormat": "cache",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap dns_duration [$__auto]) by (app_name)",
+          "legendFormat": "DNS",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap connection_duration [$__auto]) by (app_name)",
+          "legendFormat": "connection",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap request_duration [$__auto]) by (app_name)",
+          "legendFormat": "request",
+          "queryType": "range"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | ttfb!=\"\" | unwrap waiting_duration [$__auto]) by (app_name)",
+          "legendFormat": "waiting",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "FCP after first byte p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 53
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | fcp!=\"\" | unwrap first_byte_to_fcp [$__auto]) by (app_name)",
+          "legendFormat": "first byte \u2192 FCP",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Layout shift sources",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 53
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | type=\"web-vitals\" | cls!=\"\" | context_largest_shift_target!=\"\" | unwrap largest_shift_value [$__range]) by (context_largest_shift_target, view_name)",
+          "legendFormat": "p75 largest shift",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 largest shift",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 largest shift",
+              "Value": "p75 largest shift"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "row",
+      "title": "Page loads and resources",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "panels": []
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Page load timings p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_ttfb [$__auto]) by (app_name)",
+          "legendFormat": "TTFB",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_domProcessingTime [$__auto]) by (app_name)",
+          "legendFormat": "DOM processing",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_pageLoadTime [$__auto]) by (app_name)",
+          "legendFormat": "page load",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_documentParsingTime [$__auto]) by (app_name)",
+          "legendFormat": "document parsing",
+          "queryType": "range"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_onLoadTime [$__auto]) by (app_name)",
+          "legendFormat": "onload handler",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Network phases p75 (page)",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_dnsLookupTime [$__auto]) by (app_name)",
+          "legendFormat": "DNS",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_tcpHandshakeTime [$__auto]) by (app_name)",
+          "legendFormat": "TCP",
+          "queryType": "range"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_tlsNegotiationTime [$__auto]) by (app_name)",
+          "legendFormat": "TLS",
+          "queryType": "range"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_redirectTime [$__auto]) by (app_name)",
+          "legendFormat": "redirects",
+          "queryType": "range"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_requestTime [$__auto]) by (app_name)",
+          "legendFormat": "request",
+          "queryType": "range"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_responseTime [$__auto]) by (app_name)",
+          "legendFormat": "response",
+          "queryType": "range"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" | unwrap event_data_serviceWorkerTime [$__auto]) by (app_name)",
+          "legendFormat": "service worker",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "type": "table",
+      "title": "Resources by type",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 70
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_initiatorType) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" [$__range]))",
+          "legendFormat": "requests",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" | unwrap event_data_duration [$__range]) by (event_data_initiatorType)",
+          "legendFormat": "p75 duration (ms)",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_initiatorType) (sum_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" | unwrap event_data_transferSize [$__range]))",
+          "legendFormat": "bytes transferred",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "requests",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "requests",
+              "Value #B": "p75 duration (ms)",
+              "Value #C": "bytes transferred"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "table",
+      "title": "Slowest resources",
+      "description": "URLs without query values (scrubbed)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 70
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "topk(15, quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" | unwrap event_data_duration [$__range]) by (event_data_name, event_data_initiatorType))",
+          "legendFormat": "p75 duration (ms)",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 duration (ms)",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 duration (ms)",
+              "Value": "p75 duration (ms)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "table",
+      "title": "Resources by host and cache",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 70
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_httpHost, event_data_cacheHitStatus, event_data_protocol) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" [$__range]))",
+          "legendFormat": "requests",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "requests",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "requests",
+              "Value": "requests"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "type": "table",
+      "title": "Render-blocking resources",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 78
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.resource\" | event_data_renderBlockingStatus=\"blocking\" | unwrap event_data_duration [$__range]) by (event_data_name)",
+          "legendFormat": "p75 duration (ms)",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "p75 duration (ms)",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "p75 duration (ms)",
+              "Value": "p75 duration (ms)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "type": "table",
+      "title": "Failed resources and pages",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 78
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_name, event_data_responseStatus) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=~\"faro.performance.(resource|navigation)\" | event_data_responseStatus>=400 [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "type": "row",
+      "title": "Errors and console",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
+      "panels": []
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Exceptions by type",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 87
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (type) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__auto]))",
+          "legendFormat": "{{type}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "type": "table",
+      "title": "Top exceptions",
+      "description": "Messages are scrubbed in the page; stacks de-minified by Alloy",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 87
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "topk(20, sum by (type, value, view_name) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__range])))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "table",
+      "title": "Exceptions by browser",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 95
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (browser_name, browser_version, browser_os) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Console logs by level",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 95
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (level) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"log\" [$__auto]))",
+          "legendFormat": "{{level}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 44,
+      "type": "table",
+      "title": "Top console messages",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 95
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "topk(20, sum by (level, message) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"log\" [$__range])))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "logs",
+      "title": "Exceptions (de-minified stacks)",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 103
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "{app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\"",
+          "legendFormat": "",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 46,
+      "type": "row",
+      "title": "User journeys and frustration",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 113
+      },
+      "panels": []
+    },
+    {
+      "id": 47,
+      "type": "table",
+      "title": "User actions",
+      "description": "Named by data-faro-user-action-name",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 114
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_userActionName) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.user.action\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.user.action\" | unwrap event_data_userActionDuration [$__range]) by (event_data_userActionName)",
+          "legendFormat": "p75 duration (ms)",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value #B": "p75 duration (ms)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "type": "timeseries",
+      "title": "User actions over time",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 114
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_userActionName) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.user.action\" [$__auto]))",
+          "legendFormat": "{{event_data_userActionName}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 49,
+      "type": "table",
+      "title": "Top views",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 114
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_toView) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"view_changed\" [$__range]))",
+          "legendFormat": "views",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "views",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "views",
+              "Value": "views"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "type": "table",
+      "title": "View transitions",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 122
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "topk(20, sum by (event_data_fromView, event_data_toView) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"view_changed\" [$__range])))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "Soft navigation duration p75",
+      "description": "experimental.trackNavigation",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 122
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.navigation\" | unwrap event_data_duration [$__auto]) by (app_environment)",
+          "legendFormat": "{{app_environment}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "Frustration signals",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 122
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_name) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=~\"faro.frustration.*\" [$__auto]))",
+          "legendFormat": "{{event_name}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 53,
+      "type": "table",
+      "title": "Frustration by view and target",
+      "description": "Rage, dead and error clicks (Faro 2.13+)",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 130
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_name, view_name, event_data_target) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=~\"faro.frustration.*\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 54,
+      "type": "table",
+      "title": "Sessions by browser and device",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 130
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (browser_name, browser_os, browser_mobile, browser_language) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"session_start\" [$__range]))",
+          "legendFormat": "sessions",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "sessions",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "sessions",
+              "Value": "sessions"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 55,
+      "type": "timeseries",
+      "title": "Session lifecycle",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 138
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_name) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=~\"session_(start|resume|extend)\" [$__auto]))",
+          "legendFormat": "{{event_name}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 56,
+      "type": "table",
+      "title": "Releases",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 138
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (app_version) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.performance.navigation\" [$__range]))",
+          "legendFormat": "page loads",
+          "queryType": "instant",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (app_version) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"exception\" [$__range]))",
+          "legendFormat": "exceptions",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "page loads",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "page loads",
+              "Value #B": "exceptions"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "type": "row",
+      "title": "API calls from the browser",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 146
+      },
+      "panels": []
+    },
+    {
+      "id": 58,
+      "type": "timeseries",
+      "title": "API call duration p75",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 147
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.75, {app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.tracing.fetch\" | unwrap event_data_duration_ns [$__auto]) by (event_data_server_address) / 1e6",
+          "legendFormat": "{{event_data_server_address}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 59,
+      "type": "table",
+      "title": "API calls by host and status",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 147
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_server_address, event_data_http_request_method, event_data_http_response_status_code) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.tracing.fetch\" [$__range]))",
+          "legendFormat": "calls",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "calls",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "calls",
+              "Value": "calls"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "type": "timeseries",
+      "title": "Failed API calls",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 155
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_http_response_status_code) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.tracing.fetch\" | event_data_http_response_status_code>=400 [$__auto]))",
+          "legendFormat": "{{event_data_http_response_status_code}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 61,
+      "type": "table",
+      "title": "Slowest API calls (with trace)",
+      "description": "traceID opens the browser \u2192 API trace in Tempo",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 155
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "topk(20, max_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"faro.tracing.fetch\" | unwrap event_data_duration_ns [$__range]) by (event_data_url_full, traceID) / 1e6)",
+          "legendFormat": "ms",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "ms",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "ms",
+              "Value": "ms"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "type": "table",
+      "title": "Browser \u2192 API traces",
+      "datasource": {
+        "type": "tempo",
+        "uid": "${tempo}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 163
+      },
+      "description": "Browser fetch spans followed by the API's SERVER span",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "${tempo}"
+          },
+          "queryType": "traceql",
+          "limit": 50,
+          "tableType": "traces",
+          "query": "{resource.service.name=\"$app\" && kind=client} >> {kind=server}"
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "type": "row",
+      "title": "CSP violations and custom signals",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 172
+      },
+      "panels": []
+    },
+    {
+      "id": 64,
+      "type": "timeseries",
+      "title": "CSP violations",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 173
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_effectiveDirective) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"securitypolicyviolation\" [$__auto]))",
+          "legendFormat": "{{event_data_effectiveDirective}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 65,
+      "type": "table",
+      "title": "CSP violations by directive and source",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 173
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_data_effectiveDirective, event_data_blockedURI, event_data_disposition) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | event_name=\"securitypolicyviolation\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 66,
+      "type": "table",
+      "title": "Custom events",
+      "description": "pushEvent from the app's code",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 181
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_name) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"event\" | event_domain=\"browser\" | event_name!~\"faro\\\\..*|session_.*|view_changed|route_change|securitypolicyviolation\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 67,
+      "type": "timeseries",
+      "title": "Custom events over time",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 181
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (event_name) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"event\" | event_domain=\"browser\" | event_name!~\"faro\\\\..*|session_.*|view_changed|route_change|securitypolicyviolation\" [$__auto]))",
+          "legendFormat": "{{event_name}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "showPoints": "auto",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "type": "table",
+      "title": "Custom measurements",
+      "description": "pushMeasurement types; graph a value with unwrap value_<name>",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 181
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (type) (count_over_time({app_name=\"$app\", app_environment=~\"$env\"} | logfmt | view_name=~\"$view\" | browser_name=~\"$browser\" | kind=\"measurement\" | type!=\"web-vitals\" [$__range]))",
+          "legendFormat": "count",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "count",
+            "desc": true
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "merge"
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "count",
+              "Value": "count"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

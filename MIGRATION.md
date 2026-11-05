@@ -11,6 +11,11 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
 
 ### Required
 
+- **Resource attributes.** Remove `k8s.pod.uid`, `service.instance.id`, `process.pid`, `process.command_line`, `process.executable.*`, `vcs.*`, `host.id` and `deployment.id` from `observability.yml` and from code; the schema now rejects them. Stop dropping `telemetry.sdk.language/version`, `process.runtime.*` and `os.type`. Remove the pod UID from the chart's downward API, and update collectors to the pod association in `observability-builder/references/collector/README.md` (namespace and pod name, then IP; workload names extracted).
+- **Identity.** Services that set `user.id` or `tenant.id` from client headers must take them from the authentication or tenant middleware instead. Remove `request.id`; use `correlation.id`.
+- **Metrics.** Rename the GenAI `token_type` value `cache_write` to `cache_creation` in code and dashboards.
+- **GenAI content size.** `genai.content.max_chars` now defaults to 8000. A yml that sets a larger value must also set the span attribute value limit to the same number, with a comment naming `max_chars`, or lower it to 8192 or less.
+- **Collectors with GenAI routing:** add the `langfuse_request_context` transform from `observability-builder/references/collector/README.md` before the Langfuse batch.
 - **OneUptime is no longer a supported backend.** Point each service's telemetry at a remaining
   backend (the Grafana stack, Dynatrace, New Relic or AWS) by changing only `observability.yml`
   and the collector configuration ([backends](observability-builder/references/backends/README.md)):
@@ -19,12 +24,24 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
   - remove `x-oneuptime-token` headers and `oneuptime.label.*` resource attributes from
     `observability.yml` and from the chart's `resource.opentelemetry.io/*` annotations;
   - remove `oneuptime.database.server.id` stamping from database-engine pipelines.
-- **Delete `rum:` and `genai.content.destination` from every `observability.yml`.** The schema
-  rejects both keys now, and `validate.py` reports them as errors.
-- **Remove browser RUM and session replay from frontends:** the browser telemetry module
-  (`instrumentation-client.ts` or `src/observability/client/` and `rum.ts`), the replay
-  recorder and its `oneuptime-*` masking classes, the same-origin `/telemetry/` proxy routes or
-  nginx locations, the runtime `observability.json` and the RUM secrets the chart mounts.
+- **Delete `genai.content.destination` from every `observability.yml`.** The schema rejects it
+  now, and `validate.py` reports it as an error.
+- **Browser RUM moves to Grafana Faro.** The old `rum:` keys (`app_identifier`, `sample_ratio`,
+  `session_replay`, `exporter`) are rejected; the new `rum` block has a different shape
+  ([config](observability-builder/references/config.md#rum)). In each frontend:
+  - remove the OpenTelemetry Web SDK module (`src/observability/client/`, `rum.ts`), the
+    OneUptime replay recorder and its `oneuptime-*` masking classes, and the OneUptime
+    `/telemetry/session-replay/` proxy routes or nginx locations;
+  - run `observability instrument` on the frontend: it adds the Faro pieces from
+    `observability-builder/assets/js/faro`, asks for the transport and whether a same-origin
+    proxy is needed, and rewrites the runtime `observability.json` (or the fullstack config
+    script) to the new `rum` block;
+  - hand the platform team the `faro.receiver` set-up from
+    `observability-builder/references/collector/README.md` (exact CORS origins, rate limiting,
+    payload cap, source maps from files with downloads off, a TLS ingress for `/collect` only
+    when the transport is `faro`), and the source-map delivery per release;
+  - drop the OneUptime RUM secrets from the chart; keep a Faro key Secret only for transport
+    `proxy`.
 - **Collectors with GenAI routing:** update the ops branch from
   `observability-builder/references/collector/README.md`. It no longer copies `user.id` and
   `team.id` onto AI spans, keeps no content keys, and has no list of `ops` services; the Langfuse
@@ -38,15 +55,33 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
   Langfuse is on: turn Langfuse on where prompts and answers must be read.
 - Dashboards or queries that read `user.id` or `team.id` from AI spans read them from the
   entry span (ops backend) or from Langfuse's trace context instead.
+- Frontends with another RUM SDK (Datadog, New Relic, Elastic, Application Insights) move to
+  Faro with `observability instrument`; `detect.py` lists them under existing telemetry. Import
+  `observability-builder/assets/grafana/rum-dashboard.json` as the RUM dashboard.
+- Run `node observability-builder/scripts/rum_overhead.mjs` for each frontend with RUM.
+- Run `observability instrument` on each service to apply the classified data model: platform rows outside Kubernetes, the masking helper for personal data, the audit log, A2A spans where agents call agents, and the new conditional metrics.
+- Run `scripts/overhead.py` against each instrumented service and fix anything over the budget (`observability-builder/references/overhead-and-security.md`).
+- Bind `/metrics` to loopback where the scraper runs in the same pod, task or instance, and comment every plaintext exporter endpoint with its private hop.
+- Rename a Python module's `logging.py` to `logs.py`.
+- Generate correlation ids as URL-safe base64 (`secrets.token_urlsafe(16)`, `randomBytes(16).toString('base64url')`) instead of hex UUIDs: hex ids can hold digit runs that secret scanners read as card numbers.
+- Python metrics servers: on "address in use", check for a real listener and retry with reuse when none answers, so a restart right after a scrape doesn't lose `/metrics` ([metrics](observability-builder/references/signals/metrics.md)).
+- AI content: pass it to the content helper as a function, so nothing is converted while capture is off ([genai](observability-builder/references/signals/genai.md)).
+- nginx in front of pages: log the request path from `$request_uri` with the query cut off, not `$uri` (which is `/index.html` after `try_files`) or `$request` ([spa](observability-builder/references/workloads/spa.md#nginx)).
 
 ### Verify
 
+- `python3 observability-builder/scripts/audit.py <project> --module <module path>` reports no `resource-excluded-key`, `identity-from-header` or `telemetry-credential-literal` findings.
+- The RUM dashboard shows data in every panel after a frontend session (Loki and Tempo data sources selected on import).
+- `scripts/receive.py --platform <platform>` writes a `conformance.json` with no P0 or P1 findings for a test run of the service.
 - `python3 -m unittest discover -s observability-builder/scripts/tests` passes, and the receiver
   tests pass with `uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf
   --with pyyaml python -m unittest discover -s scripts/tests -p "test_receive.py"` from
   `observability-builder/`.
 - `python3 observability-builder/scripts/validate.py <project>/observability.yml` reports no
-  `rum` or `genai.content.destination` key.
+  `genai.content.destination` key and no `rum` finding.
+- For frontends, `audit.py` reports no `faro-*` P0 or P1 finding, and a browser run against
+  `scripts/receive.py` (Faro on its `/collect` endpoint) shows every record kind with no Faro
+  data-model findings.
 
 ## 2.0.0
 

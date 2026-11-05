@@ -46,11 +46,12 @@ def _blob(value) -> bytes:
 def streams(store) -> dict[str, list[bytes]]:
     """What the receiver holds, grouped by stream, as lowercase bytes."""
     with store.lock:
-        otlp = list(store.otlp)
+        otlp, faro = list(store.otlp), list(getattr(store, "faro", []))
         profiles, rejected = list(store.profiles), list(store.rejected)
         langfuse_requests = (list(store.langfuse_scores), list(store.langfuse_prompt_fetches),
                              list(store.langfuse_media), list(store.langfuse_dataset_fetches))
-    out: dict[str, list[bytes]] = {"OTLP": [], "Langfuse": [], "profiles": [], "rejected requests": []}
+    out: dict[str, list[bytes]] = {"OTLP": [], "Langfuse": [], "Faro": [], "profiles": [], "rejected requests": []}
+    out["Faro"] += [_blob(p.raw) for p in faro]
     for payload in otlp:
         name = "Langfuse" if payload.destination == "langfuse" else "OTLP"
         out[name] += [_blob(payload.raw), _blob(payload.data)]

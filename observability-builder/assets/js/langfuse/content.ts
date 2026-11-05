@@ -8,7 +8,9 @@
 // provider's message there, and providers and gateways can quote the input in it. Where content is allowed, string
 // values are redacted (a feature in redacted mode) and capped at maxChars, a JSON list keeping its newest items. The
 // retriever's query and documents become its input and output, which Langfuse doesn't map itself. A guard that fails
-// keeps no content: the copy loses every content key.
+// keeps no content: the copy loses every content key. In every mode, and when the guard fails, the copy loses the
+// request-context and HTTP detail keys (isRequestContextKey): the client's address, user agent, headers, cookies, query
+// and peer never leave for Langfuse.
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { Attributes, AttributeValue, SpanStatus } from '@opentelemetry/api';
 import type { ReadableSpan, TimedEvent } from '@opentelemetry/sdk-trace';
@@ -38,6 +40,16 @@ export function isContentKey(key: string): boolean {
   return CONTENT_EXACT.has(key) || CONTENT_PATTERN.test(key);
 }
 
+// Request context and HTTP detail, never on the Langfuse path whatever the content mode (references/data-model.md, "AI
+// feature context"); the older semantic-convention names included. Langfuse keeps the langfuse.* feature context, the
+// GenAI attributes and content under the policy.
+const REQUEST_CONTEXT_EXACT = new Set(['url.query', 'url.full', 'http.url', 'http.user_agent', 'http.client_ip']);
+const REQUEST_CONTEXT_PATTERN = /^(client|user_agent|network\.peer|net\.peer|net\.sock\.peer)\.|^http\.(request|response)\.header\.|^http\.request\.cookie\./;
+
+export function isRequestContextKey(key: string): boolean {
+  return REQUEST_CONTEXT_EXACT.has(key) || REQUEST_CONTEXT_PATTERN.test(key);
+}
+
 // A failed AI span's status message where content isn't allowed: its error type, never the provider's message.
 export function failedStatus(attributes: Attributes): string | undefined {
   if (!isAiSpan(attributes)) return undefined;
@@ -56,19 +68,23 @@ export function cap(text: string, limit: number): string {
   } catch {
     items = undefined;
   }
-  if (Array.isArray(items)) {
-    const kept = [...items];
-    while (kept.length > 0) {
-      const encoded = JSON.stringify(kept);
-      if (chars(encoded) <= limit) return encoded;
-      kept.shift();
+  if (Array.isArray(items) && items.length > 0) {
+    // Linear: each item is encoded and measured once, then the oldest go until the rest fit.
+    const encoded = items.map((item) => JSON.stringify(item) ?? 'null');
+    const sizes = encoded.map(chars);
+    let total = 1 + encoded.length + sizes.reduce((sum, n) => sum + n, 0); // the brackets and the commas
+    for (let first = 0; first < encoded.length; first += 1) {
+      if (total <= limit) return `[${encoded.slice(first).join(',')}]`;
+      total -= sizes[first] + 1;
     }
   }
   return `${Array.from(text).slice(0, limit - 1).join('')}…`;
 }
 
 function chars(text: string): number {
-  return Array.from(text).length;
+  let count = 0;
+  for (const _ of text) count += 1; // code points, without building an array
+  return count;
 }
 
 export interface Decision {
@@ -152,7 +168,9 @@ function withoutContentEvents(events: TimedEvent[]): TimedEvent[] {
 function failClosed(span: ReadableSpan): ReadableSpan | undefined {
   try {
     const attributes: Attributes = {};
-    for (const [key, value] of Object.entries(span.attributes)) if (!isContentKey(key)) attributes[key] = value;
+    for (const [key, value] of Object.entries(span.attributes)) {
+      if (!isContentKey(key) && !isRequestContextKey(key)) attributes[key] = value;
+    }
     const failed = failedStatus(span.attributes);
     if (failed !== undefined) attributes[STATUS_MESSAGE_KEY] = failed;
     const status = failed !== undefined && span.status.code === SpanStatusCode.ERROR ? { code: SpanStatusCode.ERROR, message: failed } : span.status;
@@ -169,6 +187,7 @@ export function guardedCopy(span: ReadableSpan, guard: ContentGuard): ReadableSp
     const attributes: Attributes = { ...span.attributes };
     for (const key of drop) delete attributes[key];
     Object.assign(attributes, set);
+    for (const key of Object.keys(attributes)) if (isRequestContextKey(key)) delete attributes[key];
     // The guard sets the status message only where the provider's text must not survive: the description goes too.
     let status = span.status;
     const message = set[STATUS_MESSAGE_KEY];

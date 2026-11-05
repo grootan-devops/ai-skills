@@ -27,15 +27,31 @@ Run `python3 scripts/detect.py <project>` and read what it can't see. Establish:
   existing LLM observability with its content capture;
 - health, readiness and liveness endpoints, and what they check; the API docs paths (Swagger
   UI, the OpenAPI document);
-- where the verified user and tenant become available (after which middleware);
+- where the verified user and tenant become available (after which middleware), and which
+  other identity values the auth, session and tenant code really has (roles, user type, plan,
+  organisation or account ids, auth method): only those reference-catalogue rows are added
+  ([data-model.md](data-model.md#request-and-identity-context));
+- where personal data passes through (emails, names, phone numbers, addresses) and whether the
+  project already has a masking helper; the module's shared masking helper is the only way
+  personal data reaches telemetry ([data-model.md](data-model.md#pii-masking));
 - how responses report failure: a status code, or a 2xx envelope with the outcome in the body,
   and whether a catch-all handler turns every exception into one 4xx;
+- the platforms the service runs on (Kubernetes, ECS or Fargate, Lambda, Cloud Run service or
+  job, a VM, plain Docker; often more than one, such as Compose locally and Kubernetes in
+  production), which decide the resource rows and the detectors
+  ([config.md](config.md#resource-per-platform));
+- pages: detect's `frontend` flag and the `spa` workload; the UI framework and router, the
+  bundler and how it emits source maps, where the page learns who is signed in, which API
+  origins it calls, the controls that start business actions, OAuth callback routes and other
+  URLs that carry codes or tokens in their query, the Content-Security-Policy, and any RUM SDK
+  already there (detect's `telemetry`: `faro`, `datadog-rum`, `otel-web` and others), which Faro
+  replaces ([signals/rum.md](signals/rum.md));
 - the deploy shape (chart, compose files, ingress rules), how the deployment replaces config
   files (a mounted `application.yml` given with `--spring.config.location` replaces the packaged
   one), and the project's own agent rules.
 
 Classify the workload with the workload pages (`workloads/`) (API, worker, BFF, fullstack,
-gateway, MCP server, AI agent, batch).
+single-page app, gateway, MCP server, A2A agent, AI agent, batch).
 
 ## 2. Ask
 
@@ -43,7 +59,7 @@ Suggest an answer for each question from what you found, then use what the user 
 
 | Question | Why it matters |
 | --- | --- |
-| Where does each signal go — a collector (endpoint) or directly to a backend (endpoint, auth header, token file path)? Do several clusters send to the same backend? | Sets every `exporter` block; tokens stay in mounted files; a backend shared by clusters needs `k8s.cluster.name` in the resource ([data-model.md](data-model.md#resource)) |
+| Where does each signal go — a collector (endpoint) or directly to a backend (endpoint, auth header, token file path)? Do several clusters send to the same backend? Which platforms does the service run on? | Sets every `exporter` block; tokens stay in mounted files; a backend shared by clusters needs `k8s.cluster.name` in the resource; each platform has its own mandatory resource rows and detector ([data-model.md](data-model.md#instance-identity-per-platform)) |
 | Do logs go to stdout only, OTLP only, or both? | stdout-only needs a collector that ships pod logs; errors are reported from logs |
 | The ops metrics are served on `/metrics` on their own port (default 9464) for Prometheus or the collector to scrape: which port, and who scrapes it? Does the team want app metrics pushed over OTLP as well (off by default)? | The port needs a chart service port and monitor; ops metrics are the default set, app metrics are added only on request |
 | Log level per environment, and the slow-step threshold (`logging.application.slow_threshold`, e.g. `2s`)? | The level controls the volume; steps slower than the threshold log a WARN |
@@ -59,9 +75,12 @@ Suggest an answer for each question from what you found, then use what the user 
 | Does AI telemetry go to Langfuse too? Cloud (which region) or self-hosted (which URL)? One project per environment, or separate projects for production and non-production (recommended when non-production may hold real data)? The app route or the collector route? Where are the keys mounted? Which mode: `hybrid`, `sdk` (Python and TypeScript) or `otel` (no scores), and should environments switch between them? | Sets `genai.langfuse.*` and the handoff; keys stay in mounted files; app code is the same in every mode, so a variable can pick it per environment ([genai.md](signals/genai.md#modes)) |
 | Which content may each environment record (`full` only where data is synthetic)? Which features may record redacted content in production, with which redactor, signed off by whom? Media as references or uploads? | Content is the riskiest telemetry an AI service has; production defaults to `off` ([genai.md](signals/genai.md#content)) |
 | For MCP: does the service run an MCP server, call MCP servers, or both? Which transport (stdio, Streamable HTTP)? Does the SDK trace MCP itself? Which tools and prompts does the server register, and which servers does the client call? | One span source per side; the registered names bound the MCP metrics' `target` label ([mcp.md](workloads/mcp.md)) |
+| For A2A: does the service expose an agent over the agent-to-agent protocol, call remote agents, or both? Which agents, by their card names? | Each remote call is a CLIENT `invoke_agent` span with `traceparent` on the HTTP call; the agent names bound the A2A metrics' `agent` label ([a2a.md](workloads/a2a.md)) |
 | Which models does the service call that the LLM tools can't price (self-hosted, fine-tuned, gateway aliases, deployment names)? | Unpriced models cost 0 in Langfuse until the platform adds their prices: a handoff ([langfuse.md](backends/langfuse.md#usage-cost-and-models)) |
 | Does the app use Langfuse prompt management, and where does it fetch? Which scores does the service send (user feedback, approval decisions, in-app evaluations)? Does any step wait for a person to approve? Should prompt or model changes be judged on a dataset first (experiments, and which datasets)? | Prompt management is the app's own: the instrumentation links each generation to the prompt it used and moves any Langfuse client into the module; scores need stable ids and score configs; approvals are three linked traces; an experiment runner is a command in the repository that runs where content may be `full` ([ai-agent.md](workloads/ai-agent.md)) |
 | When responses hide the outcome (a 2xx envelope with a status in the body, a catch-all 4xx for server errors): should the body's status be recorded and counted? | Status-based dashboards miss those failures; opting in adds `app.result.status`, the real-outcome access-log level and `app_request_results_total` ([errors.md](signals/errors.md#required-behaviour), item 11) |
+| For pages: RUM on? Which transport: `faro` (default, the page posts to a public Alloy `faro.receiver`), `proxy` or `otlp`? **Always ask whether a same-origin proxy is needed**, and give the trade-off: without it the receiver is public, its key reaches every browser and the CSP must allow its origin; with it the key stays in a Secret, the CSP stays `'self'` and there is one more hop (nginx or a route handler). `otlp` only when the collector isn't Alloy (no source-map resolution, experimental package). Where does the receiver run, and at which URL? | Sets `rum.transport`, `rum.endpoint` and the receiver handoff ([rum.md](signals/rum.md#transports)) |
+| For pages: which API origins get `traceparent` (exact origins; each API's CORS must allow `traceparent` and `tracestate`)? Session sample rate per environment? Which query parameters may keep their values (default none)? Where do source maps go, per release? Where does the page get the signed-in user's opaque id? Which controls start business actions (they get `data-faro-user-action-name`)? | `rum.propagate_trace_origins`, `rum.session_sample_rate`, `rum.allowed_query_params`, the receiver's `location` blocks, `setUser`, the user-action attributes |
 | Are breaking changes acceptable now (access-log format, log format, metric names, vendor SDK removal)? | Dashboards, alerts and parsers may depend on the old shape |
 
 ## 3. Audit what exists
@@ -118,7 +137,12 @@ Show the user, before editing: the files to add and change ([layout.md](layout.m
 libraries with versions, where each hook goes ([hooks.md](hooks.md)), the
 `observability.yml`, the enrichment attributes per function, the metrics with their labels,
 the jobs and WebSocket endpoints in scope, the chart handoff list and the migration note.
-Start only after they confirm.
+For pages: the RUM transport and why, the receiver and its exposure, the API origins that get
+`traceparent`, the CSP change, the source-map route and the browser overhead budget.
+Also show the overhead budget (the defaults, or the project's changes and why), the metrics
+bind address per platform with its reason, the TLS or plaintext choice per exporter endpoint,
+and how `observability.yml` reaches the image or the deployment
+([overhead-and-security.md](overhead-and-security.md)). Start only after they confirm.
 
 List risks and findings for the user's call only when they are about observability: signals or
 paths that stay uncovered, broken trace propagation, masking and content gaps, data the
@@ -139,18 +163,27 @@ Work in this order so each step builds on the previous one:
    root), resolve interpolation, write the standard `OTEL_*` settings, warn about stray ones;
    a broken file degrades telemetry and binds no metrics port ([config.md](config.md)).
 3. Entrypoint: start the SDK before the framework loads (preload flag, agent, post-fork hook),
-   with exporters, the sampler, a resource of the eight standard attributes, plus
-   `k8s.cluster.name` where several clusters send to one backend (the SDK's default detectors
-   off where it allows it), and auto-instrumentation for the clients found in step 1.
+   with exporters, the sampler, a resource of the four service rows plus the platform rows of
+   each platform from step 1 (the downward API on Kubernetes, `k8s.cluster.name` where several
+   clusters send to one backend; the platform's own detector elsewhere, run only there), the
+   SDK's own `telemetry.sdk.*`, `process.runtime.*` and `os.type` rows, and nothing the standard
+   leaves out ([config.md](config.md#resource-per-platform),
+   [sdk-notes.md](sdk-notes.md#resource-detectors)), and auto-instrumentation for the clients
+   found in step 1.
    Configure the framework instrumentation to skip its middleware, router and handler layers
    ([hooks.md](hooks.md)).
 4. Logging: JSON or plain output with native trace and span IDs, levels per the policy, no
    colours in JSON mode, constant messages with values in attributes; route every `console`,
    `print` or `fmt.Println` call in application code through the app's logger
    ([signals/app-logs.md](signals/app-logs.md)).
-5. Access log middleware, outermost; request attributes on the entry span at response end;
+5. Access log middleware, outermost; request attributes on the entry span at response end,
+   from the trusted auth or tenant middleware after authentication, never from raw client
+   headers; the core identity rows, plus only the reference-catalogue rows the code has;
+   allow-listed baggage within 8 keys and 512 bytes; the shared masking helper for every value
+   that may hold personal data; an `audit.<action>` record for audited actions;
    the route template taken when the framework matches the route, and `unmatched` as the
-   route of a 404; emails in request paths masked; successful probes and API docs requests
+   route of a 404; emails in request paths masked by the shared masking helper
+   (`j***@example.com`); successful probes and API docs requests
    suppressed, failed probes reported ([signals/access-log.md](signals/access-log.md)).
 6. Function wrappers: a decorator or helper on the OpenTelemetry API for the API work in scope
    (handlers, services and repositories that do I/O), never start-up code, helpers or
@@ -170,10 +203,13 @@ Work in this order so each step builds on the previous one:
    ([workloads/api.md](workloads/api.md#websocket)).
 10. Metrics: the default set with the stack's Prometheus client library on `/metrics`, on its
     own port, with the short labels and the standard buckets; client metrics only for calls
-    inside a trace, never the SDK's own exports; the database pool metrics; OTLP push only if
-    the team asked for app metrics ([signals/metrics.md](signals/metrics.md)).
-11. Profiling, if on: the resource attributes as static labels and `controller` labels on heavy
-    code ([signals/profiling.md](signals/profiling.md)).
+    inside a trace, never the SDK's own exports; the database pool metrics; where they apply,
+    the RPC, messaging, WebSocket, `auth_attempts_total` (when the service authenticates), MCP
+    and A2A metrics; OTLP push only if the team asked for app metrics
+    ([signals/metrics.md](signals/metrics.md), [data-model.md](data-model.md#metrics)).
+11. Profiling, if on: the resource's M and C rows as static labels (no R or O rows) and
+    `controller` labels on heavy code ([signals/profiling.md](signals/profiling.md),
+    [data-model.md](data-model.md#profile-labels)).
 12. GenAI, when the service calls a model ([signals/genai.md](signals/genai.md),
     [workloads/ai-agent.md](workloads/ai-agent.md)):
     - the loader writes every capture switch from `genai.content.capture` and adds
@@ -191,6 +227,9 @@ Work in this order so each step builds on the previous one:
       a transport that reads no `OTEL_EXPORTER_OTLP_*` variable, as the one span sender;
     - for MCP, the adapter or the SDK's own tracing, `params._meta` propagation and the MCP
       metrics ([workloads/mcp.md](workloads/mcp.md));
+    - for A2A, the `invoke_agent` CLIENT span around each remote agent call, `traceparent` on
+      the HTTP call, the SERVER span on the agent side and the A2A metrics
+      ([workloads/a2a.md](workloads/a2a.md));
     - the score client in `hybrid` and `sdk`;
     - the module's Langfuse client for app code. An existing `Langfuse()` construction in the app
       moves to it, and the app's prompt code hands the prompt it used to the model-call helper.
@@ -202,9 +241,34 @@ Work in this order so each step builds on the previous one:
     - when experiments are wanted, the runner command: `genai.experiment()` and
       `genai.experiment_item()` around the feature's own functions, fixture data for tools, the
       evaluators and their scores ([signals/genai.md](signals/genai.md#experiments)).
-13. Shutdown: flush on signals and before every explicit process exit.
-14. `observability.yml` and the dependency manifest. Leave lockfiles to the project's normal
-    install when it needs credentials you don't have, and say so.
+13. Browser RUM, when the project has pages and RUM is on ([signals/rum.md](signals/rum.md),
+    [workloads/spa.md](workloads/spa.md), [workloads/fullstack.md](workloads/fullstack.md#page-side-browser-rum)):
+    - copy `assets/js/faro` into the page's module (`src/observability/rum/`); pin every Faro
+      package to one release;
+    - start it from the entry without blocking the render, from the runtime config (an SPA's
+      mounted `observability.json` with a RUM-off default in the image, or the fullstack
+      server's rendered config script), never from build-time variables;
+    - the router hook (`setView` with the route template; `instrumentRouter` and
+      `RouteErrorReporter` for React data routers), the framework's error handler calling
+      `pushError`, and `setUser({ id })` / `resetUser()` from the verified auth state;
+    - `data-faro-user-action-name` on the agreed controls;
+    - hidden source maps moved out of the served output, for the receiver;
+    - for transport `proxy`, the nginx location or route handler; the CSP `connect-src`;
+    - the handoff for the receiver: Alloy `faro.receiver` with exact CORS origins, rate limiting,
+      the payload cap, `download = false`, the source-map volume and, for transport `faro`, a
+      TLS ingress for `/collect` only ([collector](collector/README.md#browser-rum-faroreceiver)).
+14. Shutdown: flush on signals and before every explicit process exit.
+15. `observability.yml` and the dependency manifest: exact pins, the lockfile updated
+    ([overhead-and-security.md](overhead-and-security.md#supply-chain)). Leave lockfiles to the
+    project's normal install when it needs credentials you don't have, and say so. Comment the
+    metrics `host` with the scraper's location and each plaintext endpoint with its private hop (sidecar, or in-cluster collector behind a NetworkPolicy or mesh mTLS).
+    Check that the Dockerfile copies the yml or the deployment mounts it; if neither does, add
+    a blocking item to the handoff list.
+
+Throughout, keep to the performance and security rules: batch export, bounded queues and
+timeouts, patterns compiled once, lazy step-log messages, no raised global attribute limit,
+credentials only through `${file:...}` or `${env:...}`
+([overhead-and-security.md](overhead-and-security.md)).
 
 Follow the project's rules from step 1 throughout (env loading, error helpers, logging
 sanitizers, test conventions).
@@ -236,6 +300,16 @@ sanitizers, test conventions).
   and binds no metrics port: check that the port stays free. `python3 scripts/hold_port.py <port>`
   holds a port on every IPv4 and IPv6 address. Holding only one address lets a dual-stack bind
   succeed, so that check can pass by accident.
+- The security checks ([acceptance.md](acceptance.md#security-of-the-instrumentation)): the
+  metrics port bound per the scraper's location, TLS on every non-loopback endpoint, no
+  credential literal in code or the yml, operator headers kept or reported, and the yml
+  packaged in the built image or mounted by the manifest. The audit's `metrics-public-bind`,
+  `plaintext-remote-endpoint` and `telemetry-credential-literal` rules cover the static part.
+- The overhead test, when the app can run: `python3 scripts/overhead.py` against the receiver,
+  telemetry on versus `OTEL_SDK_DISABLED=true`, with the same request mix. It exits non-zero
+  over budget ([overhead-and-security.md](overhead-and-security.md#the-overhead-test)). Over
+  budget, find the cost (a profile of the run with telemetry on shows it) and fix it; never
+  raise the budget to pass without a reason the user agrees to.
 - **When the app can run, run it against a real receiver.** In-memory and console exporters
   never open a connection, so they can't catch a TLS, protocol, endpoint-path or timeout
   mistake. Any of these makes every export fail in production while every local check
@@ -258,8 +332,15 @@ sanitizers, test conventions).
 
   Stop the app with SIGTERM and read `<scratch>/telemetry/summary.md`:
   - every enabled signal arrived, with a resource of the standard attributes and nothing else
-    (the service name, namespace, version and environment the yml sets, plus the `k8s.*` ones
-    in a cluster, `k8s.cluster.name` included where the chart sets it);
+    (the service name, namespace, version and environment the yml sets, the SDK, runtime and
+    `os.type` rows, plus the platform's rows: the `k8s.*` ones in a cluster, `k8s.cluster.name`
+    included where the chart sets it, `host.name` and `container.id` in plain Docker). Platforms
+    that can't run locally (ECS, Lambda, Cloud Run) are checked with stubbed environment
+    ([acceptance.md](acceptance.md#platform-resource)), and the report says so;
+  - the identity scenarios that apply: anonymous, authenticated, multi-tenant,
+    service-to-service, job, AI or MCP, A2A, and two tenants' requests interleaved without one's
+    identity reaching the other's spans or logs
+    ([acceptance.md](acceptance.md#identity-scenarios));
   - each request is one trace rooted at its `SERVER` span, with API functions nested under it,
     outbound calls as `CLIENT` spans carrying the peer name and no framework middleware spans;
     the 404 has the route `unmatched`, and a failed request keeps its full route template. The
@@ -270,7 +351,7 @@ sanitizers, test conventions).
   - log records carry trace ids; a failure gives one ERROR record; at `debug`, every wrapped
     call has its step logs;
   - OTLP metrics arrive only if `metrics.otlp` is on;
-  - profiles arrive under the service name with the resource attributes as static labels.
+  - profiles arrive under the service name with the resource's M and C rows as static labels.
 
   Pass every test value seeded into the requests to the receiver with `--canaries <file>` (a
   JSON `{label: value}`): its summary and `canaries.json` name each value that reached OTLP,
@@ -283,6 +364,21 @@ sanitizers, test conventions).
   runner once over a dataset the stand-in serves (`--langfuse-datasets`). Never use a real
   provider key: point the client at the stub with a dummy one.
 
+  For pages with RUM, build the page and serve it as production would, set its runtime config's
+  `rum.endpoint` to the receiver's `faro` endpoint (`otlp`: the OTLP/HTTP endpoint; `proxy`: the
+  proxy with the receiver as its upstream), and drive it with Playwright:
+  - a load and a soft navigation, a named user action that calls an API, a rage click, a thrown
+    error, a render error, a `console.error`, a CSP violation where the policy allows one, and
+    the app's custom events;
+  - a URL with a query value, typed input and a signed-in user as canaries.
+
+  The receiver's "Browser RUM (Faro)" section must show every record kind, views named by
+  route template and no Faro findings in the data-model checks; the API's `SERVER` span must
+  continue the browser's fetch span. Then run the browser overhead test,
+  `node scripts/rum_overhead.mjs`, with RUM on and off
+  ([overhead-and-security.md](overhead-and-security.md#browser-rum)). Against the team's real
+  Alloy, Loki and Tempo, also check that stacks are de-minified.
+
   Then:
   - scrape `/metrics` on its own port: the default set with the contract's names, labels and
     buckets, the library's process and runtime metrics, client metrics only for calls made
@@ -290,13 +386,17 @@ sanitizers, test conventions).
     value ([acceptance.md](acceptance.md#metrics));
   - read the access-log lines on stdout, and check that no line bypasses the logger;
   - grep the output folder and the app's stdout and stderr for every secret value you sent
-    (token, cookie, API key, password, card number, debug header). None may appear.
+    (token, cookie, API key, password, card number, debug header). None may appear. Personal
+    test values (email, phone, name) appear only masked.
 
 ## 8. Report
 
 The skill version (the ai-skills release it was installed from: `git describe --tags`, or the root `VERSION`); files changed; dependencies with versions and sources; the answers
 from step 2; the platform-builder handoff list ([charts.md](charts.md)); the migration note;
-functions the wrappers skipped and why; checks run and their results; open observability risks
+functions the wrappers skipped and why; checks run and their results; the overhead budget used
+and both runs' numbers (p50, p99, CPU, RSS, errors, drops), or why the test couldn't run; the
+security checks and the metrics bind chosen per platform; a blocking handoff when the yml is
+neither packaged nor mounted; open observability risks
 (the same scope as in step 5: nothing about security or code outside telemetry).
 
 End with a telemetry inventory. Build it from what the app really exported in step 7, the
@@ -307,5 +407,6 @@ End with a telemetry inventory. Build it from what the app really exported in st
 | Metrics | every metric family on `/metrics` with its type and label names, each marked as contract ([signals/metrics.md](signals/metrics.md)), library default or added for this app; anything in the contract the stack can't produce, and why |
 | Logging outside the logger | the `logger-bypass` findings that remain (file:line), and why each one stays, for example a CLI script or init code that runs before the logger exists |
 | Work outside the API | scheduled jobs, timers, queue consumers, WebSocket endpoints, background tasks and scripts: for each, what it has now (root span, job log record, metrics, profiling label) and what could still be added |
-| Attributes | the resource attributes as exported, and the attributes on each kind of span (request, client, function, job, WebSocket), noting any that repeat a resource attribute or conflict with another |
+| Attributes | the resource attributes as exported with their class (M, C, R, O) and the platforms checked live or by stub, and the attributes on each kind of span (request, client, function, job, WebSocket), noting any that repeat a resource attribute or conflict with another, and which reference-catalogue identity rows were added and from which code ([data-model.md](data-model.md#classification)) |
+| Browser RUM | the transport and receiver, the features on (all by default) and their record kinds as received, the views, the user-action names, the API origins with `traceparent`, the session sample rate, the allowed query parameters, the source-map route, and the browser overhead numbers |
 | AI | each feature with its entry points, step kinds and content mode per environment, the redactors, the Langfuse route and scope, the prompts and scores used, any experiment runner and its datasets, the GenAI metrics, and the Langfuse platform handoff ([backends/langfuse.md](backends/langfuse.md#platform-handoff)) |

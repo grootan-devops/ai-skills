@@ -255,6 +255,45 @@ def check_genai(doc, schema: dict | None, env: dict, use_jsonschema: bool = True
     return findings
 
 
+def check_rum(doc, schema: dict | None, env: dict, use_jsonschema: bool = True) -> list[dict]:
+    """Browser RUM settings that pass the schema but break the transport rules; never prints a value."""
+    resolved = resolve(doc, env, schema, use_jsonschema) if schema is not None else doc
+    rum = _mapping(resolved, "rum")
+    if not _is_on(rum.get("enabled")):
+        return []
+    findings = []
+    transport = rum.get("transport", "faro")
+    endpoint = rum.get("endpoint") if isinstance(rum.get("endpoint"), str) else ""
+    if not endpoint:
+        findings.append(_finding("error", "$.rum", REASONS["required"].format("endpoint")))
+    for key in ("api_key_file", "upstream"):
+        if rum.get(key) and transport != "proxy":
+            findings.append(_finding("error", f"$.rum.{key}",
+                                     f"used only by the proxy transport; with '{transport}' the page talks to the receiver itself"))
+    if transport == "proxy":
+        if rum.get("api_key"):
+            findings.append(_finding("error", "$.rum.api_key",
+                                     "set with the proxy transport: the proxy adds the key from api_key_file, the page holds none"))
+        if endpoint and not endpoint.startswith("/"):
+            findings.append(_finding("error", "$.rum.endpoint", "the proxy transport posts to a path on the page's own origin"))
+        if not rum.get("upstream"):
+            findings.append(_finding("warning", "$.rum.upstream", "the proxy transport needs the in-cluster receiver it forwards to"))
+    elif endpoint:
+        parts = urlsplit(endpoint)
+        if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")):
+            findings.append(_finding("error", "$.rum.endpoint",
+                                     "browsers post to this receiver over the internet: https only (http only for localhost)"))
+    origins = rum.get("propagate_trace_origins") or []
+    for i, origin in enumerate(origins if isinstance(origins, list) else []):
+        if not isinstance(origin, str) or "*" in origin or not re.match(r"^https?://[^/?#\s]+$", origin):
+            findings.append(_finding("error", f"$.rum.propagate_trace_origins[{i}]",
+                                     "an exact origin only: a wildcard sends trace headers and CORS preflights to every host"))
+    rate = rum.get("session_sample_rate", 1.0)
+    if isinstance(rate, (int, float)) and rate == 0:
+        findings.append(_finding("warning", "$.rum.session_sample_rate", "0 while RUM is on: no session sends anything"))
+    return findings
+
+
 def _langfuse_mode(langfuse: dict) -> list[dict]:
     """The mode against the route and the scores: the sdk mode exports from the app, the otel mode has no scores."""
     findings, mode = [], langfuse.get("mode", "hybrid")
@@ -512,6 +551,7 @@ def validate(file: Path, schema: dict | None, env: dict, require_env: bool, use_
     if schema is not None:
         findings += check_resolved(doc, schema, env, require_env, use_jsonschema)
     findings += check_genai(doc, schema, env, use_jsonschema)
+    findings += check_rum(doc, schema, env, use_jsonschema)
     return findings
 
 

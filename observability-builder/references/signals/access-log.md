@@ -18,8 +18,8 @@ and only from explicit allow-lists.
    its status code (a 2xx envelope, a catch-all 4xx) and the team opts in, the level follows the
    real outcome and the record carries `app.result.status`
    ([errors.md](errors.md#required-behaviour), item 11).
-3. **Client address** comes from the framework's trusted-proxy resolver as `client.address`.
-   The raw `X-Forwarded-For` is never logged.
+3. **Client address** comes from the framework's trusted-proxy resolver as `client.address`,
+   kept unmasked in the access log (M). The raw `X-Forwarded-For` is never logged.
 4. **Allow-listed headers only,** recorded as `http.request.header.<name>` and
    `http.response.header.<name>`. The schema rejects `authorization`, `proxy-authorization`,
    `cookie`, `set-cookie`, `x-forwarded-for`, `forwarded` and `x-real-ip`.
@@ -31,8 +31,8 @@ and only from explicit allow-lists.
 
    | Step | Setting | Use |
    | --- | --- | --- |
-   | 1. Selected fields | `body.fields: [amount, currency]` | the normal case; the named JSON fields are logged as they are, so never name a secret |
-   | 2. Small masked capture | `body.full: true` with a small `max_bytes`, e.g. `1024` | when fields aren't enough; the body passes through the module's masking code first |
+   | 1. Selected fields | `body.fields: [amount, currency]` | the normal case; each named JSON field goes through the shared masking helper, so a personal value is written masked, and a secret is never named |
+   | 2. Small masked capture | `body.full: true` with a small `max_bytes`, e.g. `1024` | when fields aren't enough; the body passes through the shared masking helper first |
    | 3. Full body | `body.full: true` with a larger `max_bytes` | last resort: bounded, temporary, switched on explicitly and off again after the investigation |
 
    Bodies are teed without consuming the stream and capped at `max_bytes`. Fields are read only
@@ -44,20 +44,33 @@ and only from explicit allow-lists.
 
 ## Fields
 
-Native fields and attribute rules are in [data-model.md](../data-model.md); the record holds:
+Native fields and attribute rules are in
+[data-model.md](../data-model.md#logs-errors-and-trace-correlation), with a class per log kind.
+For the access log:
+
+| Class | Fields |
+| --- | --- |
+| M | timestamp, severity, body, trace id, span id, trace flags, event name `access_log`, the resource, the logger scope, `correlation.id`, the HTTP server attributes below |
+| C | the identity context (the request context row below), `app.auth.method` and `app.auth.result` on an authentication request, personal values (masked) |
+| R | `observedTimeUnixNano`, `user_agent.original`, the client app and version |
+| O | allow-listed headers and cookies, selected body fields, `code.*`, `thread.*` |
+| P | secrets: raw `Cookie` and `Set-Cookie`, `Authorization`, tokens, passwords, card numbers; `app.audit.*` |
+
+The record holds:
 
 | Group | Fields |
 | --- | --- |
 | Native | timestamp, severity by status, body (the constant message `request completed`), trace id, span id, trace flags, event name `access_log` |
 | HTTP server | the HTTP server span's attributes: `http.request.method`, `http.route` (template or `unmatched`), `url.scheme`, `url.path`, `url.query` (allow-listed parameter values only), `server.address`, `server.port`, `client.address`, `user_agent.original`, `network.protocol.version`, `http.request.body.size`, `http.response.status_code`, `http.response.body.size`, `error.type` |
 | Duration | `http.server.request.duration`, in seconds like the `http_server_request_duration_seconds` metric |
-| Request context | `correlation.id`, `user.id`, `tenant.id`, `session.id`, client app and version, as set on the entry span ([enrichment.md](../enrichment.md)) |
+| Request context | as set on the entry span: `correlation.id` (M), `user.id` (C, authenticated request), `tenant.id` (C, multi-tenant request), `session.id` (C, session-based request), client app and version (R); other identity rows only when the code has the value ([data model](../data-model.md#request-and-identity-context), [enrichment.md](../enrichment.md)) |
 | Allow-listed | `http.request.header.<name>`, `http.response.header.<name>`, `http.request.cookie.<name>` |
 | Bodies (opt-in) | `http.request.body.field.<path>` and `http.response.body.field.<path>` for selected fields, `http.request.body.content` and `http.response.body.content` for a masked capture cut at `max_bytes` |
 
 Header attribute names use the lowercase header name. Selected fields keep their dot path, so
-`order.total` becomes `http.request.body.field.order.total`. A path segment that holds an email
-is written as `{email}` in `url.path`; ids stay visible ([safe-capture.md](../safe-capture.md)).
+`order.total` becomes `http.request.body.field.order.total`. A path segment that holds personal
+data goes through the masking helper, so an email is written as `j***@example.com` in
+`url.path`; ids stay visible ([safe-capture.md](../safe-capture.md#pii-masking)).
 
 ## Configuration
 
@@ -102,7 +115,7 @@ access-log record.
 requests included; the level by status; only the allow-listed headers, cookies and body
 fields, with raw `Cookie` and `Set-Cookie` never logged; `client.address` behind trusted
 proxies, with a spoofed `X-Forwarded-For` ignored; canary secrets absent while the selected
-fields appear as they are; successful probes and docs pages absent, `/api/healthcare` present
+fields appear, personal values masked; successful probes and docs pages absent, `/api/healthcare` present
 and the `health.probe.failed` record on a failed `/ready`.
 
 [Documentation index](../README.md)

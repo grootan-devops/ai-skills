@@ -5,9 +5,9 @@ Go has no Langfuse SDK, so this package is the module's Langfuse side
 
 | File | What it gives the module |
 | --- | --- |
-| `exporter.go` | `NewExporter(ctx, Config, Guard)`: OTLP/HTTP to `{base_url}/api/public/otel/v1/traces` with Basic auth from the keys, `x-langfuse-ingestion-version: 4` and gzip. It has its own transport, because `otlptracehttp` would read the `OTEL_EXPORTER_OTLP_*` variables the loader writes for the ops exporter (protocol, headers, certificates). It retries a 429, 502, 503 or 504 at most twice, after `Retry-After` (at most 5 s) or a short backoff. `Config.TLS` takes a private CA's pool; without it, the system pool, which reads `SSL_CERT_FILE`. The export scope and the content guard work on a copy of each span. `WithTranslation` adds the module's Langfuse-only keys (prompt link, completion start time) to that copy, so they never sit on the span the ops exporter shares. |
+| `exporter.go` | `NewExporter(ctx, Config, Guard)`: OTLP/HTTP to `{base_url}/api/public/otel/v1/traces` with Basic auth from the keys, `x-langfuse-ingestion-version: 4` and gzip. It has its own transport, because `otlptracehttp` would read the `OTEL_EXPORTER_OTLP_*` variables the loader writes for the ops exporter (protocol, headers, certificates). It retries a 429, 502, 503 or 504 at most twice, after `Retry-After` (at most 5 s) or a short backoff. `Config.TLS` takes a private CA's pool; without it, the system pool, which reads `SSL_CERT_FILE`. The export scope and the content guard work on a copy of each span. `WithTranslation` adds the module's Langfuse-only keys (prompt link, completion start time) to that copy, so they never sit on the span the ops exporter shares. Each request body stays under `Config.MaxRequestBytes` before gzip (3 MiB by default): a batch is split, and a span that alone exceeds it is dropped with a counted warning, at most one a minute, through `otel.Handle`. |
 | `scope.go` | `ShouldExport` (`ai_context`, `ai_only`) and `IsAISpan` |
-| `content.go` | `NewGuard(Decide, maxChars)`, built from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `Cap` (characters, not bytes) and `FailedStatus` |
+| `content.go` | `NewGuard(Decide, maxChars)`, built from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `Cap` (characters, not bytes), `FailedStatus` and `IsRequestContextKey`. The exporter drops the request-context and HTTP detail keys (`client.*`, `user_agent.*`, request and response headers, cookies, `url.query`, `url.full`, `network.peer.*`) from every Langfuse copy, in every mode and with or without a guard. |
 | `client.go` | `Client`, with `Config.HTTPClient` for the module's traced client: `Prompt` for app code, or `FetchPrompt` (one fetch, no cache) where the app keeps its own cache; `Scores(size, onError)`, a bounded queue: `Send` never blocks, and `Close(ctx)` sends what is left within the grace period; `CreateScore` (stable ids). |
 | `datasets.go` | `Client.Dataset(ctx, name, version)` for an experiment runner: the dataset and all its items |
 
@@ -35,8 +35,10 @@ keep the service's own `go.mod` versions. Then:
     the key, and Langfuse stays off while the ops telemetry runs as usual.
 - **Make the model spans.** openai-go has no GenAI instrumentation, so the module's model-call
   helper makes the `chat {model}` / `embeddings {model}` CLIENT spans.
-- **Set the span attribute limit.** It must be at least `genai.content.max_chars`: the SDK cuts a
-  longer value blindly, so a JSON value ends up invalid before `Cap` can shorten it.
+- **Set the span attribute limit.** 8192 by default, with `genai.content.max_chars` (8000 by
+  default) at or below it: the SDK cuts a longer value blindly, so a JSON value would end up
+  invalid before `Cap` could shorten it. A project that needs longer content raises both
+  together and records the exception.
 - **Clone before building a set.** A span's processors share its attribute slice, and
   `attribute.NewSet` sorts what it is given. The asset clones, so do the same in the module's ops
   guard: `attribute.NewSet(slices.Clone(span.Attributes())...)`.

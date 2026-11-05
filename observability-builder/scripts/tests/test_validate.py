@@ -84,7 +84,6 @@ resource:
   environment: "${OBS_ENVIRONMENT}"
   attributes:
     team: payments
-    vcs.ref.head.revision: "${GIT_SHA:-}"
 tracing:
   enabled: "${OBS_TRACING:-true}"
   exporter:
@@ -331,11 +330,24 @@ logging:
                                           "$.tracing.sampler.arg", "$.metrics.prometheus.port", "$.logging.output",
                                           "$.logging.application.level"}, paths)
 
-    def test_removed_rum_key_is_rejected(self):
-        rum = RESOURCE + 'rum:\n  enabled: true\n'
+    def test_excluded_resource_keys_are_rejected(self):
+        try:
+            import jsonschema  # noqa: F401  (propertyNames needs the library; the fallback doesn't read it)
+        except ImportError:
+            self.skipTest("needs jsonschema")
+        for key in ("vcs.ref.head.revision", "process.pid", "process.command", "process.executable.name", "k8s.pod.uid"):
+            doc = RESOURCE.replace("  environment: dev\n", f"  environment: dev\n  attributes:\n    {key}: x\n")
+            findings = validate.validate(self.write(doc), self.schema, {}, True)
+            self.assertTrue(any(f["path"].startswith("$.resource.attributes") for f in findings), key)
+        for key in ("team", "process.runtime.name", "k8s.cluster.name"):
+            doc = RESOURCE.replace("  environment: dev\n", f"  environment: dev\n  attributes:\n    {key}: x\n")
+            self.assertEqual(validate.validate(self.write(doc), self.schema, {}, True), [], key)
+
+    def test_removed_oneuptime_rum_keys_are_rejected(self):
+        rum = RESOURCE + 'rum:\n  enabled: false\n  app_identifier: shop\n  session_replay: {enabled: true}\n'
         for use_jsonschema in (True, False):
             findings = validate.validate(self.write(rum), self.schema, {}, True, use_jsonschema)
-            self.assertEqual([(f["level"], f["path"]) for f in findings], [("error", "$.rum")])
+            self.assertEqual(sorted(f["path"] for f in findings), ["$.rum.app_identifier", "$.rum.session_replay"])
 
     def test_temporality_and_tls_keys(self):
         for value in ("cumulative", "delta", "lowmemory", '"${OBS_TEMPORALITY:-cumulative}"'):
@@ -591,3 +603,55 @@ genai:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(LIBRARY_SCHEMA.exists(), "assets/observability.schema.json is missing")
+class RumTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def found(self, rum: str) -> list[list[tuple]]:
+        path = self.root / "observability.yml"
+        path.write_text(RESOURCE + "rum:\n  enabled: true\n" + rum, encoding="utf-8")
+        return [[(f["level"], f["path"]) for f in validate.validate(path, self.schema, {}, True, lib)]
+                for lib in (True, False)]
+
+    def assert_both(self, rum, expected):
+        for findings in self.found(rum):
+            self.assertEqual(findings, expected)
+
+    def test_direct_receiver_passes(self):
+        self.assert_both("  transport: faro\n  endpoint: https://faro.example.com/collect\n  api_key: public\n"
+                         "  propagate_trace_origins: [https://api.example.com]\n", [])
+
+    def test_proxy_passes(self):
+        self.assert_both("  transport: proxy\n  endpoint: /telemetry/faro/collect\n"
+                         "  api_key_file: /var/run/secrets/faro/key\n  upstream: http://alloy.observability:12347/collect\n", [])
+
+    def test_wildcard_origin_rejected(self):
+        for findings in self.found("  endpoint: https://faro.example.com/collect\n  propagate_trace_origins: ['*']\n"):
+            self.assertIn(("error", "$.rum.propagate_trace_origins[0]"), findings)
+
+    def test_plain_http_receiver_rejected(self):
+        self.assert_both("  endpoint: http://faro.example.com/collect\n", [("error", "$.rum.endpoint")])
+
+    def test_localhost_http_allowed(self):
+        self.assert_both("  endpoint: http://localhost:12347/collect\n", [])
+
+    def test_key_file_outside_proxy_rejected(self):
+        self.assert_both("  endpoint: https://faro.example.com/collect\n  api_key_file: /k\n", [("error", "$.rum.api_key_file")])
+
+    def test_proxy_with_page_key_rejected(self):
+        self.assert_both("  transport: proxy\n  endpoint: /telemetry/faro/collect\n  api_key: x\n  upstream: http://alloy:12347/collect\n",
+                         [("error", "$.rum.api_key")])
+
+    def test_missing_endpoint_rejected(self):
+        self.assert_both("  transport: faro\n", [("error", "$.rum")])

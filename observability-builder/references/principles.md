@@ -9,7 +9,7 @@ The standard is rules, never per-framework code:
 
 | Part | What it defines | Read |
 | --- | --- | --- |
-| Telemetry data model | every field a service emits, where it belongs, where its value comes from, and which values never leave the process | [data model](data-model.md), [enrichment](enrichment.md), [functions](functions.md), [safe capture](safe-capture.md) |
+| Telemetry data model | every field a service emits, where it belongs, its class per location (M mandatory, C conditional, R recommended, O optional, P prohibited), who sets it and when, and which values never leave the process | [data model](data-model.md), [enrichment](enrichment.md), [functions](functions.md), [safe capture](safe-capture.md) |
 | Config contract | the shape of `observability.yml` and its JSON Schema | [configuration](config.md) |
 | Integration rules | where observability code lives, how it hooks into a framework, how libraries are chosen, how existing monitoring is migrated | [layout](layout.md), [hooks](hooks.md), this page |
 | Conformance checks | black-box checks against the running application | [acceptance](acceptance.md) |
@@ -32,6 +32,25 @@ idioms. Black-box checks prove it against the running application: a local OTLP 
 (`scripts/receive.py`), real requests, a `/metrics` scrape and stdout capture. They assert the data model and the safe-capture rules, inject collector and backend
 failures, and show that switching backends needs configuration changes only.
 
+## Every field has a class and an owner
+
+Each attribute, field and label has one class per location: mandatory, conditional, recommended,
+optional or prohibited ([classification](data-model.md#classification)). Every mandatory and
+conditional row names who sets it and when; the audit and the conformance checks assert the M, C
+and P rows, not the R and O ones. Three consequences run through the other pages:
+
+- **Platform identity is detected, not configured.** Kubernetes, ECS or Fargate, Lambda, Cloud
+  Run, a VM and plain Docker each have their own mandatory resource rows and instance identity.
+  Kubernetes gets them from the downward API and the collector; the others from the SDK's
+  platform detectors, run only on their platform ([configuration](config.md#resource-per-platform)).
+- **Identity is verified, never claimed.** User, tenant and session come from trusted auth or
+  tenant middleware after authentication, never from raw client headers or baggage. The core
+  identity rows are always checked; the rest form a reference catalogue, added only where the
+  service's code has the value. Nothing is fabricated to fill a row.
+- **Personal data is masked, secrets never leave.** Personal data reaches telemetry only through
+  the shared masking helper; if masking fails, the value is dropped. Secrets are never written,
+  not even masked ([PII masking](data-model.md#pii-masking)).
+
 ## Vendor neutrality
 
 Applications speak open protocols, and the collector adapts them to each backend:
@@ -52,6 +71,10 @@ exporters. Moving between backends (a Grafana stack with Tempo, Dynatrace, New R
 is a configuration change, and the conformance checks confirm that nothing else changes. The collector may
 send one signal to several backends. The profile format is the one per-backend difference an
 application may see.
+
+**Browser RUM** uses Grafana Faro: its SDK sends Faro's own model to Alloy's `faro.receiver`,
+which writes Loki and Tempo, or, with the experimental OTLP transport, OTLP logs and traces to any
+collector. Faro is the one browser SDK the standard uses ([signals/rum.md](signals/rum.md)).
 
 The exception is **LLM observability**: the AI part of each trace, with prompts and completions where the content policy allows them,
 goes to Langfuse as well, from a processor on the same tracer provider or from the collector.
@@ -105,8 +128,8 @@ same identity as the SDK's telemetry ([cross-signal identity](data-model.md#cros
 
 - **Delivery fails open.** If the exporter, the collector or a backend fails, the application keeps
   serving; telemetry is retried, held in bounded queues and eventually dropped.
-- **Safety fails closed.** If sanitising a value fails, the value is omitted, never written raw.
-  AI content is left out when its redactor fails.
+- **Safety fails closed.** If sanitising or masking a value fails, the value is omitted, never
+  written raw. AI content is left out when its redactor fails.
 
 Telemetry becomes less detailed, never less safe. Safety is a property of the instrumentation code,
 not of a filter further down the pipeline ([safe capture](safe-capture.md)).
@@ -131,8 +154,16 @@ The conformance checks verify this by injecting failures: collector
 down, connection refused, slow collector, TLS failure, backend 429 and 500, a full export queue,
 and SIGTERM with telemetry still queued. In every case the application keeps serving with an
 unchanged error rate, memory stays bounded, drops are visible and shutdown finishes within its
-timeout. Overhead tests, the same load with telemetry on and off against a budget (latency,
-CPU, memory, spans and log bytes per request), are a later addition ([acceptance](acceptance.md)).
+timeout. Overhead tests run the same load with telemetry on and off against a budget (latency,
+CPU, memory, errors and drops) ([acceptance](acceptance.md#overhead-and-load)).
+
+## Telemetry never costs the service its performance or security
+
+Instrumentation stays within a measured overhead budget and opens no new attack surface: export
+is batched off the request path, hot paths stay cheap, limits stay bounded, transport is
+encrypted beyond the pod, credentials come only from mounted secrets, and the metrics port is
+bound no wider than its scraper needs. The budget and the rules are in
+[overhead and security](overhead-and-security.md).
 
 ## Errors are reported through logs
 

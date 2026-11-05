@@ -1,38 +1,57 @@
 # Metrics
 
 Operational measurements with short, bounded labels: request rate, errors and duration for the
-service and its calls, runtime health, the database pool, WebSocket traffic, failed probes and
-job runs. Each stack produces them with its mainstream Prometheus client library and serves
+service and its calls, runtime health, the database pool, failed probes and job runs, plus RPC,
+messaging, WebSocket, authentication, MCP, A2A and GenAI traffic in a service that has it. Each stack produces them with its mainstream Prometheus client library and serves
 them on `/metrics`, on a port of their own, for Prometheus or the collector to scrape.
 OpenTelemetry metric push over OTLP is off by default.
 
 ## Required behaviour
 
 1. **Ops metrics only by default.** The module produces the [default set](#the-default-set),
-   the contract every stack meets, plus the [GenAI metrics](#genai-metrics) in a service that
-   calls a model provider. App and business metrics are added by the team when it needs them,
+   the contract every stack meets, plus the [conditional metrics](#conditional-metrics) for the
+   kinds of traffic the service has, the [GenAI metrics](#genai-metrics) in a service that
+   calls a model provider, and the [MCP](#mcp-metrics) and [A2A](#a2a-metrics) metrics. App and business metrics are added by the team when it needs them,
    with the same library and the same rules ([enrichment.md](../enrichment.md)).
 2. **The stack's Prometheus client library** produces them: its default process and runtime
-   collectors, plus the module's own HTTP, pool, WebSocket, probe and job metrics
+   collectors, plus the module's own HTTP, pool, RPC, messaging, WebSocket, authentication, probe
+   and job metrics
    ([per stack](#per-stack)).
-3. **Pull from `/metrics` on its own port,** never the application port, bound to `0.0.0.0` so
-   Prometheus or the collector can reach it in a container. The chart exposes the same port as
-   the metrics port ([charts.md](../charts.md)). Pre-fork and multi-process servers use the
+3. **Pull from `/metrics` on its own port,** never the application port, bound no wider than
+   the scraper needs. The instrument step chooses per platform: loopback (`127.0.0.1`) when the
+   scraper runs in the same pod, task or instance (a sidecar on ECS or Cloud Run, an agent on a
+   VM); `0.0.0.0` only when it scrapes across the network, as in a Kubernetes pod scrape. The
+   yml comment on `host` says which. The port is never routed through a load balancer, ingress
+   or public service, and a NetworkPolicy or security group restricts it
+   ([overhead-and-security.md](../overhead-and-security.md#exposed-surfaces)). On Kubernetes
+   the chart exposes the same port as the metrics port ([charts.md](../charts.md)). Pre-fork and multi-process servers use the
    library's multiprocess or cluster mode, so one `/metrics` covers every worker; workers never
-   share one port.
+   share one port. A taken metrics port fails loudly at start: in Python the module first binds
+   without `SO_REUSEADDR` (a WSGI server subclass with `allow_reuse_address = False`), because
+   `prometheus_client.start_http_server` sets it and on macOS a `127.0.0.1` bind then succeeds
+   beside a held `0.0.0.0` port. If that bind fails with "address in use", it checks for a real
+   listener (a connect to the port) and retries with reuse only when none answers: right after a
+   restart, connections in `TIME_WAIT` from the last scrape also block a no-reuse bind
+   ([sdk-notes](../sdk-notes.md#python)). Node's
+   `http.createServer` and Go's listeners already fail.
 4. **OTLP push is off by default** (`metrics.otlp.enabled: false`). A team may switch it on for
    its own app metrics made with the OpenTelemetry API. The ops metrics stay on `/metrics`, and
    a series leaves by one path only: the instrumentations' own metrics (such as
    `http.server.request.duration` from the HTTP instrumentation) are turned off or dropped with
    a view, so they never repeat the ops metrics.
 5. **Short label names, bounded values.** The labels are `method`, `route`, `status_code`,
-   `service`, `probe`, `dependency`, `job_name` and `outcome` (never `job`, which the scrape sets:
-   [below](#the-default-set)), plus `provider`, `model`, `operation` and `token_type` on the
-   GenAI metrics. `method` is a standard HTTP method, or
-   `_OTHER`. `route` is the route template (the URL template for client calls), or `unmatched`
-   when nothing matched. `service` is the called dependency's name from the code's dependency
-   map. Labels never carry user, session, tenant, order, request or trace ids, raw URLs or
-   paths, or secrets.
+   `service`, `pool`, `probe`, `dependency`, `job_name` and `outcome` (never `job`, which the
+   scrape sets: [below](#the-default-set)), plus `system`, `destination`, `operation` and `type`
+   on the messaging and WebSocket metrics, `result` and `provider` on the authentication counter,
+   `provider`, `model`, `operation` and `token_type` on the GenAI metrics, `server` and `target`
+   on the MCP metrics and `agent` on the A2A metrics. `method` is a standard HTTP method, or
+   `_OTHER` (the RPC or JSON-RPC method on RPC, MCP and A2A metrics). `route` is the route
+   template (the URL template for client calls), or `unmatched` when nothing matched. `service`
+   is the called dependency's name from the code's dependency map. Each metric's required
+   labels are M and always set; its optional labels are O
+   ([data model](../data-model.md#metrics)). Prohibited as labels (P): user, tenant, org,
+   account, customer, session, request, correlation, trace and span ids, raw URLs and paths,
+   SQL, error messages, emails, free text and secrets.
 6. **One bucket list** for the duration histograms, in seconds:
    `0.005 0.01 0.025 0.05 0.1 0.25 0.5 1 2.5 5 10 30 60`. `job_duration_seconds` adds
    `120 300 600 1800` for jobs that run longer than a minute.
@@ -80,9 +99,28 @@ The job metrics label the job `job_name`, never `job`: Prometheus and the collec
 (the scrape target's name) on every scraped series, so an app label `job` arrives renamed to
 `exported_job`, or, with `honor_labels`, replaces the target's `job`, which the collector's
 OTLP conversion turns into `service.name`.
-The two WebSocket connection counters pair up, so their difference is the gauge; a rejected
-handshake is logged and traced, not counted ([WebSocket](../workloads/api.md#websocket)).
 Several of the Node.js process metrics read `/proc`, so they appear on Linux only.
+
+## Conditional metrics
+
+Added in a service that has the traffic, recorded where each call, message or attempt
+completes, so unsampled traffic counts too. Durations use the standard buckets.
+
+| Metric | Type | Unit | Labels | Emitted when |
+| --- | --- | --- | --- | --- |
+| `rpc_server_duration_seconds` | histogram | s | `method`, `status_code`; optional `service` | the service serves gRPC or another RPC protocol: each call handled, from arrival to the response; `status_code` is the RPC status (gRPC code name) |
+| `rpc_client_duration_seconds` | histogram | s | `method`, `status_code`; optional `service` (the called dependency) | the service calls RPC services: each call inside a request, job or WebSocket trace, until the response; `status_code` is `error` when none arrived |
+| `messaging_process_duration_seconds` | histogram | s | `system`, `destination`, `operation`; optional `outcome` | the service consumes messages: each message (or batch) processed, from receipt to ack or failure |
+| `messaging_messages_total` | counter | messages | `system`, `destination`, `operation`; optional `outcome` | the service produces or consumes messages: each message sent or processed; `operation` is the `messaging.operation.type` value (`send`, `process`) |
+| `auth_attempts_total` | counter | attempts | `method`, `result`; optional `provider` | C: the service itself authenticates (a login, a token exchange, a credential check); each attempt, with `method` the `app.auth.method` value, `result` `success`, `denied` or `error`, and `provider` from a fixed list |
+
+- **`system`** is the `messaging.system` value (`kafka`, `rabbitmq`, `aws_sqs`); **`destination`**
+  is the topic or queue name from a fixed list in code, a template for generated names, else
+  `other`; **`outcome`** is `success`, `failure`, `retried` or `dead_lettered`.
+- **A rejected WebSocket handshake** is logged and traced, not counted
+  ([WebSocket](../workloads/api.md#websocket)).
+- **Authentication is counted once,** where the service decides the result; a service that only
+  checks a token another service issued counts nothing here.
 
 ## Per stack
 
@@ -97,7 +135,7 @@ equivalent. Check the versions you install; the table records what was found.
 | JVM: Spring Boot (Quarkus and Ktor similar) | Micrometer with the Prometheus registry; the `jvm_*`, `process_*` and `system_*` binders | Spring's `http_server_requests_seconds` (`method`, `uri`, `status`, `outcome`, `exception`) and `http_client_requests_seconds` (plus `client_name`), renamed to the contract with `MeterFilter` renames, the extra tags dropped; buckets from `management.metrics.distribution.slo` | HikariCP, labelled `pool`: `hikaricp_connections`, `hikaricp_connections_active`, `hikaricp_connections_idle`, `hikaricp_connections_pending` (waiting), `hikaricp_connections_acquire_seconds` (wait) | The timers give no separate request counter and no in-flight gauges with the contract's labels: add `http_server_requests_total` and the active-request gauges in the module's filter. Map the HikariCP names or list the mapping |
 | Rust | The `prometheus` crate with its `process` feature (Linux only), or `metrics` with `metrics-exporter-prometheus` and `metrics-process` | A tower or axum middleware with the short labels (`MatchedPath` gives the route); client calls through the client wrappers | sqlx `Pool::size()` and `num_idle()`; deadpool `Pool::status()` | No garbage collector, so no GC metrics. Wait time: time the acquire |
 
-WebSocket, probe-failure and job metrics are the module's own on every stack.
+The conditional metrics, probe-failure and job metrics are the module's own on every stack.
 
 ## GenAI metrics
 
@@ -110,12 +148,12 @@ from spans, so unsampled requests count too:
 | Metric | Type | Labels | Measures |
 | --- | --- | --- | --- |
 | `gen_ai_client_operation_duration_seconds` | histogram | `provider`, `model`, `operation`, `outcome` | model and embedding calls, from the request to the last chunk; `outcome` is `success`, `error`, `rate_limited` or `timeout` |
-| `gen_ai_client_tokens_total` | counter | `provider`, `model`, `token_type` | tokens the provider reported; `token_type` is `input`, `output`, `cache_read`, `cache_write` or `reasoning` |
+| `gen_ai_client_tokens_total` | counter | `provider`, `model`, `token_type` | tokens the provider reported; `token_type` is `input`, `output`, `cache_read`, `cache_creation` or `reasoning` |
 | `gen_ai_client_time_to_first_chunk_seconds` | histogram | `provider`, `model` | streamed calls, from the request to the first chunk |
 
 - **Buckets:** the standard list, plus `120` and `300` on the duration histogram for long
   generations and agent turns.
-- **Token types overlap:** `cache_read` and `cache_write` are part of `input`, and `reasoning`
+- **Token types overlap:** `cache_read` and `cache_creation` are part of `input`, and `reasoning`
   is part of `output`, as the providers count them. Never add the types together.
 - **`model`** is the requested model from a fixed list in code, anything else `other`; a dated
   response model never makes new series. `provider` is the `gen_ai.provider.name` value;
@@ -146,6 +184,23 @@ completes, so unsampled traffic counts too ([mcp.md](../workloads/mcp.md#metrics
   (client only); **`server`** is the configured server name, from a fixed list.
 - **Buckets:** the standard list, plus `120` and `300` for long tool calls.
 
+## A2A metrics
+
+An agent that calls or serves the agent-to-agent protocol adds one duration histogram per side,
+recorded where each JSON-RPC call completes (for `message/stream`, when the stream ends):
+
+| Metric | Type | Unit | Labels | Emitted when |
+| --- | --- | --- | --- | --- |
+| `a2a_client_request_duration_seconds` | histogram | s | `agent`, `method`, `outcome` | the service calls a remote agent: each call until its response or the end of its stream |
+| `a2a_server_request_duration_seconds` | histogram | s | `agent`, `method`, `outcome` | the service is an A2A agent: each call it handles |
+
+- **`agent`** is the remote agent's card name on the client and the service's own agent name on
+  the server, from a fixed list; **`method`** is the A2A method (`message/send`,
+  `message/stream`, `tasks/get`, `tasks/cancel`); **`outcome`** is `success`, `error`,
+  `rejected` (the caller's JSON-RPC errors) or `timeout`. Never a task, context or message id
+  ([data model](../data-model.md#a2a-agent-to-agent-protocol)).
+- **Buckets:** the standard list, plus `120` and `300` for long agent turns.
+
 ## App metrics
 
 Added only when the team asks for them (a metric around a function, a business count), with the
@@ -174,7 +229,7 @@ The enrichment catalogue lists companion metrics for common functions
 | --- | --- | --- |
 | `metrics.enabled` | `true` | `false` turns off `/metrics` and OTLP push |
 | `metrics.prometheus.enabled` | `true` | the `/metrics` server |
-| `metrics.prometheus.host` | `0.0.0.0` | listen address |
+| `metrics.prometheus.host` | `0.0.0.0` | listen address; keep `0.0.0.0` only where the scraper is remote (a Kubernetes pod scrape), use `127.0.0.1` for a same-pod, same-task or same-instance scraper, and say which in a yml comment |
 | `metrics.prometheus.port` | `9464` | never the application port |
 | `metrics.prometheus.path` | `/metrics` | |
 | `metrics.prometheus.exclude_paths` | `[/health, /ready, /live, /metrics, /status]` | add the API docs paths; exact paths, or `/path/*` for a subtree |
@@ -218,7 +273,7 @@ excluded path is an ordinary request, measured like any other: the path isn't se
 contract's names, types, labels and buckets, the default runtime metrics, no id or raw path in
 a label value, client metrics only for calls inside a trace and never for the SDK's own
 exports, successful probes and docs pages absent while `/api/healthcare` is measured, the
-failure counter on a 503 from `/ready`, and, in a service that calls a model provider, the
-GenAI metrics with their bounded labels.
+failure counter on a 503 from `/ready`, the conditional metrics for the traffic the service has,
+and, in a service that calls a model provider, the GenAI metrics with their bounded labels.
 
 [Documentation index](../README.md)

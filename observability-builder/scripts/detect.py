@@ -72,6 +72,9 @@ TELEMETRY = [
     ("go.uber.org/zap", "zap"), ("zerolog", "zerolog"), ("logrus", "logrus"),
     ("@pyroscope/nodejs", "pyroscope"), ("pyroscope-io", "pyroscope"),
     ("github.com/grafana/pyroscope-go", "pyroscope"), ("io.pyroscope", "pyroscope"),
+    ("@grafana/faro-", "faro"), ("@datadog/browser-rum", "datadog-rum"), ("@newrelic/browser-agent", "newrelic-browser"),
+    ("@elastic/apm-rum", "elastic-rum"), ("@dynatrace/", "dynatrace"), ("@opentelemetry/sdk-trace-web", "otel-web"),
+    ("@microsoft/applicationinsights-web", "appinsights-web"), ("@splunk/otel-web", "splunk-rum"),
 ]
 
 # GenAI by manifest name: model providers, AI frameworks, vector stores and LLM-observability tools.
@@ -400,10 +403,14 @@ def detect(root: Path, max_files: int = 20000) -> dict:
     ssr = {"nextjs", "sveltekit", "nuxt", "react-router", "remix", "angular-ssr", "astro"}
     servers = {"express", "fastify", "nestjs", "koa", "hapi", "hono"}
     if frameworks & ssr or (frameworks & ui and frameworks & servers):
-        # A server-rendered framework, or a server that also serves the pages: the server side is instrumented.
+        # A server-rendered framework, or a server that also serves the pages: both sides are instrumented.
         result["workload"] = "fullstack"
-    elif frameworks - ui - {"vite"}:  # a page-only project has no server to instrument
+        result["frontend"] = True
+    elif frameworks - ui - {"vite"}:
         result["workload"] = "api"
+    elif frameworks & ui:  # pages only: a static bundle gets browser RUM (Faro)
+        result["workload"] = "spa"
+        result["frontend"] = True
     return result
 
 

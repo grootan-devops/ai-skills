@@ -4,10 +4,12 @@
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
   scripts/receive.py --out <dir> [--grpc-port N] [--http-port N] [--pyroscope-port N] [--seconds N]
                      [--langfuse-keys FILE] [--langfuse-prompts FILE] [--langfuse-datasets FILE]
-                     [--canaries FILE]
+                     [--canaries FILE] [--platform NAME]
 
 Starts OTLP/gRPC, OTLP/HTTP and Pyroscope receivers on 127.0.0.1, on free ports unless ports are
-given, and prints their endpoints as one JSON line. The OTLP/HTTP port also serves a Langfuse
+given, and prints their endpoints as one JSON line. The OTLP/HTTP port also takes Grafana Faro
+batches on /collect (browser RUM, CORS allowed for any origin: local testing only), and answers
+browsers' CORS preflights for the Faro OTLP transport. The OTLP/HTTP port also serves a Langfuse
 stand-in (base URL = the OTLP/HTTP endpoint): traces on
 /api/public/otel/v1/traces, kept apart from the ops stream; scores on /api/public/scores and in
 legacy batch ingestion; prompts from --langfuse-prompts (a JSON list of prompts); datasets for
@@ -18,14 +20,23 @@ only. While it runs it keeps <dir> up to date:
 
   <dir>/otlp/NNNN-<signal>-<transport>.json   every decoded export request
   <dir>/profiles/NNNN.bin, uploads.json       profile uploads and their labels
+  <dir>/faro/NNNN.json                        every Faro batch (browser RUM), with header names only
   <dir>/langfuse/scores.json, prompts.json,   scores (no text values), prompt and dataset fetches
     datasets.json, media.json                   and media upload attempts the Langfuse stand-in saw
   <dir>/canaries.json                         with --canaries: each canary's label and the streams
                                               it reached (OTLP, Langfuse, profiles, rejected
                                               requests); never the values
+  <dir>/conformance.json                      data-model findings (references/data-model.md): the M, C
+                                              and P rows of resources, spans, logs, metric labels and
+                                              profile labels; keys and labels only, never values
   <dir>/summary.md                            resources, span trees, metrics, log records,
                                               profiles, LLM observability
-                                              (keys and sizes only) and rejected requests
+                                              (keys and sizes only), data-model findings and rejected
+                                              requests
+
+--platform (k8s, ecs, lambda, cloud-run, cloud-run-job, vm, cloud-vm, docker, local) sets which platform rows
+the resource must carry; without it the platform is inferred from each resource (cloud.platform, k8s.*,
+aws.ecs.*, faas.*, container.id, host.name), and a resource with none gets the four service rows only.
 
 Stops on SIGINT or SIGTERM, or after --seconds. Header names are recorded, never their values.
 Exit code 0, or 3 when a requested port is busy.
@@ -45,6 +56,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from receiver import canaries as cn  # noqa: E402
+from receiver import conformance  # noqa: E402
 from receiver import genai  # noqa: E402
 from receiver import telemetry as tm  # noqa: E402
 from receiver.sink import PortBusyError, Sinks, Store  # noqa: E402
@@ -143,9 +155,17 @@ def render_logs(records: list[tm.Record]) -> list[str]:
     return lines + [""]
 
 
-def render_summary(store: Store, canaries: dict[str, str] | None = None) -> str:
+def data_model_findings(store: Store, platform: str | None = None) -> list:
+    with store.lock:
+        payloads, profiles, faro = list(store.otlp), list(store.profiles), list(store.faro)
+    return conformance.check(payloads, profiles, platform, faro=faro)
+
+
+def render_summary(store: Store, canaries: dict[str, str] | None = None, platform: str | None = None,
+                   findings: list | None = None) -> str:
     with store.lock:
         payloads, profiles, rejected = list(store.otlp), list(store.profiles), list(store.rejected)
+        faro = list(store.faro)
         scores, fetches, media = list(store.langfuse_scores), list(store.langfuse_prompt_fetches), list(store.langfuse_media)
         dataset_fetches = list(store.langfuse_dataset_fetches)
     langfuse = [p for p in payloads if p.destination == "langfuse"]
@@ -176,6 +196,9 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None) -> str:
         lines.append(f"- {upload.app_name or '-'} ({upload.source}/{upload.format or 'pprof'}) "
                      f"static labels: {upload.labels or '-'}; sample labels: {labels or '-'}")
     lines += [""] if profiles else []
+    lines += render_faro(faro)
+    findings = data_model_findings(store, platform) if findings is None else findings
+    lines += ["", *conformance.summary(findings, platform)]
     if rejected:
         lines += ["", "## Rejected requests", ""]
         lines += [f"- {r['sink']} {r['path']}: {r['reason']}" for r in rejected]
@@ -184,13 +207,48 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_faro(batches) -> list[str]:
+    """Browser RUM batches: counts by kind and name, apps, sessions and views; never values."""
+    if not batches:
+        return []
+    from collections import Counter
+    kinds, apps, sessions, views = Counter(), set(), set(), set()
+    spans = 0
+    for batch in batches:
+        data, meta = batch.data, batch.data.get("meta", {})
+        apps.add(f"{(meta.get('app') or {}).get('name', '-')} {(meta.get('app') or {}).get('environment', '-')}")
+        sessions.add((meta.get("session") or {}).get("id"))
+        if meta.get("app"):
+            views.add((meta.get("view") or {}).get("name", "default"))
+        for e in data.get("exceptions", []):
+            kinds[f"exception {e.get('type', '-')}"] += 1
+        for e in data.get("logs", []):
+            kinds[f"log {e.get('level', '-')}"] += 1
+        for e in data.get("events", []):
+            kinds[f"event {e.get('name', '-')}"] += 1
+        for e in data.get("measurements", []):
+            kinds[f"measurement {e.get('type', '-')}"] += 1
+        for rs in (data.get("traces") or {}).get("resourceSpans", []):
+            spans += sum(len(ss.get("spans", [])) for ss in rs.get("scopeSpans", []))
+    keyed = sum(1 for b in batches if b.api_key)
+    lines = [f"## Browser RUM (Faro): {len(batches)} batches, {len(sessions - {None})} sessions, {spans} spans", "",
+             f"Apps: {', '.join(sorted(apps))}. Views: {', '.join(sorted(v for v in views if v))}. "
+             f"X-API-Key present on {keyed} of {len(batches)} batches.", "",
+             "| Record | Count |", "|---|---|"]
+    lines += [f"| {k} | {n} |" for k, n in sorted(kinds.items())]
+    return lines + [""]
+
+
 class Receiver:
     """The sinks plus a writer that mirrors what they receive into the output directory."""
 
     def __init__(self, out: Path, grpc_port: int = 0, http_port: int = 0, pyroscope_port: int = 0,
                  langfuse_keys: Path | None = None, langfuse_prompts: Path | None = None,
-                 langfuse_datasets: Path | None = None, canaries: Path | None = None):
+                 langfuse_datasets: Path | None = None, canaries: Path | None = None, platform: str | None = None):
+        if platform is not None and platform not in conformance.PLATFORMS:
+            raise ValueError(f"unknown platform {platform!r}; one of {', '.join(conformance.PLATFORMS)}")
         self.out = out
+        self.platform = platform
         self.store = Store()
         self.canaries = cn.load(canaries) if canaries else {}  # label -> value; values never leave memory
         if langfuse_keys:  # read once; only its base64 form is kept, for comparison
@@ -203,14 +261,16 @@ class Receiver:
             self.store.langfuse_datasets = json.loads(langfuse_datasets.read_text(encoding="utf-8"))
         self.sinks = Sinks(self.store, grpc_port, http_port, pyroscope_port)
         self._payloads_written = 0
+        self._faro_written = 0
         self._profiles_written = 0
         self._rejected = 0
         self._langfuse_seen = 0
 
     def start(self) -> dict:
-        for sub in ("otlp", "profiles", "langfuse"):
+        for sub in ("otlp", "profiles", "langfuse", "faro"):
             shutil.rmtree(self.out / sub, ignore_errors=True)
         (self.out / "canaries.json").unlink(missing_ok=True)
+        (self.out / "conformance.json").unlink(missing_ok=True)
         self.out.mkdir(parents=True, exist_ok=True)
         self.sinks.start()
         self.flush(force=True)
@@ -219,19 +279,21 @@ class Receiver:
                 "otlp_http": f"http://127.0.0.1:{ports['otlp_http']}",
                 "pyroscope": f"http://127.0.0.1:{ports['pyroscope']}",
                 "langfuse": f"http://127.0.0.1:{ports['otlp_http']}",
+                "faro": f"http://127.0.0.1:{ports['otlp_http']}/collect",
                 "summary": str(self.out / "summary.md")}
 
     def flush(self, force: bool = False) -> bool:
         """Write payloads that arrived since the last flush; rewrite the summary when anything did."""
         with self.store.lock:
             payloads = self.store.otlp[self._payloads_written:]
+            faro = self.store.faro[self._faro_written:]
             profiles = list(self.store.profiles)
             rejected = len(self.store.rejected)
             langfuse = {"scores": list(self.store.langfuse_scores), "prompts": list(self.store.langfuse_prompt_fetches),
                         "datasets": list(self.store.langfuse_dataset_fetches), "media": list(self.store.langfuse_media)}
         new_profiles = profiles[self._profiles_written:]
         langfuse_seen = sum(len(v) for v in langfuse.values())
-        if not (force or payloads or new_profiles or rejected != self._rejected
+        if not (force or payloads or faro or new_profiles or rejected != self._rejected
                 or langfuse_seen != self._langfuse_seen):
             return False
         if langfuse_seen:
@@ -243,6 +305,10 @@ class Receiver:
                 "signal": payload.signal, "transport": payload.transport, "destination": payload.destination,
                 "auth": payload.auth, "content_type": payload.content_type,
                 "header_names": payload.header_names, "received_at": payload.received_at, "payload": payload.data})
+        for batch in faro:
+            _write_json(self.out / batch.name, {"received_at": batch.received_at, "header_names": batch.header_names,
+                                                "api_key": batch.api_key, "origin": batch.origin, "payload": batch.data})
+        self._faro_written += len(faro)
         for upload in new_profiles:
             (self.out / upload.name).parent.mkdir(parents=True, exist_ok=True)
             (self.out / upload.name).write_bytes(upload.raw)
@@ -259,7 +325,10 @@ class Receiver:
         self._rejected = rejected
         if self.canaries:
             _write_json(self.out / "canaries.json", cn.scan(self.store, self.canaries))
-        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries), encoding="utf-8")
+        findings = data_model_findings(self.store, self.platform)
+        _write_json(self.out / "conformance.json", {"platform": self.platform, "findings": [asdict(f) for f in findings]})
+        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries, self.platform, findings),
+                                             encoding="utf-8")
         return True
 
     def stop(self) -> None:
@@ -282,9 +351,11 @@ def main(argv=None) -> int:
     parser.add_argument("--canaries", type=Path,
                         help="JSON {label: value} (or a list) of test values that must reach no stream; "
                              "the summary and canaries.json name the labels and streams, never the values")
+    parser.add_argument("--platform", choices=conformance.PLATFORMS,
+                        help="the platform whose resource rows are required (default: inferred per resource)")
     args = parser.parse_args(argv)
     receiver = Receiver(args.out.resolve(), args.grpc_port, args.http_port, args.pyroscope_port,
-                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries)
+                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries, args.platform)
     try:
         endpoints = receiver.start()
     except PortBusyError as exc:

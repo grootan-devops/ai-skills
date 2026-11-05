@@ -1,6 +1,7 @@
 """The local receiver: endpoints on free ports, payload files and the summary."""
 import contextlib
 import io
+import gzip
 import json
 import tempfile
 import unittest
@@ -111,6 +112,21 @@ class ReceiverRun(unittest.TestCase):
         summary = (self.out / "summary.md").read_text()
         self.assertIn("logs/grpc 1", summary)
         self.assertIn("- ERROR trace=yes 'request failed'", summary)
+
+    def test_data_model_findings_written(self):
+        body = traces(span("GET /orders/{id}", 2, "00000000000000f1", **{"http.request.method": "GET",
+                                                                        "http.route": "/orders/{id}"}))
+        post(self.port("otlp_http"), "/v1/traces", body, {"Content-Type": "application/json"})
+        self.receiver.flush()
+        report = json.loads((self.out / "conformance.json").read_text())
+        found = {(f["rule"], f["message"]) for f in report["findings"]}
+        self.assertIn(("resource-missing", "resource lacks service.version (M)"), found)
+        self.assertIn(("span-missing", "HTTP server span lacks url.scheme (M)"), found)
+        self.assertIn("## Data model checks", (self.out / "summary.md").read_text())
+
+    def test_unknown_platform_is_refused(self):
+        with self.assertRaises(ValueError):
+            receive.Receiver(self.out, platform="mainframe")
 
     def test_rejections_are_listed(self):
         post(self.port("otlp_http"), "/v1/nothing", b"x", {"Content-Type": "application/x-protobuf"})
@@ -366,7 +382,7 @@ class Cli(unittest.TestCase):
                 code = receive.main(["--out", str(Path(tmp) / "t"), "--seconds", "0.5"])
             self.assertEqual(code, 0)
             first = json.loads(stdout.getvalue().splitlines()[0])
-            self.assertEqual(set(first), {"otlp_grpc", "otlp_http", "pyroscope", "langfuse", "summary"})
+            self.assertEqual(set(first), {"otlp_grpc", "otlp_http", "pyroscope", "langfuse", "faro", "summary"})
             self.assertIn("received 0 export requests", stdout.getvalue())
 
     def test_empty_store_summary(self):
@@ -439,3 +455,75 @@ class CanaryFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FARO_META = {"app": {"name": "shop", "version": "1.0.0", "environment": "dev"}, "sdk": {"name": "faro-web", "version": "2.13.0"},
+             "session": {"id": "s1"}, "page": {"url": "https://shop.example/orders/7"}, "view": {"name": "/orders/:id"},
+             "user": {"id": "u-1"}}
+
+
+@unittest.skipUnless(HAVE_DEPS, "needs grpcio, protobuf and opentelemetry-proto (run with uv, see README.md)")
+class FaroReceiver(unittest.TestCase):
+    """Grafana Faro batches on /collect (browser RUM)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name) / "telemetry"
+        canaries = Path(self.tmp.name) / "canaries.json"
+        canaries.write_text(json.dumps({"email": "jane.canary@example.com"}))
+        self.receiver = receive.Receiver(self.out, canaries=canaries)
+        self.port = int(self.receiver.start()["otlp_http"].rsplit(":", 1)[1])
+
+    def tearDown(self):
+        self.receiver.stop()
+        self.tmp.cleanup()
+
+    def send(self, body: dict, gzip_it=False):
+        raw = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json", "Origin": "https://shop.example", "X-API-Key": "public"}
+        if gzip_it:
+            raw, headers["Content-Encoding"] = gzip.compress(raw), "gzip"
+        return post(self.port, "/collect", raw, headers)
+
+    def findings(self):
+        self.receiver.flush()
+        return {f["rule"] for f in json.loads((self.out / "conformance.json").read_text())["findings"]}
+
+    def test_clean_batch(self):
+        status, _, _ = self.send({"meta": FARO_META, "events": [{"name": "session_start", "domain": "browser"}],
+                                  "measurements": [{"type": "web-vitals", "values": {"lcp": 120}}]}, gzip_it=True)
+        self.assertEqual(status, 202)
+        self.assertEqual(self.findings(), set())
+        summary = (self.out / "summary.md").read_text()
+        self.assertIn("## Browser RUM (Faro): 1 batches, 1 sessions, 0 spans", summary)
+        self.assertIn("| measurement web-vitals | 1 |", summary)
+        self.assertIn("X-API-Key present on 1 of 1 batches", summary)
+        saved = json.loads((self.out / "faro" / "0001.json").read_text())
+        self.assertNotIn("public", json.dumps(saved["header_names"]).lower().replace("x-api-key", ""))
+
+    def test_personal_data_and_queries_flagged(self):
+        meta = dict(FARO_META, user={"id": "u-1", "email": "jane.canary@example.com"},
+                    page={"url": "https://shop.example/cb?code=abc"}, view={"name": "default"})
+        trace = {"resourceSpans": [{"scopeSpans": [{"spans": [{"name": "GET", "attributes": [
+            {"key": "user.name", "value": {"stringValue": "jane"}}]}]}]}]}
+        self.send({"meta": meta, "traces": trace,
+                   "exceptions": [{"type": "Error", "value": "failed for jane.canary@example.com"}]})
+        self.assertEqual(self.findings(), {"faro-user-pii", "faro-pii", "faro-url-query", "faro-span-user-pii",
+                                           "faro-view-default"})
+        self.assertIn("| email | Faro |", (self.out / "summary.md").read_text())
+
+    def test_missing_meta_and_cors(self):
+        self.send({"meta": {"sdk": {"name": "faro-web"}}})
+        self.assertIn("faro-meta-missing", self.findings())
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("OPTIONS", "/collect", headers={"Origin": "https://shop.example",
+                                                     "Access-Control-Request-Method": "POST"})
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 204)
+        self.assertEqual(resp.getheader("Access-Control-Allow-Origin"), "https://shop.example")
+        self.assertIn("Idempotency-Key", resp.getheader("Access-Control-Allow-Headers"))
+        conn.close()
+
+    def test_not_a_faro_payload_rejected(self):
+        status, _, _ = post(self.port, "/collect", b'{"logs": []}', {"Content-Type": "application/json"})
+        self.assertEqual(status, 400)

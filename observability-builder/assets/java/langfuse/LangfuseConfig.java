@@ -9,13 +9,23 @@ import java.util.Base64;
 
 /**
  * The Langfuse settings: the origin (the OTLP and API paths are added in code), the keys read from mounted files
- * (never the environment), the per-request timeout (10 s when unset) and the export scope (ai_context or ai_only).
+ * (never the environment), the per-request timeout (10 s when unset), the export scope (ai_context or ai_only) and
+ * the cap on one export request's body before gzip (3 MiB when zero or less).
  */
-public record LangfuseConfig(String baseUrl, String publicKey, String secretKey, Duration timeout, String scope) {
+public record LangfuseConfig(String baseUrl, String publicKey, String secretKey, Duration timeout, String scope,
+        int maxRequestBytes) {
+    /** One export request's body before gzip, at most, when maxRequestBytes isn't set. */
+    public static final int DEFAULT_MAX_REQUEST_BYTES = 3 * 1024 * 1024;
+
     public LangfuseConfig {
         baseUrl = baseUrl.replaceAll("/+$", "");
         timeout = timeout == null || timeout.isZero() || timeout.isNegative() ? Duration.ofSeconds(10) : timeout;
         scope = scope == null || scope.isBlank() ? "ai_context" : scope;
+        maxRequestBytes = maxRequestBytes > 0 ? maxRequestBytes : DEFAULT_MAX_REQUEST_BYTES;
+    }
+
+    public LangfuseConfig(String baseUrl, String publicKey, String secretKey, Duration timeout, String scope) {
+        this(baseUrl, publicKey, secretKey, timeout, scope, 0);
     }
 
     /** The Basic credentials built from the keys. */
@@ -26,6 +36,7 @@ public record LangfuseConfig(String baseUrl, String publicKey, String secretKey,
     /** Without the keys, so a logged config never carries them. */
     @Override
     public String toString() {
-        return "LangfuseConfig[baseUrl=" + baseUrl + ", timeout=" + timeout + ", scope=" + scope + "]";
+        return "LangfuseConfig[baseUrl=" + baseUrl + ", timeout=" + timeout + ", scope=" + scope
+                + ", maxRequestBytes=" + maxRequestBytes + "]";
     }
 }

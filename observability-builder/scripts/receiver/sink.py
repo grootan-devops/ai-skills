@@ -23,7 +23,7 @@ from opentelemetry.proto.collector.metrics.v1 import metrics_service_pb2, metric
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
 
 from . import genai, pprof
-from .capture import Payload, ProfileUpload
+from .capture import FaroPayload, Payload, ProfileUpload
 
 REQUESTS = {
     "traces": trace_service_pb2.ExportTraceServiceRequest,
@@ -244,6 +244,7 @@ class Store:
         self.langfuse_scores: list[dict] = []
         self.langfuse_prompt_fetches: list[dict] = []
         self.langfuse_media: list[dict] = []
+        self.faro: list[FaroPayload] = []
         self._otlp_seq = 0
         self._profile_seq = 0
 
@@ -256,6 +257,12 @@ class Store:
                               sorted(set(header_names)), time.time(), sorted(set(token_headers)),
                               destination, dict(auth or {}))
             self.otlp.append(payload)
+        return payload
+
+    def add_faro(self, data: dict, raw: bytes, header_names, api_key: bool, origin: str) -> FaroPayload:
+        with self.lock:
+            payload = FaroPayload(len(self.faro) + 1, data, raw, sorted(set(header_names)), time.time(), api_key, origin)
+            self.faro.append(payload)
         return payload
 
     def add_score(self, body: dict, auth: dict) -> dict:
@@ -320,17 +327,54 @@ class _Handler(BaseHTTPRequestHandler):
 
     def reply(self, status: int, body: bytes = b"", content_type: str = "text/plain") -> None:
         self.send_response(status)
+        self._cors()
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
 
+    def _cors(self) -> None:
+        """Browsers (Faro, the Faro OTLP transport) post cross-origin; echo the origin, local testing only."""
+        origin = self.headers.get("Origin") if self.headers else None
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
+
 class OtlpHttpHandler(_Handler):
-    """POST /v1/{traces,metrics,logs} with protobuf or JSON bodies, gzip accepted; the Langfuse stand-in."""
+    """POST /v1/{traces,metrics,logs} with protobuf or JSON bodies, gzip accepted; the Langfuse stand-in;
+    POST /collect for Grafana Faro batches (browser RUM)."""
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "Content-Type, Content-Encoding, Idempotency-Key, Traceparent, X-API-Key, X-Faro-Session-Id, "
+                         "X-Scope-OrgID")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _faro_post(self, path: str) -> None:
+        try:
+            body = read_body(self)
+            data = json.loads(body or b"{}")
+        except (OSError, ValueError, EOFError, zlib.error):
+            self.store.reject("faro", path, "unreadable body")
+            return self.reply(400, b"unreadable body")
+        if not isinstance(data, dict) or not isinstance(data.get("meta"), dict):
+            self.store.reject("faro", path, "not a Faro payload (no meta)")
+            return self.reply(400, b"not a Faro payload")
+        self.store.add_faro(data, body, list(self.headers.keys()), bool(self.headers.get("X-API-Key")),
+                            self.headers.get("Origin", ""))
+        self.reply(202, b"ok")
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path.rstrip("/")
+        if path == "/collect" or path.startswith("/collect/"):
+            return self._faro_post(path)
         sink = "langfuse" if path.startswith("/api/public") else "otlp-http"
         try:
             body = read_body(self)

@@ -25,7 +25,7 @@ metrics in the Prometheus format on `/metrics`; and sends profiles over the Pyro
 | Dynatrace | `Authorization: Api-Token <token>` | **http/protobuf only; delta temporality only** | — | vendor agent (out of scope) | [notes](#dynatrace) |
 | New Relic | header `api-key: <license key>` | OTLP over gRPC or HTTP at `otlp.nr-data.net` (US) or `otlp.eu01.nr-data.net` (EU); **delta** temporality | — | vendor agent (out of scope) | [notes](#new-relic) |
 | AWS | SigV4, signed by the collector's auth extension | OTLP to X-Ray and CloudWatch through the collector | — | — | [notes](#aws) |
-| Langfuse (AI traces, prompts, scores) | Basic auth from the project's public and secret keys, plus `x-langfuse-ingestion-version: 4` | OTLP over HTTP at `<base>/api/public/otel`, traces only; no gRPC | the `langfuse.*` trace-context and observation keys, on the Langfuse path only | — | [langfuse.md](langfuse.md) |
+| Langfuse (AI traces, prompts, scores) | Basic auth from the project's public and secret keys, plus `x-langfuse-ingestion-version: 4` | OTLP over HTTP at `<base>/api/public/otel`, traces only; no gRPC | the `langfuse.*` trace-context and observation keys, on the Langfuse path only (the LF column of [data-model.md](../data-model.md#ai)) | — | [langfuse.md](langfuse.md) |
 
 **Verify each backend's current ingest docs at run time.** Endpoints, accepted protocols, auth
 styles, temporality, attribute limits and profile formats change; the rows above are examples
@@ -49,7 +49,9 @@ of what to look for, not values to copy.
    ([acceptance.md](../acceptance.md)).
 7. **AI traces go to Langfuse as well,** never instead of the ops backend: the same traces, the
    AI part with content where the policy allows it, from the app or the collector
-   ([signals/genai.md](../signals/genai.md)).
+   ([signals/genai.md](../signals/genai.md)). Each AI attribute has a class per path, Ops and LF
+   ([data-model.md](../data-model.md#ai)): the ops backend gets the Ops rows of model calls,
+   agents, tools, MCP and A2A calls, and never content, cost or `langfuse.*` keys.
 
 ## Dynatrace
 

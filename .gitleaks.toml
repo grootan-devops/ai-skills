@@ -19,3 +19,11 @@ paths = [
   '''platform-builder/SKILL\.md$''',
   '''platform-builder/core/scripts/checks_common\.py$''',
 ]
+
+[[allowlists]]
+description = "Fake credentials the observability tests plant so the audit and receiver must flag them"
+targetRules = ["generic-api-key", "jwt"]
+paths = [
+  '''observability-builder/scripts/tests/test_audit\.py$''',
+  '''observability-builder/scripts/tests/test_conformance\.py$''',
+]

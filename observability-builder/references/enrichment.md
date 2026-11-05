@@ -9,10 +9,10 @@ attributes each kind of function gets.
 
 | What | Where | Examples |
 | --- | --- | --- |
-| Per-process identity | **resource**: the standard's eight attributes, plus `k8s.cluster.name` where several clusters send to one backend ([data model](data-model.md#resource)); nothing else is added there | service name, namespace, version and environment; the pod's namespace, name, UID and node; the cluster's name |
-| Per-request context | attributes on **each service's entry span** and its access log only; an allow-listed subset travels as **baggage**, so the next service can set it on its own entry span | user, tenant, session, client app and version, locale, experiment variant |
+| Per-process identity | **resource**: the rows of the [data model](data-model.md#resource) only: the service and deployment rows (M), the platform's rows (C) and the SDK, runtime and OS rows (R); nothing else is added there | service name, namespace, version and environment; on Kubernetes the pod's namespace, name and node and the cluster's name; on ECS, Lambda, Cloud Run, a VM or plain Docker the `cloud.*`, `aws.ecs.*`, `faas.*`, `gcp.cloud_run.job.*`, `host.name` or `container.id` rows; SDK language and version, runtime name and version, OS type |
+| Per-request context | attributes on **each service's entry span** and its access log, as classified in [request and identity context](#request-and-identity-context); an allow-listed subset travels as **baggage**, so the next service can set it on its own entry span | user, tenant, session, client app and version, locale, experiment variant |
 | Per-operation facts | attributes on **that operation's span** | order ID, cart size, payment method |
-| AI feature context | stamped by the module on **every span of an AI feature**, for Langfuse; on the ops path only AI spans keep the user, team and conversation, as `user.id`, `team.id` and `gen_ai.conversation.id`; never baggage ([genai](signals/genai.md#trace-context)) | feature, user, conversation, team, release, tags |
+| AI feature context | stamped by the module on **every span of an AI feature**, for Langfuse; on the ops path only AI spans keep the conversation, as `gen_ai.conversation.id`, and every span loses the stamps; never baggage ([genai](signals/genai.md#trace-context)) | feature, user, conversation, team, release, tags |
 | Notable moments | **event log records** with `eventName`, correlated to the span | retry, payment declined, cache miss |
 | Aggregates | **metrics** with short, bounded labels only, never IDs; the ops metrics by default, business metrics when the team adds them | plan, payment method, outcome |
 
@@ -20,6 +20,28 @@ Request context stays off child spans because backends join them to the entry sp
 ([resource vs request attributes](data-model.md#resource-vs-request-attributes)). Notable moments
 are log records rather than span events because OpenTelemetry is deprecating span events; the
 record keeps its trace and span IDs, so it still shows up with its span.
+
+## Request and identity context
+
+Set by trusted auth and tenant middleware after authentication, never from raw client headers,
+on the entry span only ([data model](data-model.md#request-and-identity-context)).
+
+- **Core rows, always checked:** `correlation.id` (M on the entry span and every log record),
+  `http.route` (M for HTTP), `user.id` (C, authenticated request), `tenant.id` (C, multi-tenant
+  request), `session.id` (C, session-based request), `client.address` (C, HTTP and WebSocket),
+  `user_agent.original` and `app.client.name` / `app.client.version` (R). An anonymous request has
+  no `user.id`; nothing is fabricated.
+- **Reference catalogue, only when the code has the value:** `user.roles`, `app.user.type`,
+  `app.tenant.tier`, `app.subscription.plan`, `app.organization.id`, `app.account.id`,
+  `app.customer.id` (only when the request is scoped by it and it differs from `tenant.id`) and
+  `app.auth.method`, `app.auth.provider`, `app.auth.result` (on an authentication operation). The
+  audit adds such a row only when the service's auth, session or tenant code exposes the value,
+  and the e2e checks don't require them. Display names (`tenant.name`, an organisation's name)
+  are avoided: prefer ids.
+- **Not used:** `request.id`; `correlation.id` covers it.
+- **Prohibited (P)** on child spans, in the resource, as metric labels and as profile labels.
+  Bounded enums (`app.user.type`, `app.tenant.tier`, `app.subscription.plan`,
+  `app.client.name`) may be metric labels after a cardinality review; ids never.
 
 ## Naming and safety
 
@@ -31,10 +53,13 @@ record keeps its trace and span IDs, so it still shows up with its span.
   future semantic conventions.
 - **Standard-defined names:** `tenant.id` and `correlation.id` belong to this standard and are used
   without a namespace in every service, so the same key works across services, browsers and logs.
-- **Values as they are:** IDs and other values are recorded unchanged and respect the SDK's
-  attribute length limit. Secrets are never captured ([safe capture](safe-capture.md)).
+- **IDs as they are, personal data masked:** internal IDs and other values are recorded
+  unchanged and respect the SDK's attribute length limit. Personal data (emails, phone numbers,
+  names, addresses) is written only through the shared masking helper, and secrets are never
+  captured ([safe capture](safe-capture.md#pii-masking)).
 - **IDs stay out of aggregates:** IDs never become metric labels or profile labels, and they
-  are not in the default baggage allow-list. The baggage allow-list is defined in code.
+  are not in the default baggage allow-list. The baggage allow-list is defined in code, at most
+  8 keys and 512 bytes, never secrets, authorisation values or the AI trace context.
 - **Metric names** are Prometheus names in the project's namespace (`app_` by default) with
   short label names, made with the stack's Prometheus client library like the ops metrics
   ([metrics](signals/metrics.md)). In the catalogue, `name{a,b}` lists a metric's bounded labels.
@@ -64,12 +89,12 @@ metrics, added only when the team asks for them, list their bounded labels in br
 
 | Function | Span attributes | Events (log records) | Companion metric, on request (bounded labels) |
 | --- | --- | --- | --- |
-| Login or authentication | `user.id`, `user.roles`, `app.auth.method` (password, oauth, sso), `app.auth.result`, `app.auth.mfa` | `auth.failed` (reason) | `app_auth_attempts_total{method,result}` |
+| Login or authentication | `user.id`, `user.roles`, `app.auth.method` (password, oauth, sso), `app.auth.provider`, `app.auth.result`, `app.auth.mfa` | `audit.<action>` audit records ([audit log](signals/app-logs.md#audit-log)), `auth.failed` (reason) | the ops metric `auth_attempts_total{method,result}`, part of the conditional set in a service that authenticates ([metrics](signals/metrics.md#conditional-metrics)) |
 | Checkout or order | `app.order.id`, `app.cart.items_count`, `app.order.total`, `app.currency`, `app.payment.method`, `app.coupon.applied` | `payment.declined` (provider code) | `app_orders_placed_total{payment_method}`, an order value histogram |
 | Payment provider call | `app.payment.provider`, `app.payment.status`, `app.idempotency_key`, `app.retry.attempt` | `retry.scheduled` | `app_payment_duration_seconds{provider,status}` |
 | Search | `app.search.query_length`, `app.search.filters_count`, `app.search.results_count`, `app.search.page` | `search.zero_results` | a results-count histogram |
 | File upload | `file.size`, `file.extension`, `app.upload.content_type`, `app.upload.storage`, `app.scan.result` | `upload.rejected` | `app_upload_bytes_total{storage}` |
-| Multi-tenant request | `tenant.id`, `app.tenant.plan`, `app.tenant.region` | — | `app_requests_total{plan}` (never `tenant.id`) |
+| Multi-tenant request | `tenant.id`, `app.tenant.tier` or `app.subscription.plan`, `app.tenant.region` | — | `app_requests_total{tier}` (never `tenant.id`) |
 | Feature flag evaluation | `feature_flag.key`, `feature_flag.result.variant`, `feature_flag.provider.name` | `feature_flag.evaluation` | — |
 | A/B experiment | `app.experiment.id`, `app.experiment.variant` | `experiment.exposed` | conversions by variant |
 | Background job or consumer | `app.job.name`, `app.job.trigger`, `app.job.items.processed`, `app.job.items.failed`, plus `messaging.*` for a consumer | `job.retry_scheduled`, `job.dead_lettered` | the ops metrics `job_runs_total{job_name,outcome}` and `job_duration_seconds{job_name}` ([batch](workloads/batch.md)) |

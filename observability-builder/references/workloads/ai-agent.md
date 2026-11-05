@@ -24,6 +24,15 @@ function, the observations, the trace context, the content mode, the levels and 
 - **Ids with every result.** Each AI response carries a message id; the service stores message
   id → trace id, observation id, feature and whether the trace was sampled, for feedback,
   approvals and support.
+- **Attribute classes per path.** Each step's attributes have a class on the ops path and on the
+  Langfuse path, in [data-model.md](../data-model.md#ai): the
+  [feature context](../data-model.md#ai-feature-context-set-by-genaifeature-from-what-the-apps-code-has),
+  [model calls](../data-model.md#model-call-chat-completion-embeddings-kind-client-gen_aioperationname-gen_airequestmodel),
+  [agent, tool, retrieval, memory, workflow, guardrail and evaluation steps](../data-model.md#agent-tool-retrieval-memory-workflow-guardrail-evaluation),
+  [MCP](../data-model.md#mcp-client-and-server-context-via-params_meta),
+  [A2A](../data-model.md#a2a-agent-to-agent-protocol) and the
+  [metrics, logs and profiling](../data-model.md#ai-metrics-logs-and-profiling). The rules per
+  class are in [signals/genai.md](../signals/genai.md#attribute-classes).
 
 ## By function
 
@@ -34,7 +43,7 @@ function, the observations, the trace context, the content mode, the levels and 
 | Extraction or OCR | `invoke_workflow` → OCR (ops-only unless a vision model) → `chat` with `gen_ai.output.type=json` → `evaluate schema` | feature, requester, document type as metadata | off; record the extracted fields and confidences instead of the text; media as a reference | WARNING when the output had to be repaired; a `schema_valid` score with the id `{trace id}:schema_valid`; corrections through an annotation queue | the job metrics; profile rasterisation |
 | Classification or routing | one `chat`; the label as bounded metadata | feature, user | input off | WARNING for a label outside the set (`other`); a categorical score | on request `app_genai_classifications_total{feature,label}` |
 | Agent with tools | `invoke_agent` → `chat` per turn → `execute_tool {tool}`, whose own calls stay ops-only; a guardrail before risky tools | feature, user, conversation | tool arguments and results are content | a failed tool is ERROR, and the agent WARNING when it recovers; the step limit reached is WARNING; a task-success score | on request: tool-call and agent-step counters |
-| Several agents | a nested `invoke_agent` per agent, one span per sub-agent call even when it's offered to the model as a tool; across services, W3C context and each service stamps its own feature context | the same conversation id everywhere | as above | per agent | the collector gateway when Langfuse must show the upstream services too ([collector](../collector/README.md#genai-routing)) |
+| Several agents | a nested `invoke_agent` per agent, one span per sub-agent call even when it's offered to the model as a tool; a remote agent over A2A is a `CLIENT` `invoke_agent` span ([a2a.md](a2a.md)); across services, W3C context and each service stamps its own feature context | the same conversation id everywhere | as above | per agent | the collector gateway when Langfuse must show the upstream services too ([collector](../collector/README.md#genai-routing)) |
 | Batch AI job | a `job {name}` root (ops) → one AI trace per item, linked to the run; provider batch results as generations with their usage | the run id as the session, job metadata, a `batch` tag | off; `sample_ratio` for spot checks | a failed item is ERROR and the run `partial`; offline evaluation with Langfuse datasets | the job metrics and job log |
 | Embedding and indexing | one `embeddings` per batch call; vectors never captured | index name and version as metadata | off | ERROR on a failed batch | scope `ai_only`, or Langfuse off; embedding tokens; profile chunking |
 | Guardrail | `guardrail {name}` with the result (`pass`, `block`, `flag`) as metadata | inherited | the flagged text is content | a block is WARNING; a `guardrail.blocked` log event | on request a decision counter |
@@ -134,6 +143,10 @@ and [backends/langfuse.md](../backends/langfuse.md#experiments).
 - **Across services,** the W3C context carries the trace; each service declares its own
   feature context, so each one stamps its own spans, and the conversation id travels in the
   request body or a header the services agree on, never in baggage.
+- **Over A2A,** the caller's span is a `CLIENT` `invoke_agent {remote agent}` with the
+  `rpc.method`, and the remote agent's entry span is a `SERVER` `{method}` span in the same
+  trace. The A2A context id is the conversation on the remote side. Spans, status rules and the
+  `a2a_*` metrics are in [a2a.md](a2a.md).
 - **Langfuse sees what each service sends.** Upstream services without AI work don't send
   spans to Langfuse; to show them there too, the collector gateway keeps whole traces that
   contain an AI span ([collector](../collector/README.md#genai-routing)).
@@ -150,7 +163,7 @@ and [backends/langfuse.md](../backends/langfuse.md#experiments).
 
 Not written yet; say so instead of inferring: realtime and voice sessions, AI gateways
 (proxies in front of several providers) and self-hosted model servers. MCP servers and clients
-are in [mcp.md](mcp.md).
+are in [mcp.md](mcp.md); A2A agents and their callers in [a2a.md](a2a.md).
 
 ## Verification
 
@@ -165,6 +178,8 @@ stub and the Langfuse stand-in. For the functions on this page, also check:
   and its outbound calls absent from the Langfuse path;
 - a failed call and a 429 (the stub's `[[fail]]` and `[[ratelimit]]`): ERROR on the
   generation, the `outcome` label on the duration metric, one ERROR record;
+- a call to a remote agent over A2A: the caller's `invoke_agent` span and the remote agent's
+  `SERVER` span in one trace, and the `a2a_*` metrics ([a2a.md](a2a.md#verification));
 - feedback sent twice for one message: one score, sent by the server;
 - an approval: the event in trace A, the decision scores, trace C linked and tagged `resumed`;
 - an experiment over a two-item dataset: two traces with one root each, the experiment and item

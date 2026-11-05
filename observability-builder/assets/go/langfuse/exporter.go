@@ -11,10 +11,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
@@ -27,6 +30,9 @@ import (
 // TracesPath is Langfuse's OTLP traces path; Langfuse takes OTLP over HTTP only.
 const TracesPath = "/api/public/otel/v1/traces"
 
+// DefaultMaxRequestBytes caps one export request's body (before gzip) when Config.MaxRequestBytes is zero.
+const DefaultMaxRequestBytes = 3 << 20
+
 // Config is what the yml's genai.langfuse section gives the exporter and the client.
 type Config struct {
 	BaseURL   string        // the origin, e.g. https://cloud.langfuse.com
@@ -34,6 +40,9 @@ type Config struct {
 	SecretKey string        // from a mounted file, never the environment
 	Timeout   time.Duration // per export or API request; 10s when zero
 	Scope     string        // ai_context (default) or ai_only
+	// MaxRequestBytes caps one request's body before gzip (DefaultMaxRequestBytes when zero): a batch is split to fit,
+	// and a span that alone exceeds it is dropped with a counted, rate-limited warning.
+	MaxRequestBytes int
 	// HTTPClient, when set, is the REST client's (the module's traced client, so a prompt fetch inside a request
 	// gets its CLIENT span); the exporter always uses its own.
 	HTTPClient *http.Client
@@ -71,10 +80,15 @@ func NewExporter(ctx context.Context, cfg Config, guard Guard) (*Exporter, error
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	maxBytes := cfg.MaxRequestBytes
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxRequestBytes
+	}
 	next, err := otlptrace.New(ctx, &transport{
-		url:  strings.TrimRight(cfg.BaseURL, "/") + TracesPath,
-		auth: "Basic " + basic(cfg),
-		http: &http.Client{Timeout: timeout, Transport: httpTransport(cfg.TLS)},
+		url:      strings.TrimRight(cfg.BaseURL, "/") + TracesPath,
+		auth:     "Basic " + basic(cfg),
+		http:     &http.Client{Timeout: timeout, Transport: httpTransport(cfg.TLS)},
+		maxBytes: maxBytes,
 	})
 	if err != nil {
 		return nil, err
@@ -82,12 +96,78 @@ func NewExporter(ctx context.Context, cfg Config, guard Guard) (*Exporter, error
 	return &Exporter{next: next, scope: cfg.Scope, guard: guard}, nil
 }
 
-// transport posts each batch as gzip OTLP/protobuf. A batch that meets a 429, 502, 503 or 504 or a network error is
+// transport posts each batch as gzip OTLP/protobuf, split into requests of at most maxBytes before gzip. A request that meets a 429, 502, 503 or 504 or a network error is
 // tried again, at most three times in all, after the server's Retry-After (at most 5 s) or a short backoff, within
 // the batch processor's export timeout; other failures drop it. Its errors carry the status code, never the URL.
 type transport struct {
 	url, auth string
 	http      *http.Client
+	maxBytes  int
+	dropped   oversize
+}
+
+// oversize counts spans too large for one request and warns at most once a minute, with the count since the last.
+type oversize struct {
+	mu      sync.Mutex
+	count   int
+	warned  time.Time
+	pending int
+}
+
+func (o *oversize) add(n int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.count += n
+	o.pending += n
+	if time.Since(o.warned) < time.Minute {
+		return
+	}
+	otel.Handle(fmt.Errorf("langfuse traces: dropped %d span(s) larger than the request size cap (%d in all)", o.pending, o.count))
+	o.warned, o.pending = time.Now(), 0
+}
+
+// chunks splits the request into parts whose serialized size stays within limit. Each span's size is computed once;
+// a part repeats the resource and scope of the spans it carries. Spans that can't fit alone are left out and counted.
+func chunks(spans []*tracepb.ResourceSpans, limit int) (parts [][]*tracepb.ResourceSpans, dropped int) {
+	var part []*tracepb.ResourceSpans
+	size := 0
+	flush := func() {
+		if len(part) > 0 {
+			parts = append(parts, part)
+		}
+		part, size = nil, 0
+	}
+	for _, rs := range spans {
+		resourceSize := proto.Size(&tracepb.ResourceSpans{Resource: rs.Resource, SchemaUrl: rs.SchemaUrl}) + 6
+		for _, ss := range rs.ScopeSpans {
+			scopeSize := proto.Size(&tracepb.ScopeSpans{Scope: ss.Scope, SchemaUrl: ss.SchemaUrl}) + 6
+			var current *tracepb.ScopeSpans // ss's spans in the current part
+			for _, span := range ss.Spans {
+				spanSize := proto.Size(span) + 6 // the field tag and length prefix
+				if resourceSize+scopeSize+spanSize > limit {
+					dropped++
+					continue
+				}
+				extra := spanSize
+				if current == nil {
+					extra += resourceSize + scopeSize
+				}
+				if size+extra > limit {
+					flush()
+					current, extra = nil, spanSize+resourceSize+scopeSize
+				}
+				if current == nil {
+					current = &tracepb.ScopeSpans{Scope: ss.Scope, SchemaUrl: ss.SchemaUrl}
+					part = append(part, &tracepb.ResourceSpans{Resource: rs.Resource, SchemaUrl: rs.SchemaUrl,
+						ScopeSpans: []*tracepb.ScopeSpans{current}})
+				}
+				current.Spans = append(current.Spans, span)
+				size += extra
+			}
+		}
+	}
+	flush()
+	return parts, dropped
 }
 
 func (t *transport) Start(context.Context) error { return nil }
@@ -98,6 +178,24 @@ func (t *transport) Stop(context.Context) error {
 }
 
 func (t *transport) UploadTraces(ctx context.Context, spans []*tracepb.ResourceSpans) error {
+	limit := t.maxBytes
+	if limit <= 0 {
+		limit = DefaultMaxRequestBytes
+	}
+	parts, dropped := chunks(spans, limit)
+	if dropped > 0 {
+		t.dropped.add(dropped)
+	}
+	var errs []error
+	for _, part := range parts {
+		if err := t.upload(ctx, part); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (t *transport) upload(ctx context.Context, spans []*tracepb.ResourceSpans) error {
 	raw, err := proto.Marshal(&coltracepb.ExportTraceServiceRequest{ResourceSpans: spans})
 	if err != nil {
 		return err
@@ -197,9 +295,6 @@ func (e *Exporter) guarded(span sdktrace.ReadOnlySpan) (out sdktrace.ReadOnlySpa
 			out, ok = nil, false
 		}
 	}()
-	if e.guard == nil && e.translate == nil {
-		return span, true
-	}
 	var drop []attribute.Key
 	var set []attribute.KeyValue
 	allowed := true
@@ -209,6 +304,13 @@ func (e *Exporter) guarded(span sdktrace.ReadOnlySpan) (out sdktrace.ReadOnlySpa
 	if e.translate != nil {
 		set = append(set, e.translate(span)...)
 	}
+	// Request context and HTTP detail never reach Langfuse, whatever the guard or the translation says.
+	for _, kv := range span.Attributes() {
+		if IsRequestContextKey(kv.Key) {
+			drop = append(drop, kv.Key)
+		}
+	}
+	set = slices.DeleteFunc(set, func(kv attribute.KeyValue) bool { return IsRequestContextKey(kv.Key) })
 	events := span.Events()
 	if !allowed {
 		events = events[:0:0]

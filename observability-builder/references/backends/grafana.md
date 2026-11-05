@@ -15,6 +15,7 @@ protocol, and the collector or Prometheus delivers each signal to its component
 | Metrics | Mimir | OTLP over HTTP at `/otlp/v1/metrics`, or remote write | as for Prometheus |
 | Logs | Loki | OTLP over HTTP at `/otlp`, through the collector | `otelcol.exporter.otlphttp` |
 | Profiles | Pyroscope | Pyroscope protocol, JFR included | `pyroscope.write` |
+| Browser RUM | Loki (records) and Tempo (spans) | Faro batches to Alloy's `faro.receiver` | `loki.write`, `otelcol.exporter.otlp` |
 
 ## Traces
 
@@ -62,6 +63,68 @@ protocol, and the collector or Prometheus delivers each signal to its component
   span labels that link Tempo spans to profiles ([signals/profiling.md](../signals/profiling.md)).
 - Through the collector: `pyroscope.receive_http` and `pyroscope.ebpf` forward to
   `pyroscope.write`.
+
+## Browser RUM
+
+Faro records arrive in Loki as logfmt lines labelled `app_name`, `app_environment` and `kind`
+(`exception`, `log`, `event`, `measurement`), and browser spans arrive in Tempo
+([signals/rum.md](../signals/rum.md)). Grafana OSS has no frontend app, so the skill ships its own
+dashboard, [`assets/grafana/rum-dashboard.json`](../../assets/grafana/rum-dashboard.json), built
+from the fields Faro really sends (not a copy of a public dashboard). It has 68 panels in eight
+rows, and every one of its 97 queries was checked to return data from a live Faro run (Faro
+2.13, Alloy 1.21, Loki 3.7, Tempo 3.1, Grafana 13.2):
+
+| Row | What it shows |
+| --- | --- |
+| Overview | sessions, page loads, views, exceptions, exceptions per 100 page loads, signed-in users, activity over time, records by kind |
+| Core Web Vitals | LCP, INP, CLS, FCP and TTFB p75 with good and poor thresholds, trends, ratings per vital, vitals per view |
+| Web vital attribution | LCP phases (TTFB, resource load delay and duration, render delay), LCP elements and resources, INP phases and long-animation-frame script, style and layout time, slowest interactions and their scripts, TTFB phases, FCP after first byte, layout-shift sources |
+| Page loads and resources | page-load and network timings, resources by type, size and cache, slowest and render-blocking resources, failed resources |
+| Errors and console | exceptions by type, browser and release, top messages, console logs by level, the de-minified stacks |
+| User journeys and frustration | user actions and their duration, views and transitions, soft-navigation time, rage, dead and error clicks by view and element, sessions by browser and device, session lifecycle, releases |
+| API calls from the browser | fetch duration per API host, calls by status, failures, the slowest calls with their trace ids, the browser → API traces from Tempo |
+| CSP violations and custom signals | violations by directive and blocked source, the app's own events and measurements |
+
+Filters: app, environment, view (regex on the route template) and browser (regex). Import it
+with the Loki and Tempo data sources selected; nothing in it names an app or an environment.
+
+| View | Query |
+| --- | --- |
+| LCP p75 per environment | `quantile_over_time(0.75, {app_name="shop", kind="measurement"} \| logfmt \| type="web-vitals" \| lcp!="" \| unwrap lcp [5m]) by (app_environment)` (also `inp`, `cls`, `fcp`, `ttfb`) |
+| Vital ratings | `sum by (context_rating) (count_over_time({app_name="shop", kind="measurement"} \| logfmt \| type="web-vitals" \| inp!="" [5m]))` |
+| Exceptions | `sum by (app_environment) (count_over_time({app_name="shop", kind="exception"} [5m]))`, and the lines for the de-minified stacks |
+| Frustration | `sum by (event_name) (count_over_time({app_name="shop", kind="event"} \| logfmt \| event_name=~"faro.frustration.*" [5m]))` |
+| Slow views | `quantile_over_time(0.75, … \| unwrap lcp [5m]) by (view_name)` — `view_name` is the route template, so it is bounded |
+| One session | `{app_name="shop"} \| logfmt \| session_id="<id>"` |
+| Browser → API traces | TraceQL `{resource.service.name="shop" && kind=client} >> {kind=server}`; or the `traceID` on a `faro.tracing.fetch` line |
+
+- **Recording rules.** For dashboards and alerts over long ranges, turn the vital and error
+  queries into Loki recording rules that write to Prometheus or Mimir. The labels are the
+  `by (...)` labels above, never `page_url`, `session_id` or `user_id`.
+- **Transport `otlp`.** Records arrive as OTLP logs: the labels come from the resource
+  (`service_name`, `deployment_environment_name`), and fields such as `event_name`,
+  `measurement_name` and `measurement_type` are structured metadata. Use them as label filters
+  instead of `| logfmt`.
+- **Retention.** RUM is high-volume. Give the RUM tenant or streams their own retention and
+  query limits.
+
+## AI telemetry
+
+Grafana is an ops backend, so it gets the Ops column of the AI rows
+([data-model.md](../data-model.md#ai)):
+
+- **Tempo** gets the AI spans after the ops guard: model calls, agents, tools, retrieval, MCP and
+  A2A calls with their operational attributes and `gen_ai.conversation.id`. Never content,
+  `gen_ai.usage.cost` or `langfuse.*` keys ([genai](../signals/genai.md#the-ops-allow-list)).
+- **Prometheus or Mimir** gets the AI metrics by their Prometheus names:
+  `gen_ai_client_*`, `mcp_server_*` and `mcp_client_*`, `a2a_server_*` and `a2a_client_*`
+  ([data-model.md](../data-model.md#ai-metrics-logs-and-profiling)). Cost is never a metric.
+- **Loki** gets AI log events with ids and bounded values only.
+- **Pyroscope** gets a `controller` label only for heavy AI work in the process, such as prompt
+  assembly or tokenisation; model, MCP and A2A calls get none.
+
+Content, cost and the trace context per user live in Langfuse
+([langfuse.md](langfuse.md)).
 
 ## Authentication
 

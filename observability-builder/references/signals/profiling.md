@@ -12,25 +12,29 @@ Pyroscope protocol or as OTLP profiles, through the collector by default.
 2. **Through the collector by default.** The profiler sends to the collector's profile receiver,
    which forwards to each configured backend with that backend's auth. In direct mode,
    `profiling.exporter` holds the destination and its headers ([config.md](../config.md)).
-3. **Same identity as the other signals.** The application name is `service.name`. The other
-   resource attributes are the static labels, in Pyroscope syntax with dots replaced by
-   underscores: `service_namespace`, `service_version`, `deployment_environment_name`,
-   `k8s_namespace_name`, `k8s_pod_name`, `k8s_pod_uid` and `k8s_node_name`, plus
-   `k8s_cluster_name` when the resource has `k8s.cluster.name`; empty values are left out
-   ([data-model.md](../data-model.md#resource)). Labels a profiler adds of its own stay
+3. **Same identity as the other signals.** The application name is `service.name`. The M and C
+   resource rows become static labels, set once at profiler start, in Pyroscope syntax with dots
+   replaced by underscores: `service_namespace`, `service_version` and
+   `deployment_environment_name` always (M), and the platform's rows when the resource has them
+   (C): `k8s_namespace_name`, `k8s_pod_name`, `k8s_node_name` and `k8s_cluster_name` on
+   Kubernetes; `cloud_*`, `aws_ecs_*`, `faas_*` and `gcp_cloud_run_job_*` on ECS, Fargate,
+   Lambda and Cloud Run; `host_name` and `container_id` on a VM or plain Docker. Empty values
+   are left out. The R and O resource rows (`telemetry_*`, `process_runtime_*`, `os_type`) are
+   never set as labels by the module (P): identity is enough
+   ([data-model.md](../data-model.md#profile-labels)). Labels a profiler adds of its own stay
    as they are: the SDK is never patched to remove them ([sdk-notes.md](../sdk-notes.md)).
 4. **Sample rate** comes from `profiling.sample_rate`, in samples per second, translated to each
    profiler's own setting (a rate or an interval).
-5. **Profile types where the runtime supports them.** CPU is available everywhere; the others
-   depend on the runtime and its profiler. Typical sets, to check against the profiler's docs at
-   run time:
+5. **Profile types where the runtime supports them,** by class
+   ([data-model.md](../data-model.md#profile-types)); check the profiler's docs at run time:
 
-   | Runtime | Typical profile types |
-   | --- | --- |
-   | Go | CPU, allocated and in-use memory, goroutines, mutex and block contention |
-   | Java | CPU or wall clock, allocations, lock contention |
-   | Python | CPU |
-   | Node.js | CPU (wall clock), heap |
+   | Profile type | Class | Runtimes |
+   | --- | --- | --- |
+   | CPU | M, whenever profiling is on | all |
+   | Allocation and heap (allocated objects and space, in use) | R, where the SDK supports it | Go, Java, .NET, Node.js (heap); Python with `pyroscope-io` 1.3 or later (`mem_enabled`), off by default and on only after the overhead test |
+   | Lock, mutex and block contention | O | Go, Java, .NET |
+   | Goroutines or threads | O | Go |
+   | Wall clock | O, useful for I/O-bound services | Node.js, Java |
 
 6. **Span profiles.** Samples carry the span they ran under, so a trace opens its profile
    ([span profiles](#span-profiles)), on a backend that indexes the ids apart from its labels.
@@ -39,14 +43,25 @@ Pyroscope protocol or as OTLP profiles, through the collector by default.
    the request, so concurrent requests would swap span ids. There the module adds the span ids
    to the labels of its heavy synchronous sections instead, which no other request can enter.
 7. **`controller` labels on heavy code only.** Code that is slow or heavy on CPU, memory or
-   locks (file parsing, scans and uploads, PII redaction, prompt assembly and tokenisation, LLM
-   stream parsing, batch jobs) runs inside the profiler's labels API with `controller` set to a
-   bounded function name, plus a bounded `operation` label where it helps. What a label covers depends on the runtime
+   locks runs inside the profiler's labels API with `controller` set to a bounded name, plus a
+   bounded `operation` label where it helps (O). What a label covers depends on the runtime
    ([below](#labels-per-runtime)). Other functions get spans only
-   ([functions.md](../functions.md#profiling-labels)).
-8. **Bounded labels only.** Never trace, session, correlation, user or request ids, or secrets,
-   as labels. `span_id` and `trace_id` are the one exception, only for span profiles (rule 6), on
-   a backend that indexes them apart from its labels.
+   ([functions.md](../functions.md#profiling-labels)). Which operations get one
+   ([data model](../data-model.md#which-operations-get-a-controller-label)):
+
+   | Operation | `controller` |
+   | --- | --- |
+   | Application function heavy on CPU, memory or locks (parsing, conversion, serialisation, compression, crypto, image or report generation, PII redaction, tokenisation, big loops) | C: `{Class}.{method}` |
+   | GenAI prompt assembly, stream parsing | C, when heavy |
+   | Job run | R: `job {name}` |
+   | HTTP server entry | O: the route template, only when the service is CPU-bound per route |
+   | HTTP, database, cache, messaging, RPC, MCP and A2A client calls; I/O-bound functions | P: their samples are idle time, and spans already time them |
+   | Start-up, helpers, middleware | P: out of scope |
+
+8. **Bounded labels only.** Never user, tenant, session, request or correlation ids, routes
+   with ids, free text or secrets as labels (P), and `trace_id` or `span_id` are never set by
+   business code. Span ids reach samples only through span profiles (rule 6), on a backend that
+   indexes them apart from its labels.
 9. **One profiler per process.** A process is CPU-profiled either by its SDK or by the
    collector's eBPF profiler, never both ([collector](../collector/README.md)).
 
@@ -96,15 +111,20 @@ Details per backend: [backends](../backends/README.md).
 
 ## Fields
 
-Profile labels, static and dynamic, are defined in [data-model.md](../data-model.md):
+Profile labels, static and dynamic, are defined in
+[data-model.md](../data-model.md#profile-labels):
 
-| Label | Source |
-| --- | --- |
-| application name | `service.name` |
-| `service_namespace`, `service_version`, `deployment_environment_name`, `k8s_namespace_name`, `k8s_pod_name`, `k8s_pod_uid`, `k8s_node_name`, and `k8s_cluster_name` when set | the resource, set once as static labels when the profiler starts |
-| `controller`, `operation` | the labels wrapper on heavy code |
-| `span_id` | a span-profile integration only |
-| labels the profiler adds itself, e.g. `process.runtime.name`, `process.runtime.version` and `otel.scope.*` from the Node.js SDK | the SDK; they can't be dropped without patching it ([sdk-notes.md](../sdk-notes.md)) |
+| Label | Kind | Class | Source |
+| --- | --- | --- | --- |
+| application name | static | M | `service.name` |
+| `service_namespace`, `service_version`, `deployment_environment_name` | static | M | the resource, set once when the profiler starts |
+| platform rows: `k8s_*`, `cloud_*`, `aws_ecs_*`, `faas_*`, `gcp_cloud_run_job_*`, `host_name`, `container_id` | static | C, when the resource has them | the resource, set once when the profiler starts |
+| R and O resource rows: `telemetry_*`, `process_runtime_*`, `os_type` | static | P | never set by the module |
+| `controller` | dynamic | C, code wrapped as a profiled hot path | the labels wrapper on heavy code |
+| `operation` | dynamic | O, a bounded name inside a controller | the labels wrapper |
+| `span_id` | correlation | C, runtime with a span-profile integration | the integration only ([span profiles](#span-profiles)) |
+| ids, routes with ids, free text | — | P | — |
+| labels the profiler adds itself, e.g. `process.runtime.name`, `process.runtime.version` and `otel.scope.*` from the Node.js SDK | static | — | the SDK; they can't be dropped without patching it ([sdk-notes.md](../sdk-notes.md)) |
 
 ## Configuration
 

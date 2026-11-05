@@ -16,6 +16,7 @@ Importable modules for `import.git`, pinned to a library tag, will be published 
 | Prometheus `/metrics` | a named metrics port, for example `http-metrics` on 9464 | `prometheus.scrape` through a ServiceMonitor, PodMonitor or pod discovery, unless the cluster's Prometheus scrapes it |
 | Logs on stdout | one `json` or `plain` record per line; stack traces may span lines | pod log tailing and parsing |
 | Profiles | Pyroscope protocol to the profiles port the yml names (4040 by convention) | `pyroscope.receive_http` |
+| Browser RUM (Grafana Faro) | Faro batches from browsers, or through the app's same-origin proxy ([rum.md](../signals/rum.md#transports)) | `faro.receiver` on 12347 |
 | Identity | `resource.opentelemetry.io/*` pod annotations and downward-API env, plus a cluster-name env where several clusters share a backend ([charts.md](../charts.md)) | `k8sattributes` with OpenTelemetry annotations |
 
 Backend credentials live in the collector, not in the application — direct mode aside
@@ -34,6 +35,8 @@ memory_limiter ─► k8sattributes ─► transform ─► batch ─► exporte
 
 database engines       ─► scrape or receiver ─► transform (database identity) ─► batch ─► exporters
 
+browsers (Faro)        ─► faro.receiver ─► loki.write (logs)  +  batch ─► Tempo (traces)
+
 SDK profiles           ─► pyroscope.receive_http ─┐
 node CPU (eBPF)        ─► pyroscope.ebpf ─────────┴─► pyroscope.write, one per destination
 ```
@@ -44,8 +47,8 @@ node CPU (eBPF)        ─► pyroscope.ebpf ─────────┴─�
 | --- | --- | --- |
 | Receive | `otelcol.receiver.otlp` | gRPC on 4317 and HTTP on 4318, reachable inside the cluster only |
 | Limit memory | `otelcol.processor.memory_limiter` | the first processor; `limit_percentage` and `spike_limit_percentage` of the container's memory, so it triggers below the container limit; over the limit it refuses data, and senders retry or drop — applications never block |
-| Kubernetes identity | `otelcol.processor.k8sattributes` | `otel_annotations = true` in `extract`, so `resource.opentelemetry.io/*` annotations set `service.*`, `deployment.environment.name` and any extra attribute the chart annotates, such as a backend's label attributes (without it, a well-known label such as `app.kubernetes.io/instance` can win for `service.name`); extracts only `k8s.namespace.name`, `k8s.pod.name`, `k8s.pod.uid` and `k8s.node.name`; pods matched by `k8s.pod.uid`, then by the connection's IP. It can't provide `k8s.cluster.name`: where several clusters send to one backend, that comes from the app's env, set by the chart per cluster, and each cluster's collector adds it to what it collects itself (scraped metrics, file logs) with a `resource` processor (`action: upsert`) set from the same per-cluster value. |
-| Host and cloud identity | none | application telemetry carries only the standard's resource attributes, the eight plus `k8s.cluster.name` where it is used ([data-model.md](../data-model.md#resource)), so its pipelines run no `resourcedetection` |
+| Kubernetes identity | `otelcol.processor.k8sattributes` | `otel_annotations = true` in `extract`, so `resource.opentelemetry.io/*` annotations set `service.*`, `deployment.environment.name` and any extra attribute the chart annotates, such as a backend's label attributes (without it, a well-known label such as `app.kubernetes.io/instance` can win for `service.name`); extracts `k8s.namespace.name`, `k8s.pod.name` and `k8s.node.name`, plus the name of the workload that owns the pod (`k8s.deployment.name`, `k8s.statefulset.name`, `k8s.daemonset.name`, `k8s.cronjob.name` or `k8s.job.name`); never `k8s.pod.uid`. Pods are matched by `k8s.namespace.name` and `k8s.pod.name` together, which the app's resource carries from the downward API, then by the connection's IP. `k8s.replicaset.name` and `k8s.container.name` are optional extras for a team that wants them ([data-model.md](../data-model.md#resource)). It can't provide `k8s.cluster.name`: where several clusters send to one backend, that comes from the app's env, set by the chart per cluster, and each cluster's collector adds it to what it collects itself (scraped metrics, file logs) with a `resource` processor (`action: upsert`) set from the same per-cluster value. |
+| Host and cloud identity | none | in Kubernetes the app's resource already carries its platform rows ([data-model.md](../data-model.md#resource)), so the pipelines run no `resourcedetection`. Outside Kubernetes the SDK's platform detectors set them ([config.md](../config.md#resource-per-platform)) and the collector never overrides them. A collector there that collects telemetry itself (file logs, scrapes on a VM) gives it the same rows, for example `resourcedetection` with the same platform's detector and `override = false`, keeping only the platform's M and C rows; check the detector's output against the app's resource |
 | Normalise | `otelcol.processor.transform` | maps legacy names and native fields; never masks or redacts — safe capture happens in code ([safe-capture.md](../safe-capture.md)) |
 | Batch | `otelcol.processor.batch` | the last processor before the exporters |
 | Export | `otelcol.exporter.otlp` or `otelcol.exporter.otlphttp`, one per destination | auth through `otelcol.auth.headers`, `otelcol.auth.basic`, `otelcol.auth.bearer` or `otelcol.auth.sigv4`, or mTLS; secrets from mounted files or env; a bounded sending queue with retries; several destinations per signal allowed; `otelcol.processor.cumulativetodelta` only in a delta backend's branch |
@@ -67,14 +70,20 @@ otelcol.processor.memory_limiter "default" {
 otelcol.processor.k8sattributes "default" {
   extract {
     metadata = [
-      "k8s.namespace.name", "k8s.pod.name", "k8s.pod.uid", "k8s.node.name",
+      "k8s.namespace.name", "k8s.pod.name", "k8s.node.name",
+      "k8s.deployment.name", "k8s.statefulset.name", "k8s.daemonset.name",
+      "k8s.cronjob.name", "k8s.job.name",
     ]
     otel_annotations = true
   }
-  pod_association {
+  pod_association {             // both sources must match: namespace and pod name
     source {
       from = "resource_attribute"
-      name = "k8s.pod.uid"
+      name = "k8s.namespace.name"
+    }
+    source {
+      from = "resource_attribute"
+      name = "k8s.pod.name"
     }
   }
   pod_association {
@@ -227,6 +236,71 @@ same name.
   database views.
 - A database identity is never stamped onto application telemetry.
 
+### Browser RUM (`faro.receiver`)
+
+Tested with Alloy 1.21 and Faro 2.13 on all three transports. Replace the origins and the
+paths; the key is read from a mounted file.
+
+```alloy
+faro.receiver "rum" {
+  server {
+    listen_address           = "0.0.0.0"           // default 127.0.0.1 accepts nothing from other hosts
+    listen_port              = 12347
+    cors_allowed_origins     = ["https://app.example.com"]   // exact origins; never "*"
+    api_key                  = local.file.faro_key.content    // public in transport faro, secret behind a proxy
+    max_allowed_payload_size = "1MiB"
+
+    rate_limiting {
+      strategy   = "per_app"                     // one app can't use up another's budget
+      rate       = 50
+      burst_size = 100
+    }
+  }
+
+  sourcemaps {
+    download = false                             // no outbound requests driven by browser input
+
+    location {
+      path                 = "/var/lib/sourcemaps/{{ .Release }}"
+      minified_path_prefix = "https://app.example.com/"
+    }
+  }
+
+  extra_log_labels = { app_name = "", app_environment = "", kind = "" }   // empty: taken from each record
+  log_format       = "logfmt"
+
+  output {
+    logs   = [loki.write.default.receiver]
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+local.file "faro_key" {
+  filename  = "/var/run/secrets/faro/key"
+  is_secret = true
+}
+```
+
+| Concern | Rule |
+| --- | --- |
+| Exposure | Transport `faro`: an ingress or load balancer with TLS that routes only `POST /collect` and `OPTIONS /collect` to 12347, never the Alloy UI (12345) or other receivers. Transport `proxy`: no ingress; the app's proxy reaches 12347 in the cluster |
+| CORS | `cors_allowed_origins` lists the app origins exactly. The receiver allows Faro's request headers itself (`Content-Type`, `Content-Encoding`, `Idempotency-Key`, `Traceparent`, `X-API-Key`, `X-Faro-Session-Id`, `X-Scope-OrgID`); a CORS layer of your own in front of it must allow the same, or Faro 2.13's `Idempotency-Key` fails the preflight |
+| Key | Transport `faro`: the key is public and only filters stray traffic; rate limiting and the payload cap are the protection. Transport `proxy`: the key is a Secret the proxy adds |
+| Source maps | `download = false` and `location` blocks: with downloads on, a browser can make Alloy fetch any URL Alloy can reach. `{{ .Release }}` is `app.release` from the page |
+| Labels | `app_name`, `app_environment` and `kind` only ([data-model.md](../data-model.md#loki-labels)); everything else stays in the line |
+| Traces | Faro spans join the OTLP pipeline's batch and exporters to Tempo; browser and API spans share trace ids |
+| Self-monitoring | `faro_receiver_logs_total` and the component's HTTP metrics show accepted traffic; watch 429s (rate limit) and 413s (payload cap) |
+
+**Transport `otlp`.** Browsers post OTLP/HTTP JSON to `otelcol.receiver.otlp`. Its `http`
+block then needs `cors { allowed_origins = [...] allowed_headers = ["Content-Type",
+"Content-Encoding", "X-API-Key"] }`. Expose only `/v1/logs` and `/v1/traces` on that ingress, never gRPC
+or `/v1/metrics`. There is no source-map resolution and no per-app rate limit on this path.
+
+**Metrics from RUM.** Web vitals are log lines. Derive bounded series with Loki recording rules
+or `loki.process` metric stages ([backends/grafana.md](../backends/grafana.md#browser-rum)),
+labelled by `app_name`, `app_environment`, the vital and its rating, never by page URL, session
+or user.
+
 ### Profiles
 
 - `pyroscope.receive_http` listens on the profiles port and forwards SDK uploads to one
@@ -234,7 +308,11 @@ same name.
 - `pyroscope.ebpf` (an instance on every node, with host PID and the eBPF privileges) profiles
   CPU for every pod. Its targets come from `discovery.kubernetes`, with `service_name` taken from
   the pod's `resource.opentelemetry.io/service.name` annotation, so profiles match the other
-  signals ([signals/profiling.md](../signals/profiling.md)).
+  signals ([signals/profiling.md](../signals/profiling.md)). Relabel the other static labels
+  the SDK profiler writes from the same discovery: `service_namespace`, `service_version` and
+  `deployment_environment_name` from the annotations, `k8s_namespace_name`, `k8s_pod_name` and
+  `k8s_node_name` from `__meta_kubernetes_namespace`, `__meta_kubernetes_pod_name` and
+  `__meta_kubernetes_pod_node_name`. Never a pod UID label.
 - Profiles travel over the Pyroscope protocol; check the collector's current support before
   routing OTLP profiles through it.
 
@@ -296,7 +374,9 @@ The ops branch:
   ([genai](../signals/genai.md#content-stays-in-langfuse)).
 
 The Langfuse branch keeps the stamped spans of AI features and the spans of experiment items,
-minus non-AI client and producer spans:
+minus non-AI client and producer spans, and drops the request context (client address, user
+agent, headers, cookies, query strings, peer addresses) so it never leaves for Langfuse
+([genai](../signals/genai.md#content-stays-in-langfuse)):
 
 ```alloy
 // Ops branch. The transform's traces output replaces the ops path's batch input.
@@ -326,7 +406,7 @@ otelcol.processor.transform "ops_genai" {
       // AI spans: the conversation from the stamps.
       `set(span.attributes["gen_ai.conversation.id"], span.attributes["langfuse.session.id"]) where span.attributes["observability.ai_span"] == true and span.attributes["gen_ai.conversation.id"] == nil and span.attributes["langfuse.session.id"] != nil`,
       // AI spans keep only the allow-list, so an unknown content key can't pass.
-      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|call\\.id)|conversation\\.id|data_source\\.id|retrieval\\.top_k|memory\\.(store\\.id|record\\.(id|count))|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|openinference\\.span\\.kind|llm\\.(model_name|provider|system|token_count\\..+|request\\.type|usage\\.total_tokens)|traceloop\\.span\\.kind|mcp\\.(method\\.name|protocol\\.version|session\\.id|resource\\.uri)|jsonrpc\\.(request\\.id|protocol\\.version)|rpc\\.response\\.status_code|network\\.(transport|protocol\\.(name|version))|client\\.(address|port)|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+|observability\\.ai_span)$") where span.attributes["observability.ai_span"] == true`,
+      `keep_matching_keys(span.attributes, "^(gen_ai\\.(operation\\.name|provider\\.name|request\\.(model|temperature|top_p|top_k|max_tokens|frequency_penalty|presence_penalty|seed|choice\\.count|encoding_formats|stream)|response\\.(id|model|finish_reasons|time_to_first_chunk)|usage\\..+|output\\.type|agent\\.(id|name)|tool\\.(name|type|call\\.id)|conversation\\.id|data_source\\.id|retrieval\\.top_k|memory\\.(store\\.id|record\\.(id|count))|workflow\\.name|prompt\\.name|evaluation\\.(name|score\\..+))|openinference\\.span\\.kind|llm\\.(model_name|provider|system|token_count\\..+|request\\.type|usage\\.total_tokens)|traceloop\\.span\\.kind|mcp\\.(method\\.name|protocol\\.version|session\\.id|resource\\.uri)|jsonrpc\\.(request\\.id|protocol\\.version)|rpc\\.(system\\.name|method|response\\.status_code)|url\\.template|network\\.(transport|protocol\\.(name|version))|client\\.(address|port)|error\\.type|server\\..+|service\\.peer\\.name|code\\..+|thread\\.name|app\\..+|observability\\.ai_span)$") where span.attributes["observability.ai_span"] == true`,
       // Other spans: no AI keys, which would make LLM views count them as AI calls.
       `delete_matching_keys(span.attributes, "^(gen_ai|llm|traceloop)\\..*") where span.attributes["observability.ai_span"] == nil`,
       // Every span: no stamps and no content.
@@ -348,6 +428,24 @@ otelcol.processor.filter "langfuse" {
       `attributes["langfuse.trace.name"] == nil and attributes["langfuse.experiment.id"] == nil`,
       // scope ai_context; for ai_only, drop every span without a GenAI operation or type instead.
       `(kind == SPAN_KIND_CLIENT or kind == SPAN_KIND_PRODUCER) and attributes["gen_ai.operation.name"] == nil`,
+    ]
+  }
+  output { traces = [otelcol.processor.transform.langfuse_request_context.input] }
+}
+
+// Request context never goes to Langfuse, whatever the content mode.
+otelcol.processor.transform "langfuse_request_context" {
+  error_mode = "ignore"
+  trace_statements {
+    context    = "span"
+    statements = [
+      `delete_matching_keys(span.attributes, "^(client|user_agent|network\\.peer|net\\.peer|net\\.sock\\.peer)\\..*")`,
+      `delete_matching_keys(span.attributes, "^http\\.(request|response)\\.(header|cookie)\\..*")`,
+      `delete_key(span.attributes, "url.query")`,
+      `delete_key(span.attributes, "url.full")`,
+      `delete_key(span.attributes, "http.url")`,
+      `delete_key(span.attributes, "http.user_agent")`,
+      `delete_key(span.attributes, "http.client_ip")`,
     ]
   }
   output { traces = [otelcol.processor.batch.langfuse.input] }
@@ -442,7 +540,8 @@ their user and session, and traces without an AI feature were dropped.
 - **Placement:** pod logs, `pyroscope.ebpf` and `beyla.ebpf` need an instance on every node;
   OTLP reception can be node-local or central.
 - **RBAC:** `k8sattributes`, pod discovery and ServiceMonitor discovery need read access to
-  pods, namespaces, nodes and the monitor resources. Without it, identity enrichment and
+  pods, namespaces, nodes and the monitor resources, plus ReplicaSets and Jobs, through which
+  `k8sattributes` finds the owning Deployment and CronJob. Without it, identity enrichment and
   discovery fail.
 - **Self-monitoring:** the collector's own metrics (refused, dropped and failed sends, queue
   size) are scraped like any other target, so drops are visible.
