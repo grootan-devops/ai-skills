@@ -12,8 +12,8 @@ instead of editing the chart.
 | --- | --- | --- |
 | 1 | `observability.yml` from a ConfigMap, mounted at `/etc/observability/observability.yml`, with `OBSERVABILITY_CONFIG` pointing at it | one config file per environment ([config.md](config.md), [layout.md](layout.md)) |
 | 2 | backend tokens from Secrets, mounted as files (for example under `/var/run/secrets/observability/`) and referenced in the yml as `${file:/var/run/secrets/observability/<name>}` | secrets never sit in the ConfigMap or in literal env values |
-| 3 | downward-API env: pod name, pod UID, namespace and node name; where several clusters send to one backend, also the cluster's name (`K8S_CLUSTER_NAME`) from a cluster-level chart value, since the downward API doesn't provide it | the yml adds them to the resource, and the collector matches telemetry to its pod by UID |
-| 4 | pod annotations `resource.opentelemetry.io/service.name`, `…/service.namespace`, `…/service.version` and `…/deployment.environment.name`, rendered from the same values as the yml's resource, plus one for every other attribute the yml's `resource.attributes` sets beyond the pod identity (for example `…/oneuptime.label.<key>`) | collector-derived telemetry (stdout logs, scraped metrics, eBPF data) gets the same identity as the SDK's: the yml's resource reaches only what the SDK sends ([data-model.md](data-model.md)) |
+| 3 | downward-API env: pod name, namespace and node name, never the pod UID; where several clusters send to one backend, also the cluster's name (`K8S_CLUSTER_NAME`) from a cluster-level chart value, since the downward API doesn't provide it | the yml adds them to the resource, and the collector matches telemetry to its pod by namespace and pod name ([data-model.md](data-model.md#instance-identity-per-platform)) |
+| 4 | pod annotations `resource.opentelemetry.io/service.name`, `…/service.namespace`, `…/service.version` and `…/deployment.environment.name`, rendered from the same values as the yml's resource, plus one for every other attribute the yml's `resource.attributes` sets beyond the pod identity (`…/<attribute>`) | collector-derived telemetry (stdout logs, scraped metrics, eBPF data) gets the same identity as the SDK's: the yml's resource reaches only what the SDK sends ([data-model.md](data-model.md)) |
 | 5 | a named metrics port (for example `http-metrics` on 9464) on the container and the Service, and a ServiceMonitor or PodMonitor for `/metrics` on it | Prometheus or the collector discovers and scrapes the endpoint the yml declares ([signals/metrics.md](signals/metrics.md)) |
 | 6 | colourised logs switched off | colour codes break `json` and `plain` parsing |
 | 7 | `/metrics` and the health endpoints kept off public ingress | they are internal; the ingress routes application paths only |
@@ -52,8 +52,6 @@ spec:
           value: production
         - name: K8S_POD_NAME
           valueFrom: { fieldRef: { fieldPath: metadata.name } }
-        - name: K8S_POD_UID
-          valueFrom: { fieldRef: { fieldPath: metadata.uid } }
         - name: K8S_NAMESPACE_NAME
           valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
         - name: K8S_NODE_NAME
@@ -92,7 +90,6 @@ resource:
   environment: "${OBS_ENVIRONMENT}"
   attributes:
     k8s.pod.name: "${K8S_POD_NAME:-}"
-    k8s.pod.uid: "${K8S_POD_UID:-}"
     k8s.namespace.name: "${K8S_NAMESPACE_NAME:-}"
     k8s.node.name: "${K8S_NODE_NAME:-}"
     k8s.cluster.name: "${K8S_CLUSTER_NAME:-}"   # dropped where the chart doesn't set it
@@ -115,7 +112,13 @@ spec:
       interval: 30s
 ```
 
-The resource carries nothing else ([data-model.md](data-model.md#resource)).
+The resource carries nothing else from the chart ([data-model.md](data-model.md#resource)). The
+SDK keeps its own `telemetry.sdk.*`, `process.runtime.*` and `os.type` rows, and the collector adds
+the owning workload's name (`k8s.deployment.name` and the others), which the chart doesn't pass.
+
+Outside Kubernetes there is no chart: on ECS, Lambda, Cloud Run, a VM or plain Docker the
+deployment sets only the `OBS_*` values the yml reads, and the SDK's platform detectors add the
+platform rows ([config.md](config.md#resource-per-platform)).
 
 ## Workload notes
 
@@ -123,12 +126,6 @@ The resource carries nothing else ([data-model.md](data-model.md#resource)).
   metrics port and no monitor, because nothing scrapes a process that exits. Keep finished pods
   long enough for the collector to read their last log lines
   ([workloads/batch.md](workloads/batch.md)).
-- **Frontends served by nginx:** mount the runtime RUM config (`observability.json`) per
-  environment, and the nginx configuration with the JSON access log and the same-origin
-  `/telemetry/` routes to the collector; a replay key injected by nginx comes from a Secret
-  (`rum.session_replay.headers`), for example as an nginx include file holding the
-  `proxy_set_header` line. The proxy locations follow the tested snippet in
-  [workloads/spa.md](workloads/spa.md#the-nginx-proxy).
 - **Collector address:** endpoints default to the collector named in the yml; per-environment
   overrides go in through the `OBS_*_ENDPOINT` variables the yml interpolates.
 - **AI services on the collector route:** the Langfuse keys go to the collector's Secret
@@ -149,7 +146,7 @@ Chart handoff — <service>
 [ ] Secret <name>/<key> mounted at /var/run/secrets/observability/<file> (yml: ${file:…})
 [ ] Env OBS_SERVICE_NAME, OBS_SERVICE_NAMESPACE, OBS_SERVICE_VERSION, OBS_ENVIRONMENT
 [ ] Env OBS_*_ENDPOINT overrides for this environment, if any
-[ ] Downward-API env K8S_POD_NAME, K8S_POD_UID, K8S_NAMESPACE_NAME, K8S_NODE_NAME
+[ ] Downward-API env K8S_POD_NAME, K8S_NAMESPACE_NAME, K8S_NODE_NAME (no pod UID)
 [ ] Env K8S_CLUSTER_NAME from a cluster-level value, only where several clusters send to
     one backend
 [ ] Pod annotations resource.opentelemetry.io/: service.name, service.namespace,

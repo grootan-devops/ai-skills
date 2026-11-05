@@ -1,53 +1,145 @@
 # Telemetry data model
 
-The field dictionary every service follows: where each field belongs, where its value comes from
-and the rules it obeys. Names follow OpenTelemetry semantic conventions; custom names use the
-project's namespace, `app.` by default ([enrichment](enrichment.md#naming-and-safety)). Values are
-written as they are, `client.address` and user, tenant and session IDs included; secrets are never
-captured ([safe capture](safe-capture.md)).
+The field dictionary every service follows: where each field belongs, how strongly it is required,
+who sets it and when. Names follow OpenTelemetry semantic conventions; custom names use the
+project's namespace, `app.` by default ([enrichment](enrichment.md#naming-and-safety)). Secrets are
+never captured, and personal data is written only masked ([PII masking](#pii-masking),
+[safe capture](safe-capture.md)).
+
+## Classification
+
+Every attribute, field and label has one class per location:
+
+| Class | Meaning |
+| --- | --- |
+| **M** mandatory | Set whenever the signal or operation exists. |
+| **C** conditional | Set when the stated condition holds (the platform, a response, an authenticated user). Absent otherwise, never fabricated. |
+| **R** recommended | Set when the instrumentation provides it; it helps troubleshooting. |
+| **O** optional | Set only where it is useful for the service. |
+| **P** prohibited | Never set in that location. |
+
+Every M and C row names who sets it and when; a mandatory field without an owner is a rule nobody
+implements. The audit checks M, C and P rows; R and O rows are not asserted.
 
 ## Where each field belongs
 
 | Location | What belongs there |
 | --- | --- |
-| Resource attributes | Identity of the producer: the eight standard attributes [below](#resource), the service and its pod, plus the cluster's name where several clusters send to one backend. Created once per process and shared by its traces, logs, OTLP metrics and profiles. |
-| Span attributes | Details of one operation: an HTTP request, a database query, a message, an RPC, a GenAI or MCP call, an application function, a job run, a WebSocket message. AI content (prompts, completions, tool arguments and results) only through the content policy, at the one content destination: Langfuse, or the ops backend's AI views ([genai](signals/genai.md#destination)). |
-| Log attributes | Details of one log event, including exception information. |
-| Metric labels | Short, bounded labels of a measurement: method, route, status code, dependency, job, outcome. |
-| Profile labels | Static identity labels and bounded dynamic labels such as `controller`. |
+| Resource attributes | Identity of the producer: the service, its deployment and the platform it runs on ([resource](#resource)). Created once per process and shared by its traces, logs, metrics and profiles. |
+| Span attributes | Details of one operation ([operations](#operations), [AI](#ai)). Request and identity context only on the entry span ([context](#request-and-identity-context)). AI content only through the content policy, and only on the Langfuse path ([genai](signals/genai.md#content-stays-in-langfuse)). |
+| Log attributes | Details of one log event, including exception information ([logs](#logs-errors-and-trace-correlation)). |
+| Metric labels | Short, bounded labels of a measurement ([metrics](#metrics)). |
+| Profile labels | Static identity labels and bounded dynamic labels such as `controller` ([profiling](#profiling)). |
+| Browser (Faro) metas and records | The page's identity (app, session, user, page, view, browser) on every record, and the record's own fields ([browser RUM](#browser-rum-faro)). |
 | Native OTLP fields | Trace and span IDs, timestamps, span kind, status, events and links, log severity and body, instrumentation scope; for OTLP metrics, the metric type, unit, temporality and buckets. Always set natively, never as ordinary attributes. |
 
 ## Resource
 
-Resource attributes, on every signal. The resource carries the first eight attributes below,
-and the ninth only where several clusters send to one backend:
+Resource attributes are on every signal: created once per process and shared by its traces, logs,
+metrics and profiles. The tables list every attribute the platform makes available, with its class.
+Attributes not listed are not added: process IDs and command lines, VCS data, release IDs,
+`service.instance.id` and pod or node UIDs.
+**Pyroscope** = the static profile label written at profiler start (dots → underscores); only M and C rows
+become profile labels. **E2E** = how the end-to-end run checks it: *live* on the local stack, *stub* with faked
+platform env or metadata, *—* not asserted.
 
-| Attribute | Example | Source and rule |
+### Service and deployment
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `service.name` | string | `checkout-api` | M | observability.yml → SDK, process start | app name | live |
+| `service.namespace` | string | `commerce` | M | observability.yml | `service_namespace` | live |
+| `service.version` | string | `1.8.2` | M | CI/CD image tag → yml, build | `service_version` | live |
+| `deployment.environment.name` | string | `production` | M | yml, deploy | `deployment_environment_name` | live |
+
+### Kubernetes (`k8s.*`) — when running on Kubernetes
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `k8s.namespace.name` | string | `commerce-prod` | C (K8s) | downward API env | `k8s_namespace_name` | live |
+| `k8s.pod.name` | string | `checkout-api-7d9c6b5f4-x2k8p` | C (K8s) | downward API env | `k8s_pod_name` | live |
+| `k8s.node.name` | string | `worker-a1` | C (K8s) | downward API env | `k8s_node_name` | live |
+| `k8s.cluster.name` | string | `prod-eu-1` | C (several clusters → one backend) | chart value per cluster | `k8s_cluster_name` | live |
+| `k8s.deployment.name` / `k8s.statefulset.name` / `k8s.daemonset.name` | string | `checkout-api` | R (whichever owns the pod) | collector k8sattributes | — | — |
+| `k8s.cronjob.name`, `k8s.job.name` | string | `nightly-report` | R (job pods) | collector k8sattributes | — | — |
+| `k8s.replicaset.name` | string | `checkout-api-7d9c6b5f4` | O | collector k8sattributes | — | — |
+| `k8s.container.name` | string | `app` | O (multi-container pods) | collector k8sattributes | — | — |
+
+### Cloud (`cloud.*`) — when running on a cloud provider (ECS, Fargate, Lambda, Cloud Run, cloud VM, managed K8s)
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cloud.provider` | string | `aws`, `gcp`, `azure` | C (cloud) | cloud detector | `cloud_provider` | stub |
+| `cloud.platform` | string | `aws_ecs`, `aws_lambda`, `gcp_cloud_run` | C (cloud) | cloud detector | `cloud_platform` | stub |
+| `cloud.region` | string | `eu-west-1` | C (cloud) | cloud detector | `cloud_region` | stub |
+| `cloud.availability_zone` | string | `eu-west-1a` | R | cloud detector | — | — |
+| `cloud.account.id` | string | `123456789012` | O | cloud detector | — | — |
+| `cloud.resource_id` | string | function / task ARN | O | cloud detector | — | — |
+
+### AWS (`aws.*`) — ECS / Fargate / EKS / Lambda
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `aws.ecs.cluster.arn` | string | ARN | C (ECS/Fargate) | ECS detector | `aws_ecs_cluster_arn` | stub |
+| `aws.ecs.task.arn` | string | ARN | C (ECS/Fargate) — instance identity | ECS detector | `aws_ecs_task_arn` | stub |
+| `aws.ecs.launchtype` | string | `fargate`, `ec2` | C (ECS/Fargate) | ECS detector | `aws_ecs_launchtype` | stub |
+| `aws.ecs.task.family`, `aws.ecs.task.revision` | string | `checkout`, `42` | R | ECS detector | — | — |
+| `aws.ecs.task.id`, `aws.ecs.container.arn` | string | | O | ECS detector | — | — |
+| `aws.eks.cluster.arn` | string | ARN | O (EKS; `k8s.cluster.name` is the identity) | EKS detector | — | — |
+| `aws.log.group.names`, `aws.log.stream.names` | string[] | `/ecs/checkout` | O (ECS/Lambda) | detector | — | — |
+
+### FaaS (`faas.*`) — Lambda, Cloud Run, Cloud Functions, Azure Functions
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `faas.name` | string | `resize-img` | C (FaaS / Cloud Run service) | Lambda / GCP detector | `faas_name` | stub |
+| `faas.version` | string | `$LATEST`, `checkout-00042` | C (FaaS) | detector | `faas_version` | stub |
+| `faas.instance` | string | log stream / instance id | C (FaaS) — instance identity | detector | `faas_instance` | stub |
+
+### GCP (`gcp.*`)
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `gcp.cloud_run.job.execution` | string | `report-abc12` | C (Cloud Run jobs) | GCP detector | `gcp_cloud_run_job_execution` | stub |
+| `gcp.cloud_run.job.task_index` | int | `0` | C (Cloud Run jobs) | GCP detector | `gcp_cloud_run_job_task_index` | stub |
+| `gcp.gce.instance.name` | string | `vm-12` | R (GCE VM) | GCP detector | — | — |
+
+### Host and container — VM and plain Docker
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `host.name` | string | `vm-12` | C (VM) — instance identity on a VM; O in plain Docker (it reports the container's hostname) | host detector | `host_name` | live |
+| `container.id` | string | `3f1c…` | C (plain Docker) — instance identity in Docker | container detector | `container_id` | live |
+| `host.type` | string | `n2-standard-4` | O (cloud VM) | cloud detector | — | — |
+| `host.arch` | string | `amd64` | O | host detector | — | — |
+| `container.name` | string | `checkout-api-1` | O (plain Docker) | container detector | — | — |
+| `container.image.name`, `container.image.tags` | string / string[] | `checkout-api`, `[1.8.2]` | O | detector / chart | — | — |
+
+### Telemetry, process, OS
+
+| Attribute | Type | Example | Class | Owner / when | Pyroscope | E2E |
+| --- | --- | --- | --- | --- | --- | --- |
+| `telemetry.sdk.language` | string | `python` | R | SDK default | — | live (present) |
+| `telemetry.sdk.version` | string | `1.39.0` | R | SDK default | — | live (present) |
+| `process.runtime.name` | string | `cpython`, `nodejs` | R | runtime detector | — | live (present) |
+| `process.runtime.version` | string | `3.12.4` | R | runtime detector | — | live (present) |
+| `os.type` | string | `linux` | R | os detector | — | live (present) |
+| `os.description`, `os.name`, `os.version` | string | | O | os detector | — | — |
+
+Rule: **any per-request value is never a resource attribute** — for example `user.id`, `tenant.id`, `session.id`,
+`correlation.id`, trace or span IDs, routes, and every other value that differs between requests.
+
+### Instance identity per platform
+
+| Platform | Mandatory rows beyond the four service rows | Instance identity |
 | --- | --- | --- |
-| `service.name` | `checkout-api` | `observability.yml`; stable across releases and replicas, because backends key services on it |
-| `service.namespace` | `commerce` | `observability.yml`; the application group the deployment is part of (its `partOf` name), shared by every service of the application |
-| `service.version` | `1.8.2` | `observability.yml`, filled from the build (the image tag); never a default, which would merge releases |
-| `deployment.environment.name` | `production` | `observability.yml`; never a default, which would merge environments |
-| `k8s.namespace.name` | `commerce-prod` | the downward API, through `resource.attributes` |
-| `k8s.pod.name` | `checkout-api-7d9c6b5f4-x2k8p` | the downward API, through `resource.attributes` |
-| `k8s.pod.uid` | `3f1c9a2e-5b7d-4c1e-9f0a-2b6d8e4c7a11` | the downward API, through `resource.attributes`; the collector matches telemetry to its pod by it, so pod association doesn't depend on the connection's source IP |
-| `k8s.node.name` | `worker-a1` | the downward API, through `resource.attributes` |
-| `k8s.cluster.name` | `prod-eu-1` | optional, for setups where several clusters send to one backend. It isn't in the downward API: the chart sets it per cluster (for example an env var `K8S_CLUSTER_NAME` from a cluster-level value), and `resource.attributes` lists it like the other `k8s.*` keys |
-
-Empty values are dropped: outside Kubernetes every `k8s.*` value, and `k8s.cluster.name`
-wherever the chart doesn't set it. Nothing else goes in the resource:
-
-- **SDK detector attributes are dropped** where the SDK allows it: `telemetry.sdk.*`,
-  `process.*`, `host.*`, `os.*` and `vcs.*`. How per SDK is in [sdk-notes.md](sdk-notes.md);
-  where an SDK can't drop one, it stays and the report says so. The SDK is never patched for it.
-- **`service.instance.id` is not set:** the pod name and UID identify the instance.
-- **Build and deployment details** (commit, branch, pipeline run) stay out: `service.version`
-  identifies the release.
-- **One backend exception:** a service exporting straight to OneUptime adds the older
-  `deployment.environment`, with the same value, because OneUptime files exceptions under it and
-  no collector copies it there ([oneuptime.md](backends/oneuptime.md#exceptions)).
-
-A web page has a resource of its own, for RUM ([below](#rum-and-profiling)).
+| Kubernetes | `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name` | `k8s.pod.name` (+ namespace) |
+| ECS / Fargate | `cloud.provider/platform/region`, `aws.ecs.cluster.arn`, `aws.ecs.task.arn`, `aws.ecs.launchtype` | `aws.ecs.task.arn` |
+| Lambda | `cloud.*` (3), `faas.name`, `faas.version`, `faas.instance` | `faas.instance` |
+| Cloud Run service | `cloud.*` (3), `faas.name`, `faas.version`, `faas.instance` | `faas.instance` |
+| Cloud Run job | `cloud.*` (3), `faas.name`, `gcp.cloud_run.job.execution`, `gcp.cloud_run.job.task_index` | execution + task index |
+| VM | `host.name`, plus `cloud.*` (3) on a cloud VM | `host.name` |
+| Plain Docker | `container.id` | `container.id` |
 
 ### Cross-signal identity
 
@@ -58,18 +150,18 @@ traces and profiles) carry the **same** identity:
   `resource.opentelemetry.io/<attribute>` (for `service.name`, `service.namespace`,
   `service.version` and `deployment.environment.name`, and for any extra attribute the yml adds,
   such as a backend's label attributes) from the same values, and passes the pod's
-  namespace, name, UID and node through the downward API ([charts](charts.md)), plus the cluster's
+  namespace, name and node through the downward API ([charts](charts.md)), plus the cluster's
   name from a chart value where it is used.
 - The collector's `k8sattributes` processor runs with `extract.otel_annotations: true`, so it reads
-  those annotations, and extracts the same four pod `k8s.*` attributes. It can't provide
+  those annotations, and extracts the same three pod `k8s.*` attributes plus the owning workload's name. It can't provide
   `k8s.cluster.name`, which comes from the app's environment; where the cluster name is used,
   each cluster's collector adds it to the telemetry it collects itself (scraped metrics, file
   logs) with a resource processor set from the same per-cluster value
   ([collector](collector/README.md)). Without the annotations,
   `service.name` is derived from the `app.kubernetes.io/instance` label, which can differ from
   the SDK's value, and one service shows up under two names.
-- The collector adds no host, OS, process, container or cloud attributes to application
-  telemetry ([collector](collector/README.md)).
+- Outside Kubernetes the SDK's platform detectors set the platform rows, and the collector
+  adds nothing that would differ from them ([collector](collector/README.md)).
 
 Never put a trace ID, or any other per-request value, in resource attributes or
 `OTEL_RESOURCE_ATTRIBUTES`: the resource is fixed for the life of the process.
@@ -82,19 +174,19 @@ process emits; it can't change per request. Request facts the middleware learns 
 the local root (`SERVER` or `CONSUMER`), and on its access log. Child spans stay lean: their own
 operation's attributes, result and status. Repeating the request context on every span would
 multiply storage without adding information, since backends join child spans to the entry span by
-trace ID. AI spans are the one exception: they carry `user.id` and `team.id`, because LLM views
-such as OneUptime's attribute each call's cost on the call's own span
-([genai](signals/genai.md#who-spent-what)).
+trace ID.
 
-Another service gets the request context only through allow-listed baggage, which its own
-middleware puts on *its* entry span. Values are written as they are, IDs and client IP included,
-except secrets, which instrumentation never captures.
+Another service sets its own identity rows from its own trusted middleware. Allow-listed baggage
+may carry `correlation.id` and similar hints onto *its* entry span, but is never trusted as identity
+or authorisation. IDs are written as they are; personal data only masked
+([PII masking](#pii-masking)); secrets never.
 
 ```text
 Resource (once per process; identical for trace A and trace B)
   service.name=checkout-api  service.namespace=commerce  service.version=1.8.2
   deployment.environment.name=production  k8s.namespace.name=commerce-prod
-  k8s.pod.name=checkout-api-7d9c6b5f4-x2k8p  k8s.pod.uid=3f1c9a2e-…  k8s.node.name=worker-a1
+  k8s.pod.name=checkout-api-7d9c6b5f4-x2k8p  k8s.node.name=worker-a1
+  telemetry.sdk.language=java  process.runtime.version=21.0.4  os.type=linux
 
 Trace A (user u-123, session s-9)
   SERVER     POST /orders          http.route=/orders  user.id=u-123  session.id=s-9
@@ -112,37 +204,87 @@ Trace B (user u-456, session s-4)
                                    status=ERROR  error.type=503
 ```
 
+## Trace context
+
+Native span fields, not attributes, generated by the SDK.
+
+| Field | Class | Owner | Rule |
+| --- | --- | --- | --- |
+| `trace_id`, `span_id`, kind, name, start/end, status | M | SDK | name low-cardinality, never IDs or raw URLs |
+| `parent_span_id` | C (continuing a trace) | SDK, from `traceparent` | |
+| `trace_flags` | M | SDK | sampled bit drives log correlation |
+| `tracestate` | O | propagator | pass through untouched |
+| Links | C (batch consume, fan-in, job started by a request, WS message → connection) | instrumentation | |
+| Events | O; `exception` events P | instrumentation | exceptions go to the one error log record, not span events ([errors](signals/errors.md)) |
+| Baggage | O, allow-list only | middleware | max 8 keys / 512 B; never secrets, never authorisation, never AI context |
+
+## Request and identity context
+
+Set by trusted auth/tenant middleware after authentication, never from raw client headers.
+Root = entry span only; child spans don't repeat it.
+
+**Core and reference rows.** The core rows are `user.id`, `tenant.id`, `session.id`, `correlation.id`, `http.route`,
+`client.address`, UA and client app. They are classified as shown and checked. Every other identity or business row is a
+**reference catalogue**: the names and placements to use *when the code actually has that data*. The
+audit adds such a row only if the service's auth/session/tenant code exposes the value. The classes shown for
+those rows (C/O) apply only once the code has the value. Nothing is fabricated or forced to match
+across services, and the e2e checks don't require them.
+
+| Attribute | Type | Res | Root | Child | App log | Access log | Audit log | Metric | Profile | Required when / note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| *core* | | | | | | | | | | |
+| `user.id` | string | P | C | P | O | C | C (authenticated actor) | P | P | authenticated request; anonymous → absent, never fabricated |
+| `tenant.id` | string | P | C | P | O | C | C (multi-tenant) | P | P | multi-tenant request; custom name |
+| `session.id` | string | P | C | P | O | C | C | P | P | session-based request; semconv (dev) |
+| `correlation.id` | string | P | M | P | M | M | M | P | P | from valid `x-correlation-id` or generated; custom |
+| `http.route` | string | P | M (HTTP) | P | O | M | C (HTTP request audits) | M (`route`) | P | template or `unmatched` |
+| `client.address` | string | P | C (HTTP/WS) | P | P | M | M | P | P | via trusted-proxy resolver; last octet masked anywhere else |
+| `user_agent.original` | string | P | R | P | P | R | R | P | P | |
+| `app.client.name` / `app.client.version` | string | P | R | P | O | R | O | O (bounded list) | P | custom |
+| *reference catalogue below — only when the code has the value* | | | | | | | | | | |
+| `user.roles` | string[] | P | O | P | O | O | C | P | P | semconv name (development) |
+| `app.user.type` | string (enum) | P | O | P | O | O | R | O (bounded) | P | `human`/`service`/`system`; custom |
+| `app.tenant.tier` / `app.subscription.plan` | string (enum) | P | O | P | O | O | O | O (bounded) | P | billing/plan-scoped ops; custom |
+| `tenant.name`, `app.organization.name` | string | P | O | P | P | P | O | P | P | display names: PII-ish, prefer IDs |
+| `app.organization.id`, `app.account.id`, `app.customer.id` | string | P | C | P | O | C | C | P | P | only when the request is scoped by it and it differs from tenant.id |
+| `request.id` | — | P | P | P | P | P | P | P | P | not used: correlation.id covers it |
+| `app.auth.method`, `app.auth.provider` | string (enum) | P | C | P | P | C | C (auth events) | method: M as `method` on `auth_attempts_total`; provider: O | P | auth operation (login, token exchange); custom |
+| `app.auth.result` | string (enum) | P | C | P | P | C | C (auth events) | M as `result` on `auth_attempts_total` | P | `success`/`denied`/`error`; custom |
+| `langfuse.*` stamps | string | P | C (AI feature, Langfuse path) | C (every span in the feature) | P | P | P | P | P | the one scoped exception |
+
 ## Operations
 
-Span attributes and results. Semantic-convention groups are chosen from what the code and the
-service actually do: every operation type found during the audit gets its group's attributes, not
-only HTTP. How spans are produced per framework: [traces](signals/traces.md).
+Placement is Child unless the kind is SERVER/CONSUMER, in which case it is Root. Owner is auto-instrumentation,
+unless "module" (the skill's generated client/GenAI/MCP module) or "code" (the function wrapper) is given.
 
-| Operation | Native fields | Attributes | Result |
-| --- | --- | --- | --- |
-| HTTP server | kind `SERVER`, name `{method} {http.route}` | `http.request.method`, `http.route` (the template, or `unmatched`), `url.scheme`, `url.path` (a segment that holds an email masked as `{email}`), `url.query` (allow-listed parameter values only), `server.address`, `server.port`, `client.address` (trusted-proxy resolver), `user_agent.original`, `network.protocol.version`, `http.request.header.<name>` (allow-list), `http.request.body.size` | `http.response.status_code`, `http.response.body.size`, `error.type`; status ERROR on 5xx or an escaped exception |
-| HTTP client | kind `CLIENT`, name `{method} {url.template}` (`{method}` when no template) | `http.request.method`, `url.full` and `url.path` (sanitised: no credentials, allow-listed query values, an email in the path masked as `{email}`, no other content in the path), `url.template`, `server.address`, `server.port`, `service.peer.name`, `http.request.resend_count` | `http.response.status_code`, `error.type`; status ERROR on 4xx and 5xx |
-| Call to another service (client module) ([functions](functions.md#calls-to-other-services)) | kind `CLIENT`, name `{service.peer.name} {operation}` | `service.peer.name`, `server.address`, `server.port`, `network.transport` (non-HTTP), safe operation attributes | `error.type`; status ERROR on failure; the HTTP client span nests under it |
-| Database or cache | kind `CLIENT`, name `{db.query.summary}` or `{db.operation.name} {db.collection.name}` | `db.system.name`, `server.address`, `server.port` (integer), `db.namespace`, `db.operation.name`, `db.collection.name`, `db.query.summary`, `db.query.text` (optional; parameterised or sanitised, never parameter values) | `db.response.status_code`, `db.response.returned_rows`, `error.type` |
-| Messaging | kind `PRODUCER` to publish, `CONSUMER` to process; links for batches | `messaging.system`, `messaging.destination.name`, `messaging.operation.type`, `messaging.operation.name`, `messaging.consumer.group.name`, `messaging.destination.partition.id`, `messaging.message.id`, `server.address`, `server.port`; trace context travels in message headers | `messaging.batch.message_count`, `error.type` |
-| RPC, gRPC | kind `SERVER` or `CLIENT`, name `{rpc.method}` | `rpc.system.name`, `rpc.method`, `server.address`, `server.port` (release-candidate names through the `rpc` stability opt-in; legacy `rpc.system` and `rpc.service` accepted) | `rpc.response.status_code`, `error.type` |
-| GenAI model call or embedding ([genai](signals/genai.md#step-kinds)) | kind `CLIENT`, name `{gen_ai.operation.name} {gen_ai.request.model}` (`chat gpt-4o-mini`, `embeddings text-embedding-3-small`) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` and parameters, `gen_ai.conversation.id`, `gen_ai.prompt.name`, `app.genai.prompt.version`; content only through the content policy, at the content destination | `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, `gen_ai.response.time_to_first_chunk`, `error.type`; a WARNING level for a degraded success |
-| GenAI agent, tool, retrieval, memory, planning, workflow, guardrail or evaluation step | kind `INTERNAL` (`CLIENT` for a remote store or agent), names `invoke_agent {agent}`, `execute_tool {tool}`, `retrieval {data source}`, `{memory operation}`, `plan {agent}`, `invoke_workflow {name}`, `guardrail {name}`, `evaluate {name}` | `gen_ai.operation.name` (`retrieval` on retrieval steps), `gen_ai.agent.*`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.data_source.id`, `gen_ai.retrieval.top_k`, `gen_ai.memory.store.id`, `gen_ai.memory.record.count`, `gen_ai.workflow.name`, `gen_ai.evaluation.*`, the module's `app.genai.*` and `app.rag.*` attributes; the Langfuse type where the operation doesn't imply it | `error.type`; status ERROR only for the step's own failure |
-| AI trace context (every span of an AI feature) | — | `langfuse.trace.name` (the feature), `langfuse.user.id`, `langfuse.session.id` (the conversation), `langfuse.trace.metadata.team`, `langfuse.release`, `langfuse.trace.tags`, `langfuse.trace.metadata.*`, stamped by the module on every span started inside the feature: the one scoped exception to request context on the entry span only, because Langfuse filters per observation | on the ops path AI spans get `user.id`, `team.id` and `gen_ai.conversation.id` from the stamps, because OneUptime attributes spend per AI span, and every span loses the stamps; never baggage |
-| MCP ([mcp](workloads/mcp.md)) | kind `CLIENT` on the caller, `SERVER` on the server; name `{mcp.method.name} {target}`, the target being the tool or prompt name, or the method alone; one span with the agent's `execute_tool` span when its framework already made one | `mcp.method.name`, `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name` on `tools/call`, `gen_ai.prompt.name` on `prompts/get`, `mcp.resource.uri` (sanitised, or its template), `jsonrpc.request.id`, `mcp.protocol.version`, `mcp.session.id`, `network.transport` (`pipe` for stdio, `tcp`), `network.protocol.name`, `network.protocol.version`, `server.address` and `server.port` on the client, `client.address` and `client.port` on the server; context from `params._meta` | `rpc.response.status_code`, `error.type` (`tool_error` for a tool result with `isError`); the client marks every JSON-RPC error ERROR, the server leaves the caller's errors (-32700, -32600, -32601, -32602, -32002) UNSET |
-| Application function ([functions](functions.md)) | kind `INTERNAL`, name `{Class}.{method}` or `{module}.{function}` | `code.function.name`, `code.file.path`, `code.line.number`, `thread.name`, allow-listed argument summaries, [enrichment](enrichment.md) attributes | result summary (count, size, status), `error.type`; status ERROR on failure |
-| Job run ([batch](workloads/batch.md)) | kind `INTERNAL`, a root span named `job {name}`; a link to the request that started it, if any | `app.job.name`, `app.job.trigger` (`cron`, `manual` or `internal`) | `app.job.items.processed`, `app.job.items.failed`, `error.type`; status ERROR when the run failed |
-| WebSocket connection ([api](workloads/api.md#websocket)) | kind `SERVER`, a root span named `WS {path}` (the endpoint's route, for example `WS /ws`), covering the handshake and authentication | `url.path`, `client.address`, `user.id`, `tenant.id` | `app.websocket.close_code` on a rejection; UNSET for a client rejection, ERROR only when the server failed |
-| WebSocket message | kind `SERVER`, a root span named `WS {type}` from a bounded set of types, linked to the connection span; pings get none | `app.websocket.message.type`, `user.id`, `tenant.id` | `error.type`; status ERROR when handling failed |
-| GraphQL | name `{graphql.operation.type} {graphql.operation.name}` | `graphql.operation.name`, `graphql.operation.type`; document text off by default | the errors list mapped to `error.type` |
-| Cloud SDK or object storage | kind `CLIENT` | `rpc.system.name` (e.g. `aws-api`), `rpc.method`, `cloud.region`, service attributes such as `aws.s3.bucket` (object keys only if they are not sensitive) | `http.response.status_code`, `error.type` |
-| Serverless invocation | kind `SERVER` or `CONSUMER` | `faas.trigger`, `faas.invocation_id`, `faas.coldstart` | `error.type` |
-| Request context (each service's entry span only) | — | `user.id`, `tenant.id`, `session.id`, `correlation.id`, `http.route`, client app and version, set by the middleware on the `SERVER` or `CONSUMER` span as they are; `client.address` from the trusted-proxy resolver; child spans don't repeat them, except AI spans, which carry `user.id` and `team.id` for spend ([genai](signals/genai.md#who-spent-what)) | never resource attributes, never metric labels |
+| Operation | Kind / name | M | C | R | O | P | Result & status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| HTTP server | SERVER `{method} {http.route}` | `http.request.method`, `http.route`, `url.scheme`, `url.path` (sanitised) | `http.response.status_code` (response sent), `server.address`/`server.port` (known), `client.address` | `user_agent.original`, `network.protocol.version` | `url.query` (allow-listed values), `http.request.header.<n>` (allow-list), body sizes | raw query, `Authorization`, `Cookie`, bodies | `error.type`; ERROR on 5xx / escaped exception |
+| HTTP client | CLIENT `{method} {url.template}` | `http.request.method`, `server.address`, `server.port`, `url.full` (sanitised) | `http.response.status_code`, `url.template` (known), `http.request.resend_count` (retry ≥1) | `service.peer.name` | `network.protocol.version` | credentials in URL, token query params | `error.type`; ERROR on 4xx/5xx |
+| Call to another service (module) | CLIENT `{service.peer.name} {operation}` | `service.peer.name`, `server.address` | `server.port`, `network.transport` (non-HTTP) | safe operation attrs | | args/payloads | `error.type`; HTTP client nests under it |
+| Database | CLIENT `{db.query.summary}` / `{op} {collection}` | `db.system.name`, `db.operation.name` (known) | `db.collection.name`, `db.namespace`, `server.address`, `server.port`, `db.response.status_code` (error) | `db.query.summary` | `db.query.text` (parameterised) | parameter values, credentials | `db.response.returned_rows`, `error.type` |
+| Cache | CLIENT `{op} {db.namespace}` | `db.system.name` (`redis`…), `db.operation.name` | `db.namespace`, `server.address`, `server.port` | `app.cache.hit` | | keys holding PII | `error.type` |
+| Messaging producer | PRODUCER `send {destination}` | `messaging.system`, `messaging.destination.name`, `messaging.operation.type`, `messaging.operation.name` | `messaging.batch.message_count` (batch), `messaging.destination.partition.id` | `messaging.message.id`, `server.address` | `messaging.message.conversation_id` | payload | `error.type`; context injected into headers |
+| Messaging consumer | CONSUMER `process {destination}` (Root) | same as producer | `messaging.consumer.group.name` (groups), links (batch) | `messaging.message.id`, partition | `app.messaging.attempt` | payload | `error.type`; DLQ outcome |
+| RPC / gRPC | SERVER/CLIENT `{rpc.method}` | `rpc.system.name`, `rpc.method` | `rpc.response.status_code` (response), `server.address`/`port` (client) | `network.peer.*` | | metadata values | `error.type`; gRPC status mapping per semconv |
+| GraphQL operation | SERVER/INTERNAL `{type} {name}` | `graphql.operation.type` | `graphql.operation.name` (named op) | | `graphql.document` (sanitised, off by default) | variables | `error.type` from errors list |
+| GraphQL resolver | — | — | — | — | — | **P (no spans)** | resolver spans off: tracing scope keeps API + client calls only |
+| WebSocket connection | SERVER root `WS {route}` | `url.path`/route, `client.address` | `user.id`, `tenant.id` (after auth), `app.websocket.close_code` (rejected) | | | tokens in query | UNSET on client rejection; ERROR on server failure |
+| WebSocket message | SERVER root `WS {type}`, link → connection | `app.websocket.message.type` (bounded) | `user.id`, `tenant.id` (authenticated) | | | payload; pings get no span | `error.type` |
+| GenAI model call ([details](#ai)) | CLIENT `{op} {model}` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model` | `gen_ai.response.model`, `gen_ai.usage.input_tokens`/`output_tokens` (returned), `gen_ai.conversation.id` (conversation) | `gen_ai.response.finish_reasons`, `gen_ai.response.id`, request params | `gen_ai.prompt.name`, `app.genai.prompt.version`, TTFC | prompts/completions on ops path | `error.type`; WARNING level for degraded success |
+| GenAI agent / workflow | INTERNAL `invoke_agent {agent}` | `gen_ai.operation.name`, `gen_ai.agent.name` | `gen_ai.agent.id`, `gen_ai.conversation.id` | `gen_ai.workflow.name` | `app.genai.*` | content | `error.type` |
+| GenAI tool | INTERNAL/CLIENT `execute_tool {tool}` | `gen_ai.operation.name`, `gen_ai.tool.name` | `gen_ai.tool.call.id` (model issued one) | `gen_ai.tool.type` | | arguments/results (Langfuse path only, by policy) | `error.type` |
+| Retrieval / RAG | INTERNAL/CLIENT `retrieval {source}` | `gen_ai.operation.name=retrieval`, `gen_ai.data_source.id` | `server.address` (remote store) | `gen_ai.retrieval.top_k`, `app.rag.documents_retrieved` | `app.rag.top_score` | query text, documents | `error.type` |
+| MCP client / server | CLIENT/SERVER `{mcp.method.name} {target}` | `mcp.method.name` | `gen_ai.tool.name` (tools/call), `gen_ai.prompt.name` (prompts/get), `mcp.resource.uri` sanitised (resources/read), `mcp.session.id` (session), `server.*` (client), `client.*` (server) | `jsonrpc.request.id`, `mcp.protocol.version`, `network.transport` | | tool args/results | `rpc.response.status_code`, `error.type`; server leaves caller errors UNSET |
+| Cloud SDK / object storage | CLIENT | `rpc.system.name`, `rpc.method` | `cloud.region`, `aws.s3.bucket` etc. (applicable) | | object keys (if not sensitive) | credentials, signed URLs | `http.response.status_code`, `error.type` |
+| Serverless invocation | SERVER/CONSUMER (Root) | `faas.trigger` | `faas.invocation_id`, `faas.coldstart` (first call) | | | event payload | `error.type` |
+| Job run | INTERNAL root `job {name}` | `app.job.name`, `app.job.trigger` | link to the starting request (request-started) | `app.job.items.processed`/`failed` | `app.job.run.id` | | ERROR when the run failed |
+| Application function (code) | INTERNAL `{Class}.{method}` | `code.function.name` (fully qualified) | | `code.file.path`, `code.line.number` | `thread.name`, allow-listed arg summaries, enrichment attrs | raw args, `code.namespace` (deprecated) | result summary, `error.type` |
 
 `tenant.id` and `correlation.id` are this standard's own names, not OpenTelemetry's. The
 correlation ID comes from a valid incoming `x-correlation-id` header or is generated
 ([hooks](hooks.md)). `gen_ai.conversation.id` is the AI conversation or thread, while
-`session.id` stays the login or replay session; neither is derived from the other.
+`session.id` stays the login session; neither is derived from the other.
 
 Native span fields (`traceId`, `spanId`, `parentSpanId`, a low-cardinality name, kind, start and
 end time, status `{code, message}`, events, links, `traceState`, flags) are generated by the SDK.
@@ -155,18 +297,47 @@ emit older attribute names, the semantic-convention stability opt-in
 
 ## Logs, errors and trace correlation
 
-| Location | Field | Rule |
+| Group | Field | App log | Access log | Error log | Audit log | Owner |
+| --- | --- | --- | --- | --- | --- | --- |
+| Native | `timeUnixNano`, `severityNumber`, `severityText`, `body` | M | M | M | M | logger / bridge |
+| Native | `observedTimeUnixNano` | R | R | R | R | bridge / collector |
+| Native | `traceId`, `spanId`, `flags` | C (inside a span) | M | C | C | log bridge, or collector for stdout |
+| Native | `eventName` | O | M (`access_log`) | M (`exception`) | M (`audit.<action>`) | code / hooks |
+| Resource | the [resource](#resource) attributes | M | M | M | M | SDK or collector |
+| Scope | logger name/version | M | M | M | M | bridge |
+| Attr | `correlation.id` | M | M | M | M | hooks |
+| Attr | identity context: the [context](#request-and-identity-context) rows the code has, for example `user.id`, `tenant.id`, `session.id`, `user.roles`, `app.organization.id` | O | C ([context](#request-and-identity-context)) | O | C (authenticated actor; the rows the code has) | middleware |
+| Attr | `exception.type`, `exception.message` (sanitised) | — | — | M | C | error hook |
+| Attr | `exception.stacktrace` | — | — | R | O | error hook |
+| Attr | `code.function.name`, `code.file.path`, `code.line.number` | R | O | R | O | bridge |
+| Attr | `thread.id`, `thread.name` | O | O | O | O | bridge |
+| Attr | HTTP span attrs (method, route, status, sizes, client, UA) | P | M | O | C | access-log middleware |
+| Attr | allow-listed `http.request.header.<n>` / `http.response.header.<n>` / `http.request.cookie.<n>` | P | O | P | P | middleware |
+| Attr | `app.audit.action`, `app.audit.outcome`, `app.audit.target.type` | P | P | P | M | code |
+| Attr | `app.auth.method`, `app.auth.result` | P | C | P | C (auth events) | auth middleware |
+| Secrets | passwords, tokens, API keys, session cookies, raw `Cookie`/`Set-Cookie`, `Authorization`, private keys, card numbers | P | P | P | P | never logged, not even masked |
+| PII | any personal value logged in any field or message | C: masked ([rules](#pii-masking)) | C: masked | C: masked | C: masked | the logging helper, before the record is written |
+
+### PII masking
+
+Applies to logs, span attributes and exception messages.
+
+PII may appear only in masked form, through the shared masking helper. If masking fails, the value is dropped,
+never written raw. The audit flags any raw PII write.
+
+| Data | Rule | Example |
 | --- | --- | --- |
-| Native | `timeUnixNano`, `observedTimeUnixNano` | event time from the application |
-| Native | `severityNumber`, `severityText` | TRACE 1, DEBUG 5, INFO 9, WARN 13, ERROR 17, FATAL 21 |
-| Native | `body` | message text (a constant template, see [functions](functions.md#message-templates)) or a structured map |
-| Native | `traceId`, `spanId`, `flags` | must be native: set by the OpenTelemetry log bridge, or by the collector when it maps stdout lines; a JSON `trace_id` field on its own does not correlate |
-| Native | `eventName` | `exception` on error records; `access_log`, `health.probe.failed` and `job_run` on those records; the event's name on other event records ([enrichment](enrichment.md)) |
-| Scope | instrumentation scope name and version | the logger name, or the library that emits the record |
-| Attributes | `exception.type`, `exception.message`, `exception.stacktrace` | errors and exceptions; the message is sanitised before recording ([safe capture](safe-capture.md)) |
-| Attributes | `code.function.name`, `code.file.path`, `code.line.number`, `thread.id`, `thread.name` | where the event came from |
-| Attributes | `correlation.id` on every record; the full request context (`user.id`, `tenant.id`, `session.id`, client) on the access log, optional on application logs | application logs join the entry span through the native trace IDs |
-| Attributes (access log) | the HTTP server span's attributes, plus allow-listed `http.request.header.<name>` and `http.response.header.<name>`, `http.request.cookie.<name>` (custom) and selected body fields (custom, opt-in) | the raw `Cookie` and `Set-Cookie` headers are never logged |
+| Email | first character + `***` + domain | `jane.doe@example.com` → `j***@example.com` |
+| Phone | last 4 digits | `+44 7700 900123` → `***0123` |
+| Person name | first character of each part | `Jane Doe` → `J*** D***` |
+| Postal address | city + country only | `12 High St, Leeds, UK` → `Leeds, UK` |
+| Government ID, passport, tax ID | last 4 | `AB123456C` → `*****456C` |
+| Bank account / IBAN | last 4 | `GB29NWBK60161331926819` → `****6819` |
+| Date of birth | year only | `1990-04-12` → `1990` |
+| IP address (`client.address`) | kept in access/audit logs and on the entry span; last octet masked elsewhere | `203.0.113.27` → `203.0.113.0` |
+| Internal opaque IDs (`user.id`, `tenant.id`, order IDs) | not masked (pseudonymous) | `u-123` |
+| Free text, request/response bodies | not logged by default; the access log's opt-in body capture runs every value through the masking helper | — |
+| Card numbers, CVV, passwords, tokens | **P**: never logged, not even masked | — |
 
 Lines on stdout carry the event fields only; the collector attaches the resource from the same
 values as the SDK ([cross-signal identity](#cross-signal-identity)). JSON lines are parsed field by
@@ -175,57 +346,278 @@ native fields, plus a multiline rule for stack traces ([collector](collector/)).
 
 ## Metrics
 
-Ops metrics with short, bounded labels, produced by each stack's Prometheus client library and
-scraped from `/metrics` ([metrics](signals/metrics.md)).
+Ops metrics produced by each stack's Prometheus client library and scraped from `/metrics`
+([metrics](signals/metrics.md)). Names are this standard's Prometheus names. The OTel semconv instrument is given for mapping.
 
-| Metric | Labels |
+| Metric (type, unit) | OTel equivalent | Required labels | Optional labels |
+| --- | --- | --- | --- |
+| `http_server_request_duration_seconds` (histogram, s) | `http.server.request.duration` | `method`, `route`, `status_code` | — |
+| `http_server_requests_total` (counter) | — | `method`, `route` | — |
+| `http_server_active_requests` (gauge) | `http.server.active_requests` | `method` | — |
+| `http_client_request_duration_seconds` (histogram, s) | `http.client.request.duration` | `service`, `method`, `route`, `status_code` | — |
+| `http_client_active_requests` (gauge) | — | `service`, `method`, `route` | — |
+| `rpc_server_duration_seconds` / `rpc_client_duration_seconds` (histogram) | `rpc.server.call.duration` / `rpc.client.call.duration` | `method`, `status_code` | `service` |
+| `messaging_process_duration_seconds` (histogram), `messaging_messages_total` (counter) | `messaging.process.duration` / `messaging.client.sent.messages`, `messaging.client.consumed.messages` | `system`, `destination` (bounded), `operation` | `outcome` |
+| `db_pool_connections*`, `db_pool_wait_duration_seconds` | `db.client.connection.*` | — | `pool` (several pools) |
+| `websocket_connections` (gauge), `websocket_connections_total`, `websocket_disconnections_total`, `websocket_messages_received_total`, `websocket_messages_sent_total`, `websocket_send_errors_total`, `websocket_receive_errors_total` (counters) | — | — | — |
+| `job_runs_total` / `job_duration_seconds` | — | `job_name` (+`outcome` on counter) | — |
+| `gen_ai_client_operation_duration_seconds` | `gen_ai.client.operation.duration` | `provider`, `model`, `operation`, `outcome` | — |
+| `gen_ai_client_tokens_total` | `gen_ai.client.token.usage` | `provider`, `model`, `token_type` | — |
+| `gen_ai_client_time_to_first_chunk_seconds` | — | `provider`, `model` | — |
+| `mcp_server_operation_duration_seconds` / `mcp_client_operation_duration_seconds` (histogram) | `mcp.server.operation.duration` / `mcp.client.operation.duration` | `method`, `target` (fixed list), `outcome`; client adds `server` | — |
+| `a2a_client_request_duration_seconds` / `a2a_server_request_duration_seconds` (histogram) ([AI](#ai)) | — | `agent`, `method`, `outcome` | — |
+| `auth_attempts_total` (counter) — C (the service authenticates) | — | `method`, `result` | `provider` |
+| `app_health_probe_failures_total` | — | `probe`, `dependency` | — |
+| process/runtime defaults | runtime semconv | library defaults | — |
+| business metrics | — | team-defined | bounded values (`plan`, `tier`, `user_type`) after cardinality review |
+
+Each metric's `outcome` values are a fixed list defined with the metric ([metrics](signals/metrics.md)).
+
+The following are **PROHIBITED as labels**: user, tenant, org, account, customer, session, request, correlation, trace and
+span IDs; raw URLs and paths; SQL; error messages; emails; free text. Exemplars are optional and only used
+where both the client library and the backend support them.
+
+## Profiling
+
+Profiles carry no span-style attributes. They carry **labels**: static identity labels set once at profiler start,
+plus a few bounded dynamic labels around hot code. Each distinct label set is a separate profile series.
+
+### Profile types
+
+| Profile type | Class | Runtimes | Note |
+| --- | --- | --- | --- |
+| CPU | M (profiling enabled) | all | |
+| Allocation / heap (alloc objects/space, inuse) | R where the SDK supports it | Go, Java, .NET, Node (heap), Python (`pyroscope-io` 1.3+, `mem_enabled`) | Python allocation profiling is off by default; turn it on only after the overhead test |
+| Lock / mutex / block contention | O | Go, Java, .NET | |
+| Goroutines / threads | O | Go | |
+| Wall-clock | O | Node, Java | useful for I/O-bound services |
+
+### Profile labels
+
+| Label | Kind | Class | Owner / when |
+| --- | --- | --- | --- |
+| app name = `service.name` | static | M | profiler start, from the same yml values as the resource |
+| `service_namespace`, `service_version`, `deployment_environment_name` | static | M | profiler start |
+| platform rows of the [resource](#resource) (`k8s_*`, `cloud_*`, `aws_ecs_*`, `faas_*`, `gcp_cloud_run_job_*`, `host_name`, `container_id`) | static | C (same condition as in the resource) | profiler start, from the same env |
+| R/O resource rows (`telemetry_*`, `process_runtime_*`, `os_type`, …) | static | P | not profile labels; where an SDK adds one itself (the Node.js SDK adds runtime labels) it stays and the report says so |
+| `controller` | dynamic | C (code wrapped as a profiled hot path) | code, labels API |
+| `operation` | dynamic | O (bounded name inside a controller) | code, labels API |
+| `span_id` (`pyroscope.profile.id` on the span) | correlation | C (a span-profile integration exists: Go, Java, Python, .NET; on event-loop runtimes such as Node.js and Python asyncio, the module's heavy-section helper adds it) | integration or the module's helper, never business code |
+| `trace_id`/`span_id` set by hand; any user, tenant, session, request or correlation ID; route with IDs; free text | — | P | — |
+
+### Which operations get a `controller` label
+
+| Operation | Profiling label | Why |
+| --- | --- | --- |
+| HTTP server entry | O: `controller` = route template | only when the service is CPU-bound per route |
+| Application function, CPU/memory/lock heavy (parsing, conversion, serialisation, compression, crypto, image/report generation, PII redaction, tokenisation, big loops) | C: `controller` = `{Class}.{method}` | attributes CPU/memory to the code |
+| Job run | R: `controller` = `job {name}` | batch work is usually CPU-heavy |
+| GenAI prompt assembly / stream parsing | C (when heavy) | |
+| HTTP/DB/cache/messaging/RPC/MCP client calls, I/O-bound functions | P (no label) | the samples are idle time; spans already time them |
+| Start-up, helpers, middleware | P | out of scope |
+
+Runtime note: in Node.js a label covers synchronous work only (it doesn't cross `await`).
+
+## Correlation and propagation
+
+| Pair / transport | Mechanism | Class |
+| --- | --- | --- |
+| trace ↔ log | native `traceId`/`spanId` on records | M |
+| trace ↔ metric | `service.name` + `route` + time; exemplars | M / O |
+| trace ↔ profile | span-profile integration `span_id` | C (supported runtime) |
+| log ↔ profile | resource identity + time | M |
+| user/tenant ↔ trace | entry-span attributes | C |
+| HTTP, GraphQL-over-HTTP | `traceparent` and `tracestate` headers (M); allow-listed `baggage` header (O) | M |
+| gRPC | metadata, same keys | M |
+| Messaging | message headers; links for batches | M |
+| WebSocket | handshake headers; app messages carry `traceparent` field if the client sends one | C |
+| MCP | `params._meta.traceparent` / `tracestate` | M |
+| A2A | HTTP `traceparent` / `tracestate` headers on the JSON-RPC call | M |
+| Browser (Faro) → API | `traceparent` from the page's fetch/XHR spans to the listed API origins only; none for unsampled sessions | C (RUM on, API origin listed) |
+| Browser record ↔ trace | `traceID`/`spanID` on Faro events and exceptions inside a span | C |
+| GenAI agent ↔ tool / MCP / A2A / model calls | parent-child spans in one trace; same Langfuse trace via the feature stamps | M |
+
+## AI
+
+There are two paths. The **ops path** (the ops backend) gets operational attributes only. The **Langfuse path** also gets
+content, but only through the module's content helper, under `genai.content.capture` (`off` / `redacted` / `full`).
+Columns: **Ops** / **LF** = class on each path. Names are from OTel GenAI semconv (development status, emitted under
+`OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`); `app.*` are custom; `langfuse.*` are Langfuse's.
+
+### AI feature context (set by `genai.feature()` from what the app's code has)
+
+| Attribute | Type | Example | Ops | LF | Where | Note |
+| --- | --- | --- | --- | --- | --- | --- |
+| `langfuse.trace.name` | string | `support-chat` | P | M | every span in the feature | the feature name |
+| `langfuse.user.id` | string | `u-123` | P | C (code has a user) | every span in the feature | |
+| `langfuse.session.id` | string | `conv-88` | P | C (conversation) | every span in the feature | the conversation, not the login session |
+| `gen_ai.conversation.id` | string | `conv-88` | C (conversation) | C | AI spans | same value as above |
+| `langfuse.trace.metadata.team` | string | `support` | P | O | every span in the feature | |
+| `langfuse.release` | string | `1.8.2` | P | M | every span | from `service.version` |
+| `langfuse.environment` | string | `production` | P | C (experiment runs) | experiment spans | Langfuse reads the environment from the resource's `deployment.environment.name`; the module stamps it only on experiments |
+| `langfuse.trace.tags`, `langfuse.trace.metadata.<key>` | string[] / string | `["beta"]` | P | O | every span | bounded values |
+| any AI context in baggage | — | — | P | P | — | baggage reaches the model provider |
+| request context and HTTP detail: `client.*`, `user_agent.*`, `http.request.header.*`, `http.response.header.*`, `http.request.cookie.*`, `url.query`, `url.full`, `network.peer.*` | — | `client.address` | — | P | every span on the Langfuse path | the ops path follows [request and identity context](#request-and-identity-context); the Langfuse guard drops these from every copy in every content mode, and Langfuse keeps the `langfuse.*` context, the GenAI attributes and content under the policy |
+
+### Model call: chat, completion, embeddings (kind CLIENT, `{gen_ai.operation.name} {gen_ai.request.model}`)
+
+| Attribute | Type | Example | Ops | LF | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `gen_ai.operation.name` | string | `chat`, `text_completion`, `embeddings`, `generate_content` | M | M | instrumentation / module |
+| `gen_ai.provider.name` | string | `openai`, `anthropic`, `aws.bedrock`, `azure.ai.openai`, `gcp.vertex_ai` | M | M | instrumentation |
+| `gen_ai.request.model` | string | `gpt-4o-mini` | M | M | instrumentation |
+| `gen_ai.response.model` | string | `gpt-4o-mini-2024-07-18` | C (returned) | C | instrumentation |
+| `gen_ai.response.id` | string | `chatcmpl-…` | R | R | instrumentation |
+| `gen_ai.response.finish_reasons` | string[] | `["stop"]` | R | R | instrumentation |
+| `gen_ai.output.type` | string | `text`, `json`, `image` | O | O | instrumentation |
+| `gen_ai.request.max_tokens`, `.temperature`, `.top_p`, `.top_k`, `.frequency_penalty`, `.presence_penalty`, `.seed`, `.choice.count` | number / string[] | `0.2` | O (when set by the code) | O | instrumentation |
+| `gen_ai.request.stop_sequences` | string[] | `["END"]` | P (may hold prompt text) | O | instrumentation |
+| `gen_ai.request.encoding_formats`, `gen_ai.embeddings.dimension.count` | string[] / int | `["float"]`, `1536` | O (embeddings) | O | instrumentation |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | int | `812`, `154` | C (provider returns usage) | C | instrumentation |
+| `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, `gen_ai.usage.reasoning.output_tokens` | int | `600` | C (returned) | C | instrumentation |
+| `gen_ai.usage.cost` | double (USD) | `0.0031` | P | C (provider reports it) | module; never estimated |
+| `gen_ai.response.time_to_first_chunk` | double (s) | `0.42` | C (streaming) | C (`langfuse.observation.completion_start_time`) | module |
+| `gen_ai.prompt.name`, `app.genai.prompt.version` | string | `triage`, `7` | C (managed prompt) | C (`langfuse.observation.prompt.name/version`) | module |
+| `server.address`, `server.port` | string / int | `api.openai.com`, `443` | R | R | instrumentation |
+| `error.type` | string | `rate_limit`, `timeout` | C (failed) | C | instrumentation |
+| `langfuse.observation.level` | string | `WARNING` | P | C (degraded success: fallback, truncated, guardrail block) | module |
+| `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` | JSON | — | **P** | C (capture mode allows; redacted/sampled/capped) | content helper only |
+| legacy `gen_ai.prompt*`, `gen_ai.completion*` (older instrumentations) | — | — | **P** | C (treated as content, same policy) | content guard |
+
+### Agent, tool, retrieval, memory, workflow, guardrail, evaluation
+
+| Step | Kind / name | Mandatory | Conditional | Recommended / optional | Content (LF only, by policy) | Langfuse type |
+| --- | --- | --- | --- | --- | --- | --- |
+| Agent | INTERNAL (CLIENT for a remote agent) `invoke_agent {gen_ai.agent.name}` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name` | `gen_ai.agent.id` (has one), `gen_ai.conversation.id` | R `gen_ai.agent.version`; O `gen_ai.agent.description` | input/output messages | agent |
+| Agent creation | CLIENT (remote agent service) or INTERNAL `create_agent {name}` | `gen_ai.operation.name=create_agent`, `gen_ai.agent.name` | `gen_ai.agent.id` | | | — |
+| Planning step | INTERNAL `plan {agent}` | `gen_ai.operation.name` | | | plan text | — (plain span) |
+| Tool call | INTERNAL (CLIENT if remote) `execute_tool {gen_ai.tool.name}` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name` | `gen_ai.tool.call.id` (model issued it) | R `gen_ai.tool.type` (`function`, `extension`, `datastore`); O `gen_ai.tool.description` | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result`, `gen_ai.tool.definitions` | tool |
+| Retrieval / RAG | INTERNAL or CLIENT `retrieval {gen_ai.data_source.id}` | `gen_ai.operation.name=retrieval`, `gen_ai.data_source.id` | `server.address` (remote store), `db.system.name` (vector DB) | R `gen_ai.retrieval.top_k`, `app.rag.documents_retrieved`; O `app.rag.top_score` | `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents` | retriever |
+| Memory | INTERNAL/CLIENT `{gen_ai.operation.name}` | `gen_ai.operation.name`, `gen_ai.memory.store.id` | `gen_ai.memory.record.count` (read/write) | O `gen_ai.memory.record.id` | `gen_ai.memory.query.text`, `gen_ai.memory.records` | retriever for `search_memory`; plain span otherwise |
+| Workflow | INTERNAL `invoke_workflow {gen_ai.workflow.name}` | `gen_ai.operation.name`, `gen_ai.workflow.name` | | | | chain |
+| Guardrail | INTERNAL `guardrail {name}` | `app.genai.guardrail.name`, `app.genai.guardrail.result` (`pass`/`block`/`flag`) | WARNING level on block | | blocked text | guardrail |
+| Evaluation | INTERNAL `evaluate {gen_ai.evaluation.name}` | `gen_ai.evaluation.name` | `gen_ai.evaluation.score.value` or `.score.label` | | `gen_ai.evaluation.explanation` | evaluator |
+| Experiment run | — | — | `langfuse.experiment.*` (only when mode is `full`) | | expected output | — |
+
+Prohibited everywhere: prompt or user text in span names, content in logs/metrics/span events/baggage, and
+any content on the ops path.
+
+### MCP (client and server; context via `params._meta`)
+
+| Attribute | Type | Example | Class | Applies to |
+| --- | --- | --- | --- | --- |
+| `mcp.method.name` | string | `tools/call`, `resources/read`, `prompts/get`, `initialize` | M | all |
+| `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name` | string | `search_orders` | C (`tools/call`) | client + server |
+| `gen_ai.prompt.name` | string | `summarise` | C (`prompts/get`) on LF; P on ops (prompt names of MCP prompts stay in Langfuse) | client + server |
+| `mcp.resource.uri` | string | `file:///{path}` (sanitised or template) | C (`resources/*`) | client + server |
+| `mcp.session.id` | string | `sess-…` | C (session transport) | client + server |
+| `mcp.protocol.version` | string | `2025-06-18` | R | client + server |
+| `jsonrpc.request.id` | string | `17` | R | client + server |
+| `jsonrpc.protocol.version` | string | `2.0` | O | client + server |
+| `network.transport` | string | `pipe` (stdio), `tcp` | R | client + server |
+| `network.protocol.name` / `.version` | string | `http` / `2` | O (HTTP transports) | client + server |
+| `server.address`, `server.port` | string / int | `mcp.internal`, `443` | C (network transport) | client |
+| `client.address`, `client.port` | string / int | | C (network transport) | server |
+| `rpc.response.status_code` | string | `-32602` | C (JSON-RPC error) | client + server |
+| `error.type` | string | `tool_error`, `-32601` | C (failure; `tool_error` for `isError` results) | client + server |
+| tool arguments / results, resource contents, prompt text | — | — | P on ops; LF by content policy | — |
+
+Status: the client marks every JSON-RPC error ERROR. The server leaves the caller's errors (-32700, -32600, -32601,
+-32602, -32002) UNSET.
+
+### A2A (agent-to-agent protocol)
+
+OTel has no `a2a.*` conventions yet. The calling agent's span is an agent invocation ([agent steps](#agent-tool-retrieval-memory-workflow-guardrail-evaluation)), and the protocol fields are custom `app.a2a.*`.
+
+| Attribute | Type | Example | Class | Applies to |
+| --- | --- | --- | --- | --- |
+| span kind / name | — | CLIENT `invoke_agent {remote agent}` on the caller; SERVER `{a2a method}` on the remote agent | M | both |
+| `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name` (remote agent's card name) | string | `billing-agent` | M | client |
+| `rpc.system.name=jsonrpc`, `rpc.method` | string | `message/send`, `message/stream`, `tasks/get`, `tasks/cancel` | M | both |
+| `app.a2a.task.id` | string | `task-…` | C (task created) | both |
+| `app.a2a.context.id` | string | `ctx-…` | C (multi-turn) | both |
+| `app.a2a.task.state` | string | `submitted`, `working`, `input-required`, `completed`, `failed`, `canceled` | C (task returned) | both |
+| `app.a2a.protocol.version` | string | `0.3.0` | R | both |
+| `server.address`, `server.port`, `url.template` | | | M (client) | client |
+| `jsonrpc.request.id` | string | | R | both |
+| `error.type`, `rpc.response.status_code` | string | `-32001` (task not found) | C (failure) | both |
+| message parts / artifacts content | — | — | P on ops; LF by content policy | — |
+
+Propagation: W3C `traceparent` and `tracestate` in the HTTP headers. Streaming (`message/stream`, SSE) stays on one span until the stream ends.
+
+### AI metrics, logs and profiling
+
+| Signal | Item | Class | Labels / fields |
+| --- | --- | --- | --- |
+| Metric | `gen_ai_client_operation_duration_seconds` | M (GenAI used) | `provider`, `model` (fixed list, else `other`), `operation`, `outcome` |
+| Metric | `gen_ai_client_tokens_total` | C (usage returned) | `provider`, `model`, `token_type` (`input`, `output`, `cache_read`, `cache_creation`, `reasoning`) |
+| Metric | `gen_ai_client_time_to_first_chunk_seconds` | C (streaming) | `provider`, `model` |
+| Metric | `mcp_server_/mcp_client_operation_duration_seconds` | C (MCP) | [metrics](#metrics) |
+| Metric | `a2a_client_/a2a_server_request_duration_seconds` | C (A2A) | `agent`, `method`, `outcome` |
+| Metric | cost | P as a metric label or metric on the ops path | cost lives in Langfuse |
+| Log events | `genai.feedback.received`, `genai.approval.requested`, `genai.approval.decided`, `gen_ai.evaluation.result`, `guardrail.blocked`, `rag.no_documents`, AI errors | C (event occurs) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `error.type`; never content |
+| Profiling | prompt assembly, tokenisation, stream parsing, PII redaction of AI content | C (heavy) | `controller` label ([profiling](#profiling)) |
+| Profiling | model / MCP / A2A calls | P (no label) | I/O-bound |
+
+## Browser RUM (Faro)
+
+The page's fields as Faro sends them ([signals/rum.md](signals/rum.md)). Faro has its own model:
+metas on every record instead of a resource, and records of kind `exception`, `log`, `event`,
+`measurement` plus OpenTelemetry spans. Columns: **Faro field** is the meta or payload field,
+**Loki** is what the receiver writes (logfmt key, or label), **Class** is per record.
+
+### Metas
+
+| Faro field | Loki | Maps to | Class | Owner / when |
+| --- | --- | --- | --- | --- |
+| `app.name` | label `app_name` | `service.name` | M | runtime config, start-up |
+| `app.namespace` | `app_namespace` | `service.namespace` | M | runtime config |
+| `app.version` | `app_version` | `service.version` | M | runtime config (from the build's release) |
+| `app.environment` | label `app_environment` | `deployment.environment.name` | M | runtime config |
+| `sdk.name`, `sdk.version` | `sdk_name`, `sdk_version` | `telemetry.sdk.*` | M | Faro |
+| `session.id` | `session_id` | `session.id` | C (session sampled) | Faro session tracking |
+| `user.id` | `user_id` | `user.id` | C (signed in) | the app's verified auth state, `setUser({ id })` |
+| `user.hash`, `user.roles` | `user_hash`, `user_roles` | reference catalogue | O | auth state |
+| `user.email`, `user.username`, `user.fullName`, `user.attributes` | — | — | P | never set; the scrubber drops them |
+| `page.id` | `page_id` | — | O (with `pageTracking.generatePageId`) | runtime config |
+| `page.url` | `page_url` | `url.full` without query values or fragment | M | Faro, scrubbed |
+| `view.name` | `view_name` | route template | M (set by the router hook) | app router hook, `setView` |
+| `browser.name`, `.version`, `.os`, `.mobile`, `.language`, `.viewportWidth/Height` | `browser_*` | `browser.*` | R | Faro |
+| `browser.userAgent` | `browser_userAgent` | `user_agent.original` | O | Faro |
+| `app.release`, `app.bundleId` | `app_release`, `app_bundleId` | — | O (`release` selects a source-map path) | runtime config |
+| geolocation | — | — | P (Grafana Cloud only; `trackGeolocation: false`) | — |
+
+### Records
+
+| Record | Required fields | Conditional | Prohibited |
+| --- | --- | --- | --- |
+| `exception` | `type`, `value` (scrubbed), stack frames | `traceID`/`spanID` (inside a span), `context` (bounded) | personal data in `value` or `context`; one failure reported twice |
+| `log` | `level`, `message` (constant text, values in `context`) | `context` | `debug`/`trace`/`log` console levels; secrets |
+| `event` | `event_name` (bounded), `event_domain` | `event_data_*` attributes (bounded, allow-listed) | ids of other users, input values, element text |
+| `measurement` web vitals | `type=web-vitals`, the vital (`lcp`, `cls`, `inp`, `fcp`, `ttfb`), `delta`, `context_rating` | attribution fields (`trackAttributionSources`): LCP element and resource URL, INP phases and longest script, TTFB phases | `reportAllChanges` in production |
+| `measurement` custom | `type` (bounded), numeric `values` | `context` (bounded) | ids or free text as values |
+| span (browser CLIENT) | `http.request.method`, `url.full` (scrubbed), `server.address`, `server.port` | `http.response.status_code`, `session.id`, `user.id`, `faro.action.user.name` (inside a user action) | `user.email`, `user.name`; raw query strings |
+
+### Loki labels
+
+| Label | Class |
 | --- | --- |
-| `http_server_request_duration_seconds`, `http_server_requests_total`, `http_server_active_requests` | `method`, `route` (the template, or `unmatched`), `status_code`; the counter has no `status_code`, the gauge only `method` |
-| `http_client_request_duration_seconds`, `http_client_active_requests` | `service` (the dependency's name), `method`, `route` (the URL template), `status_code` (not on the gauge) |
-| Process and runtime | the client library's defaults (`process_*`, `nodejs_*`, `python_gc_*`, `go_*`, `jvm_*`) |
-| `db_pool_connections`, `db_pool_connections_active`, `db_pool_connections_idle`, `db_pool_connections_waiting`, `db_pool_wait_duration_seconds` | none; `pool` when the service has several pools |
-| `websocket_*` | none |
-| `app_health_probe_failures_total` | `probe` (the matching `exclude_paths` entry), `dependency` (the name the readiness response itself gives the failing check, never one the instrumentation picks; `unknown` when the response names none) |
-| `job_runs_total`, `job_duration_seconds` | `job_name`, and `outcome` on the counter |
-| `gen_ai_client_operation_duration_seconds`, `gen_ai_client_tokens_total`, `gen_ai_client_time_to_first_chunk_seconds` | `provider`, `model` (a fixed list, else `other`), and `operation` and `outcome` on the duration, `token_type` on the counter ([metrics](signals/metrics.md#genai-metrics)) |
-| App and business metrics, added by the team | bounded values only, e.g. plan, payment method or outcome |
+| `app_name`, `app_environment`, `kind` | M (`faro.receiver` `extra_log_labels` with empty values, which take them from each record) |
+| `service_name` | M (added by Loki) |
+| any id (`session_id`, `user_id`, `page_id`, `traceID`), `page_url`, `view_name`, `event_name` | P as labels: they stay in the line |
 
-Rules:
+## Who sets what, and when
 
-- **Names and labels** are the contract's on every stack, with short label names (`method`, not
-  `http_request_method`). A framework's ready-made metric is renamed to the contract, or its
-  mapping is documented.
-- **Bounded labels.** Never request, message, user, session, tenant or order IDs, raw URLs or
-  paths, or secrets. `route` is the template (`/orders/{id}`), or `unmatched` when no route
-  matched; `method` is a standard HTTP method, or `_OTHER`. Every distinct value is a new time
-  series, so one per user or URL overwhelms the metrics backend.
-- **No trace ids in metrics.** Metrics join traces and logs through the service, the route and
-  the time, never through a label.
-- **Preserved end to end.** Names, label sets, types and histogram buckets pass the collector
-  unchanged.
-- **OTLP push is opt-in,** for a team's own app metrics: OpenTelemetry instruments with bounded
-  attributes, the SDK's cardinality limit set in code, and the temporality from
-  `metrics.otlp.temporality` (cumulative, or delta where a backend requires it).
-
-## RUM and profiling
-
-| Signal | Metadata |
+| Time | Attributes |
 | --- | --- |
-| Browser RUM resource | `service.name`, `service.version`, `deployment.environment.name`, `browser.platform`, `browser.language`, `browser.brands`, `browser.mobile`, `user_agent.original` |
-| Browser spans and logs | `app.route` (the route template), `session.id` (the same value as the replay session), `correlation.id`, HTTP client attributes on fetch and XHR spans; exceptions with `exception.*` |
-| Web vitals | `web_vital.lcp`, `web_vital.inp`, `web_vital.cls`, `web_vital.fcp`, `web_vital.ttfb` histograms with explicit buckets; dimensions `web_vital.rating`, `app.route` |
-| Browser to backend | `traceparent` and `tracestate` on same-origin requests and allow-listed origins only, never a match-all pattern; the backend's CORS policy allows `traceparent`, `tracestate` and `baggage` |
-| Session replay (OneUptime) | the recorder's session ID is `session.id`; a replay entry in `tracestate` links each session to its backend traces |
-| Sensitive-input masking | replay uses the provider's masking mode and mask, block and ignore selectors on sensitive fields; the OpenTelemetry browser SDK never records input values or element text, strips query and fragment from `url.full` except allow-listed parameters, and sanitises exception messages ([details](safe-capture.md#browser-and-session-replay)) |
-| Profiles | application name = `service.name`; the other resource attributes as static labels in Pyroscope syntax, dots replaced by underscores (`service_namespace`, `service_version`, `deployment_environment_name`, `k8s_namespace_name`, `k8s_pod_name`, `k8s_pod_uid`, `k8s_node_name`, and `k8s_cluster_name` when set); a `span_id` sample label only from a supported span-profile integration (none for Node.js); dynamic labels bounded ([profiling labels](functions.md#profiling-labels)) |
-
-RUM is standardised on OneUptime: the OpenTelemetry Web SDK plus OneUptime session replay, with RUM
-classified by the `browser.*` resource attributes. Its OTLP destination and keys still come from
-configuration. Sessions, replay and profiles need their own instrumentation; resource attributes
-alone record nothing.
-
-Trace and span IDs are never set by hand as profile labels, because each value would create a
-profile series per request. Only a supported span-profile integration attaches them, where the
-runtime supports span profiles.
+| build (CI) | `service.version` |
+| deploy (chart) | `deployment.environment.name`, `k8s.namespace.name`, `k8s.pod.name`, `k8s.node.name`, `k8s.cluster.name` |
+| process start (SDK/loader) | resource, profiler static labels, semconv opt-ins |
+| request entry (hooks) | trace context, `correlation.id`, `http.route`, `client.address`, UA, client app |
+| authentication / tenant resolution | `user.id`, `user.roles`, `tenant.id`, `session.id`, `app.auth.*` |
+| operation (auto-instr / modules / code) | [operations](#operations) |
+| error handling | `error.type`, status, `exception.*` |
+| log emission | [logs](#logs-errors-and-trace-correlation) |
+| collector | k8s workload names, stdout log parsing, resource for scraped/stdout signals, k8s association, redaction backstop |
 
 [Documentation index](README.md)

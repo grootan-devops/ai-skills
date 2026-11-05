@@ -54,7 +54,13 @@ result = run_job("invoice-export", trigger = cron | manual | internal, links = [
   never dates, ids or arguments.
 - **Attributes.** `app.job.name`; `app.job.trigger`: `cron` for a schedule, `manual` for an
   operator's trigger (an admin endpoint, a CLI), `internal` for work the service starts itself;
-  when the run ends, `app.job.items.processed` and `app.job.items.failed`.
+  when the run ends, `app.job.items.processed` and `app.job.items.failed`
+  ([data-model.md](../data-model.md#operations)).
+- **Identity.** A run carries no request context of its own. `user.id` or `tenant.id` go on the
+  root span only when the job's own code has them for this run (a job run for one tenant, or the
+  user behind a manual trigger, as the job's verified input says); never copied from the request
+  that started it, and never a placeholder. A run that works through several tenants keeps them
+  off the root span, and each chunk's root carries its own tenant where the code has it.
 - **Status.** UNSET, also when some items failed; ERROR with `error.type` only when the run
   itself failed ([traces](../signals/traces.md#status)).
 - **Children.** Nested function spans ([functions.md](../functions.md)) and CLIENT spans for
@@ -161,8 +167,20 @@ spans, logs and metrics — often the ones that explain a failure.
 ## Kubernetes Jobs and CronJobs
 
 - `service.name` is the job's stable name, never the generated Job or pod name; `k8s.pod.name`
-  in the resource tells the runs' pods apart ([data-model.md](../data-model.md#resource)).
+  in the resource tells the runs' pods apart ([data-model.md](../data-model.md#resource)). The
+  collector adds `k8s.cronjob.name` and `k8s.job.name` from the pod's owners
+  ([collector](../collector/README.md)).
 - The pod annotations and downward-API environment from [charts.md](../charts.md) go on the
   Job's pod template. There is no metrics port and no ServiceMonitor.
+
+## Other platforms
+
+- **Cloud Run jobs:** the GCP detector sets `gcp.cloud_run.job.execution` and
+  `gcp.cloud_run.job.task_index`, which tell the executions and their tasks apart; there is no
+  pod. **Lambda** functions run as one invocation per event: the invocation is the root
+  (`faas.trigger`, `faas.invocation_id`, `faas.coldstart` on the first call), and the Lambda
+  detector sets `faas.name`, `faas.version` and `faas.instance`. **ECS scheduled tasks** take
+  their identity from the ECS detector (`aws.ecs.task.arn`). Each process flushes before it
+  exits ([config.md](../config.md#resource-per-platform)).
 
 [Documentation index](../README.md)

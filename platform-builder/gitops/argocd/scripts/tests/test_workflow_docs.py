@@ -23,7 +23,7 @@ _LOCAL_SECTION_REF = re.compile(r"\(§(\d+)\)")
 _STEP_REF = re.compile(r"(?:\[(\d\d)[^\]]*\]\([^)]*\)|\b(\d\d))\s+\*{0,2}steps?\s+(\d+)(?:[–-](\d+))?")
 _SECTION_HEADING = re.compile(r"^## (\d+)\. ", re.M)
 _STEP_HEADING = re.compile(r"^## Step (\d+):", re.M)
-#: Names of real environments and customers; examples use oneuptime, dev and prod instead.
+#: Names of real environments and customers; examples use storefront, dev and prod instead.
 _PRIVATE_NAMES = re.compile(r"(?i)\b(midgard|moheet|ezto|zentre|sparkzen|jaidar\w*|grootan\.com|grootan-(?!devops)\w+)")
 
 

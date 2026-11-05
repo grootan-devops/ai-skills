@@ -72,6 +72,9 @@ TELEMETRY = [
     ("go.uber.org/zap", "zap"), ("zerolog", "zerolog"), ("logrus", "logrus"),
     ("@pyroscope/nodejs", "pyroscope"), ("pyroscope-io", "pyroscope"),
     ("github.com/grafana/pyroscope-go", "pyroscope"), ("io.pyroscope", "pyroscope"),
+    ("@grafana/faro-", "faro"), ("@datadog/browser-rum", "datadog-rum"), ("@newrelic/browser-agent", "newrelic-browser"),
+    ("@elastic/apm-rum", "elastic-rum"), ("@dynatrace/", "dynatrace"), ("@opentelemetry/sdk-trace-web", "otel-web"),
+    ("@microsoft/applicationinsights-web", "appinsights-web"), ("@splunk/otel-web", "splunk-rum"),
 ]
 
 # GenAI by manifest name: model providers, AI frameworks, vector stores and LLM-observability tools.
@@ -391,8 +394,7 @@ def detect(root: Path, max_files: int = 20000) -> dict:
                     route = "/" + "/".join(segments)
                     if HEALTH_RE.search(f'"{route}"'):
                         health.add(route)
-        for name in ("instrumentation.ts", "instrumentation.js", "src/instrumentation.ts", "instrumentation-client.ts",
-                     "src/instrumentation-client.ts", "app/layout.tsx", "src/app/layout.tsx", "proxy.ts", "middleware.ts"):
+        for name in ("instrumentation.ts", "instrumentation.js", "src/instrumentation.ts", "proxy.ts", "middleware.ts"):
             if (root / name).is_file() and name not in result["entrypoints"]:
                 result["entrypoints"].append(name)
     result["health_paths"] = sorted(health)[:50]
@@ -401,12 +403,14 @@ def detect(root: Path, max_files: int = 20000) -> dict:
     ssr = {"nextjs", "sveltekit", "nuxt", "react-router", "remix", "angular-ssr", "astro"}
     servers = {"express", "fastify", "nestjs", "koa", "hapi", "hono"}
     if frameworks & ssr or (frameworks & ui and frameworks & servers):
-        # A server-rendered framework, or a server that also serves the pages: the proxy lives in the app.
+        # A server-rendered framework, or a server that also serves the pages: both sides are instrumented.
         result["workload"] = "fullstack"
-    elif frameworks & ui:
-        result["workload"] = "spa"
-    elif frameworks:
+        result["frontend"] = True
+    elif frameworks - ui - {"vite"}:
         result["workload"] = "api"
+    elif frameworks & ui:  # pages only: a static bundle gets browser RUM (Faro)
+        result["workload"] = "spa"
+        result["frontend"] = True
     return result
 
 

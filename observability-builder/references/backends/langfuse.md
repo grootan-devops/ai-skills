@@ -1,9 +1,9 @@
 # Langfuse
 
 Langfuse is the standard's LLM-observability destination: it receives the AI part of each
-trace, with content where the [content policy](../signals/genai.md#content) allows it and the
-content destination is `langfuse` ([destination](../signals/genai.md#destination)), and holds
-prompts and scores. It takes traces only; metrics, logs, profiles and the content-free copy of
+trace, with content where the [content policy](../signals/genai.md#content) allows it (content
+goes nowhere else: [content stays in Langfuse](../signals/genai.md#content-stays-in-langfuse)),
+and holds prompts and scores. It takes traces only; metrics, logs, profiles and the content-free copy of
 every trace go to the ops backend as usual. What to emit is in
 [signals/genai.md](../signals/genai.md); this page covers ingestion, the routes, what Langfuse
 reads from a span, and the platform work that stays in Langfuse.
@@ -155,7 +155,7 @@ the conventions.
 | Release, version | `langfuse.release`; `langfuse.version`, else `service.version` |
 | Environment | `langfuse.environment`, else the resource's `deployment.environment.name`, lowercased |
 | Tags, metadata | `langfuse.trace.tags`; `langfuse.trace.metadata.<key>` (top-level keys filterable); other span attributes land in the observation's metadata, resource attributes too |
-| Type | `langfuse.observation.type`, else `gen_ai.operation.name`: `chat` → generation, `embeddings` → embedding, `invoke_agent` → agent, `execute_tool` → tool (renamed to `gen_ai.tool.name`); `retrieval` and `invoke_workflow` stay plain spans; any model attribute → generation |
+| Type | `langfuse.observation.type`, else `gen_ai.operation.name`: `chat` → generation, `embeddings` → embedding, `invoke_agent` → agent (an A2A caller's span included), `execute_tool` → tool (renamed to `gen_ai.tool.name`); `retrieval` and `invoke_workflow` stay plain spans; any model attribute → generation |
 | Input | `langfuse.observation.input`, else `gen_ai.input.messages` with `gen_ai.system_instructions` prepended as a system message, `gen_ai.prompt`, `input.value`, and on tool spans `gen_ai.tool.call.arguments` |
 | Output | `langfuse.observation.output`, else `gen_ai.output.messages`, `gen_ai.completion`, `output.value`, and on tool spans `gen_ai.tool.call.result` |
 | Trace input, output | the root observation's input and output (`langfuse.observation.input` and `langfuse.observation.output` on the root span), which the trace list and the session view show; `langfuse.trace.input` and `langfuse.trace.output` are dropped (seen with 4.58) |
@@ -169,6 +169,33 @@ the conventions.
 The retrieval query and documents aren't read either, so the module's translation table maps
 them, the types and the time to first chunk
 ([signals/genai.md](../signals/genai.md#translation-to-langfuse)).
+
+## Attribute classes
+
+Each AI attribute has a class on this path, the **LF** column of
+[data-model.md](../data-model.md#ai); the rules per class are in
+[signals/genai.md](../signals/genai.md#attribute-classes). On the Langfuse path:
+
+- **M:** `langfuse.trace.name` and `langfuse.release` on every span of the feature, plus the M
+  rows of each step, the same as on the ops path. The environment comes from the resource's
+  `deployment.environment.name`, which Langfuse reads ([mapping](#mapping)); the module writes
+  `langfuse.environment` only on [experiment](#experiments) spans.
+- **C:**
+  - `langfuse.user.id` and `langfuse.session.id` when the code has a user and a conversation;
+  - `gen_ai.usage.cost` only when the provider reports it, which Langfuse takes as final;
+  - the prompt link for a managed prompt, never for a fallback ([prompt links](#prompt-links));
+  - `langfuse.observation.completion_start_time` for a streamed generation;
+  - `langfuse.observation.level=WARNING` on a degraded success;
+  - content, when the feature's mode allows it, through the content helper only.
+- **O:** the team, tags and other bounded metadata.
+- **P:** AI context in baggage, prompt or user text in a span name, `langfuse.trace.public`, and
+  request context and HTTP detail (`client.*`, `user_agent.*`, request and response headers,
+  cookies, `url.query`, `url.full`, `network.peer.*`): the content guard drops them from every
+  copy, whatever the content mode.
+
+MCP and A2A spans carry the same rows here as on the ops path, less the request context. Their message content (tool
+arguments and results, A2A message parts and artifacts) is content under the policy
+([mcp](../workloads/mcp.md), [a2a](../workloads/a2a.md)).
 
 ## Trace context in Langfuse 4
 
@@ -276,19 +303,8 @@ for the module's side). Verified with Langfuse 4.55: experiments are built from 
 
 Base64 images, audio and files in observations are uploaded to Langfuse's media store and
 replaced by reference strings when the SDK handles them. Under the standard, media is a
-reference (type, size, hash) unless `genai.content.media: upload`, the feature's mode is
-`full` and the destination is `langfuse` ([signals/genai.md](../signals/genai.md#modes)).
-
-## Without content
-
-With `genai.content.destination: ops`, content goes to the ops backend's AI views instead, and
-Langfuse receives the AI steps without it:
-
-- **What arrives:** the structure, types, usage, cost, timing, levels, prompt links and the trace
-  context.
-- **No content:** the module's content guard removes every content key on the Langfuse path, as
-  in mode `off`.
-- **Experiments** need the `langfuse` destination.
+reference (type, size, hash) unless `genai.content.media: upload` and the feature's mode is
+`full` ([signals/genai.md](../signals/genai.md#modes)).
 
 ## Environments and projects
 
@@ -329,6 +345,26 @@ When the module takes over from the SDK's `@observe` decorators and its OpenAI i
   migration note: evaluators and saved filters keyed on the old names need updating.
 - **Metadata:** the team stamp is `langfuse.trace.metadata.team`. Keep an existing metadata key
   that people filter on (`org`, for example) as well, or list the change.
+
+## Export failures
+
+A failed export to Langfuse is a WARN, at most one line per distinct message a minute, with the
+message only: no stack, no body, no URL with keys. The SDKs report it through OpenTelemetry's
+global error handler or their loggers, which default to ERROR, so the module routes them:
+
+- **JS:** `diag.setLogger(logger, DiagLogLevel.WARN)` in the preload, then
+  `setGlobalErrorHandler` from `@opentelemetry/core` with a handler that writes `diag.warn`
+  once per message a minute. `BatchSpanProcessor`, Langfuse's processor included, sends failed
+  exports there; the default handler writes `diag.error`. The JS asset's `routeExportErrors()`
+  does this.
+- **Python:** a filter on the `opentelemetry` and `langfuse` loggers that lowers ERROR to WARNING,
+  drops `exc_info` and passes one record per message a minute, writing to stderr, not the OTLP
+  log bridge ([sdk-notes](../sdk-notes.md#python)).
+- **Go:** `otel.SetErrorHandler` with a handler that logs `slog.Warn` once per message a minute;
+  the Go asset's size-cap warning goes through `otel.Handle` too.
+- **Java:** the exporters log through `java.util.logging` (`io.opentelemetry.exporter`, SEVERE on
+  a failed export); a handler on the `io.opentelemetry` logger, without parent handlers, writes
+  them at WARN once per message a minute.
 
 ## Platform handoff
 

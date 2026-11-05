@@ -17,7 +17,7 @@ SPACED = """global:
       name: apisix-private
 
 oauth:
-  clientId: oneuptime-chat
+  clientId: storefront-chat
   scopes:
     - openid
     - email
@@ -25,7 +25,7 @@ oauth:
 
 database:
   redis:
-    host: oneuptime-redis
+    host: storefront-redis
     auth:
       username: default
 
@@ -37,7 +37,7 @@ database:
 containers:
   main:
     image:
-      repository: "oneuptime/{{ .Values.component }}/dev"
+      repository: "storefront/{{ .Values.component }}/dev"
 
     resources:
       requests:
@@ -70,7 +70,7 @@ DATA = {
     "global": {"image": {"pullSecrets": ["registry-pull-credentials"]},
                "routes": {"domain": "dev.example.com", "ingressClass": "nginx-private"}},
     "routes": {"default": {"host": "app.{{ .Values.global.routes.domain }}"}},
-    "containers": {"main": {"image": {"repository": "oneuptime/app/dev", "tag": ""},
+    "containers": {"main": {"image": {"repository": "storefront/app/dev", "tag": ""},
                             "resources": {"requests": {"memory": "256Mi"}, "limits": {"memory": "512Mi"}}}},
     "database": {"postgresql": {"host": "postgres-cluster-rw.postgres", "port": 5432}},
     "jira": {"tempoLocationId": "2", "note": "<ask: jira note>"},

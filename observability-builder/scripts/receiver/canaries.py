@@ -1,9 +1,7 @@
 """Canary scan: which test values reached which stream. Values are compared, never printed or written.
 
-The receiver keeps replay chunks as metadata only, so a value typed into a masked field could not be
-looked for in the output folder afterwards; the scan runs over what the receiver holds in memory:
-OTLP request bodies (raw and decoded), Langfuse payloads and requests, replay events and requests,
-profile uploads and rejected requests.
+The scan runs over what the receiver holds in memory: OTLP request bodies (raw and decoded), Langfuse
+payloads and requests, profile uploads and rejected requests.
 """
 from __future__ import annotations
 
@@ -48,19 +46,16 @@ def _blob(value) -> bytes:
 def streams(store) -> dict[str, list[bytes]]:
     """What the receiver holds, grouped by stream, as lowercase bytes."""
     with store.lock:
-        otlp = list(store.otlp)
-        chunks, replay_requests = list(store.replay_chunks), list(store.replay_requests)
+        otlp, faro = list(store.otlp), list(getattr(store, "faro", []))
         profiles, rejected = list(store.profiles), list(store.rejected)
         langfuse_requests = (list(store.langfuse_scores), list(store.langfuse_prompt_fetches),
                              list(store.langfuse_media), list(store.langfuse_dataset_fetches))
-    out: dict[str, list[bytes]] = {"OTLP": [], "Langfuse": [], "replay events": [], "replay requests": [],
-                                   "profiles": [], "rejected requests": []}
+    out: dict[str, list[bytes]] = {"OTLP": [], "Langfuse": [], "Faro": [], "profiles": [], "rejected requests": []}
+    out["Faro"] += [_blob(p.raw) for p in faro]
     for payload in otlp:
         name = "Langfuse" if payload.destination == "langfuse" else "OTLP"
         out[name] += [_blob(payload.raw), _blob(payload.data)]
     out["Langfuse"] += [_blob(items) for items in langfuse_requests if items]
-    out["replay events"] += [_blob({"envelope": c.envelope, "events": c.events}) for c in chunks]
-    out["replay requests"] += [_blob(replay_requests)] if replay_requests else []
     out["profiles"] += [_blob(p.raw) for p in profiles]
     out["rejected requests"] += [_blob(rejected)] if rejected else []
     return out

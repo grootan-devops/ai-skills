@@ -1,3 +1,7 @@
+import contextlib
+import io
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -154,41 +158,30 @@ class AuditTests(unittest.TestCase):
 
     def test_browser_code_rules(self):
         write(self.root, "app/orders/form.tsx", "'use client';\nexport function Form() {\n"
-              "  const headers = { 'x-oneuptime-token': process.env.NEXT_PUBLIC_ONEUPTIME_TOKEN };\n"
-              "  span.setAttribute('app.note', event.target.value);\n}\n")
-        write(self.root, "instrumentation-client.ts", "new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/.*/] });\n")
-        write(self.root, "app/telemetry/v1/[signal]/route.ts", "headers['x-oneuptime-token'] = config.token;\n")
-        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "rum-"))]
-        self.assertIn(("browser-key", "app/orders/form.tsx:3"), found)
-        self.assertIn(("rum-input-capture", "app/orders/form.tsx:4"), found)
-        self.assertIn(("rum-propagate-all", "instrumentation-client.ts:1"), found)
-        self.assertFalse([f for f in found if f[1].startswith("app/telemetry")], "the server proxy may hold the key")
+              "  const headers = { Authorization: 'Api-Token ' + process.env.NEXT_PUBLIC_OTLP_TOKEN };\n}\n")
+        write(self.root, "app/api/export/route.ts", "headers.Authorization = 'Api-Token ' + config.token;\n")
+        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith("browser-")]
+        self.assertEqual(found, [("browser-key", "app/orders/form.tsx:3")])
 
     def test_browser_rules_in_other_frontends(self):
         write(self.root, "src/routes/orders/new/+page.svelte",
-              "<script>\n  const headers = { 'x-oneuptime-token': token };\n</script>\n")
-        write(self.root, "src/hooks.client.ts", "span.setAttribute('app.email', input.value);\n")
-        write(self.root, "app/components/OrderForm.vue", "const key = useRuntimeConfig().public.oneuptimeToken;\n")
-        write(self.root, "plugins/rum.client.ts", "new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/.*/] });\n")
+              "<script>\n  const headers = { Authorization: 'Api-Token ' + token };\n</script>\n")
+        write(self.root, "app/components/OrderForm.vue", "const key = useRuntimeConfig().public.otlpToken;\n")
         write(self.root, "src/app/order-form.component.ts",
-              "import { Component } from '@angular/core';\nconst t = import.meta.env.NG_APP_ONEUPTIME_TOKEN;\n")
-        write(self.root, "src/main.ts", "const key = import.meta.env.VITE_ONEUPTIME_API_KEY;\n")
-        for proxy in ("src/routes/telemetry/v1/[signal]/+server.ts", "server/api/telemetry.post.ts", "server.ts",
-                      "src/lib/rum.server.ts"):
-            write(self.root, proxy, "headers['x-oneuptime-token'] = config.token;\n")
-        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "rum-", "public-"))]
+              "import { Component } from '@angular/core';\nconst t = import.meta.env.NG_APP_OTLP_TOKEN;\n")
+        write(self.root, "src/main.ts", "const key = import.meta.env.VITE_TELEMETRY_API_KEY;\n")
+        for server in ("server/api/telemetry.post.ts", "server.ts", "src/lib/export.server.ts"):
+            write(self.root, server, "headers.Authorization = 'Api-Token ' + config.token;\n")
+        found = [(rule, loc) for sev, rule, loc in self.rules() if rule.startswith(("browser-", "public-"))]
         self.assertIn(("browser-key", "src/routes/orders/new/+page.svelte:2"), found)
-        self.assertIn(("rum-input-capture", "src/hooks.client.ts:1"), found)
         self.assertIn(("browser-key", "app/components/OrderForm.vue:1"), found)
-        self.assertIn(("rum-propagate-all", "plugins/rum.client.ts:1"), found)
         self.assertIn(("browser-key", "src/app/order-form.component.ts:2"), found)
         self.assertIn(("public-key-var", "src/main.ts:1"), found)
         write(self.root, "src/i18n.ts", "const tolgee = import.meta.env.VITE_APP_TOLGEE_API_KEY;\n")
         write(self.root, "src/app/pay.client.ts", "const stripe = process.env.NEXT_PUBLIC_STRIPE_KEY;\n")
         others = [(rule, loc) for sev, rule, loc in self.rules() if loc.startswith(("src/i18n.ts", "src/app/pay.client.ts"))]
         self.assertEqual(others, [], "only telemetry keys are this audit's concern")
-        self.assertFalse([f for f in found if "server" in f[1] or f[1].startswith("src/routes/telemetry")],
-                         "server-side proxies may hold the key")
+        self.assertFalse([f for f in found if "server" in f[1]], "server-side code may hold the key")
 
     def test_body_in_span_and_logged_headers(self):
         write(self.root, "src/c.ts", 'span.setAttribute("payload", JSON.stringify(req.body));\nlogger.info("in", req.headers);\n')
@@ -579,5 +572,420 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(self.located("sdk-internal-patch", include_tests=True), [])
 
 
+
+class DataModelRules(unittest.TestCase):
+    """Static rules for references/data-model.md: identity, request.id, code.namespace, PII, profiles, baggage,
+    excluded resource keys and ID-like metric labels."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def found(self, rule):
+        return [f.location for f in audit.audit(self.root, ["src/observability"]) if f.rule == rule]
+
+    def test_identity_from_raw_headers(self):
+        write(self.root, "src/a.ts", "span.setAttribute('user.id', req.headers['x-user-id']);\n"
+                                     "span.setAttribute('user.id', req.user.id);\n")
+        write(self.root, "src/b.py", "def handler(request, x_tenant_id: str = Header(None)):\n"
+                                     "    span.set_attribute('tenant.id', x_tenant_id)\n"
+                                     "    sid = request.cookies.get('session_id')\n"
+                                     "    span.set_attribute('session.id', sid)\n"
+                                     "    span.set_attribute('tenant.id', principal.tenant_id)\n")
+        write(self.root, "src/C.java", "void h(@RequestHeader(\"X-User-Id\") String userId) {\n"
+                                       "  span.setAttribute(\"user.id\", userId);\n}\n")
+        self.assertEqual(self.found("identity-from-header"), ["src/C.java:2", "src/a.ts:1", "src/b.py:2", "src/b.py:4"])
+
+    def test_request_id_and_code_namespace(self):
+        write(self.root, "src/a.ts", "span.setAttribute('request.id', id);\nspan.setAttribute('correlation.id', id);\n"
+                                     "logger.info('done', { requestId: rid, 'request_id': rid });\n")
+        write(self.root, "src/b.py", "logger.info('x', extra={'request_id': rid})\nrequest_id = uuid4()\n"
+                                     "span.set_attribute('code.namespace', cls)\nspan.set_attribute(CODE_NAMESPACE, cls)\n")
+        self.assertEqual(self.found("request-id-attribute"), ["src/a.ts:1", "src/a.ts:3", "src/b.py:1"])
+        self.assertEqual(self.found("code-namespace"), ["src/b.py:3", "src/b.py:4"])
+
+    def test_pii_unmasked(self):
+        write(self.root, "src/a.py", "\n".join([
+            "logger.info('signup %s', user.email)",
+            "logger.info('signup %s', mask_email(user.email))",
+            "logger.info(f'call {customer.phone_number}')",
+            "span.set_attribute('app.user.dob', profile.date_of_birth)",
+            "raise ValueError(f'bad {first_name}')",
+            "logger.info('sent', len(emails))",
+            "logger.info('checked', is_email(value))",
+            "logger.warning('invalid', code=ErrorCode.INVALID_EMAIL)",
+            "send_email(user)",
+        ]) + "\n")
+        write(self.root, "src/observability/masking.py", "logger.debug('masking %s', email)\n")
+        self.assertEqual(self.found("pii-unmasked"), ["src/a.py:1", "src/a.py:3", "src/a.py:4", "src/a.py:5"])
+
+    def test_values_read_by_key(self):
+        write(self.root, "src/k.py", "\n".join([
+            "log.info('invoice for %s card %s', body['email'], body[\"card_number\"])",
+            "span.set_attribute('customer.email', data.get('email'))",
+            "log.info('invoice %s', body['amount'])",
+        ]) + "\n")
+        self.assertEqual(self.found("pii-unmasked"), ["src/k.py:1", "src/k.py:2"])
+        self.assertEqual(self.found("secret-named-value"), ["src/k.py:1"])
+
+    def test_id_like_metric_labels(self):
+        write(self.root, "src/m.ts", "const c = new client.Counter({ name: 'orders_total', labelNames: ['tenant_id'] });\n"
+                                     "const h = new client.Histogram({ name: 'x', labelNames: ['route', 'method'] });\n")
+        write(self.root, "src/m.py", "ORDERS = Counter('orders_total', 'Orders', ['customer_id'])\n"
+                                     "PAGES = Counter('pages_total', 'Pages', labelnames=['path'])\n")
+        write(self.root, "src/m.go", 'var c = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "x"}, []string{"session_id"})\n')
+        write(self.root, "src/n.ts", "counter.add(1, { 'organization.id': org.id });\nmeter.record(1, { 'url.full': url });\n")
+        self.assertEqual(self.found("id-metric-label"), ["src/m.go:1", "src/m.py:1", "src/m.py:2", "src/m.ts:1",
+                                                         "src/n.ts:1", "src/n.ts:2"])
+
+    def test_profile_labels_come_from_the_resource(self):
+        write(self.root, "src/observability/profiling.py", "\n".join([
+            "pyroscope.configure(",
+            "    application_name=resource['service.name'],",
+            "    tags={'service_version': '1.2.3', 'process_runtime_name': 'cpython'},",
+            ")",
+            "pyroscope.configure(application_name=cfg.name, tags=static_labels(resource))",
+        ]) + "\n")
+        write(self.root, "src/observability/profiling.ts", "Pyroscope.init({ appName: 'checkout-api', tags });\n")
+        self.assertEqual(self.found("profile-label-mismatch"), ["src/observability/profiling.py:1",
+                                                                "src/observability/profiling.py:1",
+                                                                "src/observability/profiling.ts:1"])
+
+    def test_baggage_limits(self):
+        keys = ", ".join(f"'k{i}'" for i in range(9))
+        write(self.root, "src/observability/baggage.py", f"BAGGAGE_ALLOW_LIST = [{keys}]\n")
+        write(self.root, "src/observability/baggage2.ts", "const BAGGAGE_KEYS = ['tenant.id', 'authorization'];\n"
+                                                         "const MAX_BAGGAGE_BYTES = 512;\n")
+        write(self.root, "src/observability/ok.ts", "const BAGGAGE_KEYS = ['tenant.id', 'app.client.name'];\n"
+                                                    "const MAX_BAGGAGE_BYTES = 512;\n")
+        write(self.root, "src/app.ts", "propagation.setBaggage(ctx, bag);\n")
+        found = [(f.location, f.message.split(";")[0]) for f in audit.audit(self.root, ["src/observability"])
+                 if f.rule == "baggage-over-limit"]
+        self.assertEqual(sorted(found), [
+            ("src/app.ts:1", "baggage set outside the observability module"),
+            ("src/observability/baggage.py:1", "baggage allow-list with 9 keys"),
+            ("src/observability/baggage.py:1", "baggage allow-list without the 512-byte cap nearby"),
+            ("src/observability/baggage2.ts:1", "baggage allow-list names authorization"),
+        ])
+
+    def test_too_many_baggage_keys_in_the_project(self):
+        write(self.root, "src/observability/ctx.py", "\n".join(f"ctx = set_baggage('key{i}', v, ctx)" for i in range(10)) + "\n")
+        self.assertEqual(self.found("baggage-over-limit"), ["src/observability/ctx.py:9"])
+
+    def test_resource_excluded_keys(self):
+        write(self.root, "deploy/values.yaml", "env:\n  - name: K8S_POD_UID\n    valueFrom: {fieldRef: {fieldPath: metadata.uid}}\n"
+                                               "  - name: K8S_POD_NAME\n")
+        write(self.root, "observability.yml", "resource:\n  attributes:\n    vcs.ref.head.revision: abc\n"
+                                              "    k8s.cluster.name: prod\n")
+        write(self.root, ".env", "OTEL_NODE_RESOURCE_DETECTORS=env,host,process\nOTEL_RESOURCE_DISABLED_KEYS=process.pid,host.id\n")
+        write(self.root, "src/observability/resource.ts", "const r = resourceFromAttributes({ 'service.instance.id': id });\n"
+                                                          "const DROP = ['process.pid', 'host.id'];\n"
+                                                          "detectors: [envDetector, processDetector],\n")
+        self.assertEqual(self.found("resource-excluded-key"), [".env:1", "deploy/values.yaml:2", "observability.yml:3",
+                                                               "src/observability/resource.ts:1",
+                                                               "src/observability/resource.ts:3"])
+
+
+class SafetyRules(unittest.TestCase):
+    """Rules that keep the telemetry itself cheap and safe: export, credentials, binds, limits and log formatting."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def found(self, rule, include_tests=False):
+        return sorted((f.severity, f.location) for f in audit.audit(self.root, ["src/observability"], include_tests)
+                      if f.rule == rule)
+
+    def test_sync_exporter(self):
+        write(self.root, "src/observability/tracing.py", "from opentelemetry.sdk.trace.export import SimpleSpanProcessor\n"
+              "provider.add_span_processor(SimpleSpanProcessor(exporter))\n"
+              "provider.add_span_processor(BatchSpanProcessor(exporter))\n")
+        write(self.root, "src/observability/otel.ts", "const p = new SimpleSpanProcessor(exporter);\n"
+              "const l = new SimpleLogRecordProcessor(logExporter);\n")
+        write(self.root, "internal/observability/tp.go", "tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))\n")
+        write(self.root, "src/main/java/obs/Otel.java", "var p = SimpleSpanProcessor.create(exporter);\n")
+        write(self.root, "tests/test_tracing.py", "provider.add_span_processor(SimpleSpanProcessor(InMemorySpanExporter()))\n")
+        self.assertEqual(self.found("sync-exporter", include_tests=True), [
+            ("P1", "internal/observability/tp.go:1"), ("P1", "src/main/java/obs/Otel.java:1"),
+            ("P1", "src/observability/otel.ts:1"), ("P1", "src/observability/otel.ts:2"),
+            ("P1", "src/observability/tracing.py:2")])
+
+    def test_exporter_without_timeout_in_the_module(self):
+        write(self.root, "src/observability/a.py", "exporter = OTLPSpanExporter(endpoint=cfg.endpoint)\n")
+        write(self.root, "src/observability/b.py", "exporter = OTLPSpanExporter(endpoint=cfg.endpoint, timeout=cfg.timeout_s)\n")
+        write(self.root, "src/observability/c.ts", "const e = new OTLPTraceExporter({\n  url,\n  timeoutMillis: cfg.timeoutMs,\n});\n")
+        write(self.root, "src/observability/d.go", "exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpoint(ep))\n")
+        write(self.root, "src/observability/E.java", "var e = OtlpGrpcSpanExporter.builder()\n    .setEndpoint(ep)\n"
+              "    .setTimeout(Duration.ofSeconds(5))\n    .build();\n")
+        write(self.root, "src/app.py", "exporter = OTLPSpanExporter()\n")   # outside the module: sdk-outside-module's job
+        self.assertEqual(self.found("exporter-no-timeout"), [("P2", "src/observability/a.py:1"), ("P2", "src/observability/d.go:1")])
+
+    def test_plaintext_remote_endpoint(self):
+        write(self.root, "src/observability/otel.py", "\n".join([
+            "exporter = OTLPSpanExporter(endpoint='http://collector.prod.example:4317', insecure=True)",
+            "local = OTLPSpanExporter(endpoint='http://localhost:4317', insecure=True)",
+            "OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:4318'",
+            "PYROSCOPE_URL = 'http://pyroscope.monitoring:4040'",
+            "# sidecar collector in the same pod",
+            "OTLP_ENDPOINT = 'http://otel-agent:4317'",
+            "LANGFUSE_HOST = 'https://cloud.langfuse.example'",
+            "docs_link = 'http://example.org/page'",
+        ]) + "\n")
+        write(self.root, "src/observability/otel.go", "opts = append(opts, otlptracegrpc.WithInsecure())\n")
+        write(self.root, "observability.yml", "\n".join([
+            "exporter:",
+            "  endpoint: http://alloy:4317   # in-cluster collector, NetworkPolicy limits who can reach it",
+            "  insecure: true",
+            "profiling:",
+            "  endpoint: ${env:PYROSCOPE_URL:-http://localhost:4040}",
+            "langfuse:",
+            "  base_url: http://langfuse.tools.svc:3000",
+        ]) + "\n")
+        self.assertEqual(self.found("plaintext-remote-endpoint"), [
+            ("P1", "observability.yml:7"), ("P1", "src/observability/otel.go:1"),
+            ("P1", "src/observability/otel.py:1"), ("P1", "src/observability/otel.py:4")])
+
+    def test_private_hop_comment_on_the_line_above(self):
+        write(self.root, "observability.yml", "exporter:\n  # plaintext to the in-cluster collector; mesh mTLS covers the hop\n"
+              "  endpoint: http://alloy:4317\n")
+        self.assertEqual(self.found("plaintext-remote-endpoint"), [])
+
+    def test_telemetry_credential_literal(self):
+        write(self.root, "src/observability/otel.ts", "\n".join([
+            "const headers = { Authorization: 'Bearer abcdef0123456789' };",
+            "const ok = { Authorization: `Bearer ${token}` };",
+            "const dd = { 'DD-API-KEY': 'f00dfeedf00dfeed' };",
+            "const lf = { publicKey: 'pk-lf-1234abcd-5678' };",
+        ]) + "\n")
+        write(self.root, "src/observability/otel.py", "headers = {'x-honeycomb-team': key}\n"
+              "headers = {'x-honeycomb-team': 'hcaik_0123456789abcdef'}\n")
+        write(self.root, "observability.yml", "exporter:\n  headers:\n    authorization: ${file:/var/run/secrets/otlp-token}\n"
+              "    x-api-key: s3cr3tValue0123\n")
+        write(self.root, ".env", "OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic dXNlcjpwYXNzd29yZA==\n"
+              "OTEL_EXPORTER_OTLP_HEADERS=x-api-key=${API_KEY}\nLANGFUSE_SECRET_KEY=sk-lf-0123abcd-ef\n")
+        self.assertEqual(self.found("telemetry-credential-literal"), [
+            ("P0", ".env:1"), ("P0", ".env:3"), ("P0", "observability.yml:4"),
+            ("P0", "src/observability/otel.py:2"), ("P0", "src/observability/otel.ts:1"),
+            ("P0", "src/observability/otel.ts:3"), ("P0", "src/observability/otel.ts:4")])
+
+    def test_metrics_public_bind(self):
+        write(self.root, "src/observability/metrics.py", "\n".join([
+            "start_http_server(9464, addr='0.0.0.0')",
+            "start_http_server(9464, addr='0.0.0.0')  # Prometheus scrapes it from the pod network",
+            "start_http_server(9464, addr='127.0.0.1')",
+        ]) + "\n")
+        write(self.root, "src/server.py", "app.run(host='0.0.0.0', port=8080)\n")   # the app's own server
+        write(self.root, "observability.yml", "metrics:\n  prometheus:\n    host: 0.0.0.0\n"
+              "profiling:\n  # remote: the profiler pulls from the pod network\n  host: 0.0.0.0\n")
+        self.assertEqual(self.found("metrics-public-bind"), [("P2", "observability.yml:3"),
+                                                             ("P2", "src/observability/metrics.py:1")])
+
+    def test_attribute_limit_raised(self):
+        write(self.root, "src/observability/otel.ts", "const limits = { attributeValueLengthLimit: 65536 };\n"
+              "const ok = { attributeValueLengthLimit: 4096 };\n")
+        write(self.root, "src/observability/otel.py", "os.environ['OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT'] = '100000'\n"
+              "SpanLimits(max_span_attribute_length=8192)\n")
+        write(self.root, "deploy/values.yaml", "env:\n  - name: OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT\n    value: '8192'\n")
+        write(self.root, ".env", "OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT=20000\n")
+        self.assertEqual(self.found("attribute-limit-raised"), [("P2", ".env:1"), ("P2", "src/observability/otel.py:1"),
+                                                                ("P2", "src/observability/otel.ts:1")])
+
+    def test_attribute_limit_equal_to_max_chars_with_a_comment(self):
+        write(self.root, "observability.yml", "genai:\n  content:\n    max_chars: 16000\n")
+        write(self.root, "src/observability/otel.ts",
+              "// raised with genai.content.max_chars: long prompts, recorded in the report\n"
+              "const limits = { attributeValueLengthLimit: 16000 };\n"
+              "const other = { attributeValueLengthLimit: 16000 };\n"
+              "const more = { attributeValueLengthLimit: 20000 }; // max_chars\n")
+        write(self.root, ".env", "# equal to max_chars\nOTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT=16000\n")
+        self.assertEqual(self.found("attribute-limit-raised"), [("P2", "src/observability/otel.ts:3"),
+                                                                ("P2", "src/observability/otel.ts:4")])
+
+    def test_attribute_limit_comment_without_a_yml_value_is_not_enough(self):
+        write(self.root, "src/observability/otel.py", "SpanLimits(max_span_attribute_length=16000)  # max_chars\n")
+        self.assertEqual(self.found("attribute-limit-raised"), [("P2", "src/observability/otel.py:1")])
+
+    def test_log_extras_passthrough(self):
+        write(self.root, "src/observability/logs.py", "\n".join([
+            "class JsonFormatter(logging.Formatter):",
+            "    def format(self, record):",
+            "        extras = {k: v for k, v in record.__dict__.items() if k not in RESERVED}",
+            "        allowed = {k: v for k, v in record.__dict__.items() if k in ALLOWED_EXTRAS}",
+            "        for key, value in vars(record).items():",
+            "            out[key] = value",
+        ]) + "\n")
+        self.assertEqual(self.found("log-extras-passthrough"), [("P1", "src/observability/logs.py:3"),
+                                                                ("P1", "src/observability/logs.py:5")])
+
+    def test_eager_debug_format(self):
+        write(self.root, "src/observability/export.py", "\n".join([
+            "logger.debug(f'exported {len(batch)} spans')",
+            "logger.debug('exported %d spans', len(batch))",
+            "logger.debug('exported {} spans'.format(len(batch)))",
+            "logger.debug('exported %d spans' % len(batch))",
+            "if logger.isEnabledFor(logging.DEBUG):",
+            "    logger.debug(f'exported {len(batch)} spans')",
+            "logger.info(f'started {name}')",
+        ]) + "\n")
+        write(self.root, "src/observability/export.ts", "logger.debug(`exported ${batch.length} spans`);\n"
+              "logger.debug('exported ' + batch.length + ' spans');\nlogger.debug('exported', { count: batch.length });\n")
+        write(self.root, "src/observability/Export.java", "log.debug(\"exported {} spans\", n);\nlog.debug(String.format(\"exported %d\", n));\n")
+        self.assertEqual(self.found("eager-debug-format"), [
+            ("P2", "src/observability/Export.java:2"), ("P2", "src/observability/export.py:1"),
+            ("P2", "src/observability/export.py:3"), ("P2", "src/observability/export.py:4"),
+            ("P2", "src/observability/export.ts:1"), ("P2", "src/observability/export.ts:2")])
+
+    def test_detector_filtered_through_an_allow_list(self):
+        write(self.root, "src/observability/resource.py", "\n".join([
+            "ALLOWED_PROCESS_KEYS = {'process.runtime.name', 'process.runtime.version'}",
+            "detected = ProcessResourceDetector().detect()",
+            "kept = {k: v for k, v in detected.attributes.items() if k in ALLOWED_PROCESS_KEYS}",
+        ]) + "\n")
+        write(self.root, "src/observability/resource.ts", "const KEEP_KEYS = new Set(['host.name']);\n"
+              "const r = await detectResources({ detectors: [hostDetector] });\n"
+              "const attrs = Object.fromEntries(Object.entries(r.attributes).filter(([k]) => KEEP_KEYS.has(k)));\n")
+        write(self.root, "src/observability/raw.ts", "const r = await detectResources({ detectors: [hostDetector] });\n")
+        self.assertEqual(self.found("resource-excluded-key"), [("P2", "src/observability/raw.ts:1")])
+
+    def test_module_given_as_an_absolute_or_working_directory_path(self):
+        write(self.root, "src/observability/tracing.py", "provider = TracerProvider()\n")
+        absolute = str(self.root / "src" / "observability")
+        self.assertEqual(audit.module_path(self.root.resolve(), absolute), "src/observability")
+        self.assertEqual(audit.module_path(self.root.resolve(), "src/observability/"), "src/observability")
+        self.assertIsNone(audit.module_path(self.root.resolve(), "/elsewhere/obs"))
+        cwd = os.getcwd()
+        try:   # relative to the working directory, as a shell user types it
+            os.chdir(self.root.parent)
+            self.assertEqual(audit.module_path(self.root.resolve(), f"{self.root.name}/src/observability"), "src/observability")
+        finally:
+            os.chdir(cwd)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = audit.main([str(self.root), "--module", absolute, "--json"])
+        self.assertEqual(code, 0)
+        rules = {f["rule"] for f in json.loads(out.getvalue())}
+        self.assertNotIn("sdk-outside-module", rules)
+
+    def test_the_skill_scripts_inside_a_project_are_not_audited(self):
+        found = audit.audit(audit.SKILL_SCRIPTS.parent, ["scripts"])
+        self.assertFalse([f for f in found if f.location.startswith("scripts/")])
+
+    def test_logs_py_is_the_app_logger(self):
+        write(self.root, "app/observability/logs.py", "import logging\n")
+        write(self.root, "app/orders.py", "from app.observability import logs\n\ndef run():\n    print('starting')\n")
+        messages = {f.location: f.message for f in audit.audit(self.root, ["src/observability"]) if f.rule == "logger-bypass"}
+        self.assertIn("around the app logger (app/observability/logs.py)", messages["app/orders.py:4"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class FaroRules(unittest.TestCase):
+    """Browser RUM with Grafana Faro (references/signals/rum.md)."""
+
+    LEAKY = """import { initializeFaro, getWebInstrumentations } from '@grafana/faro-web-sdk';
+import { TracingInstrumentation } from '@grafana/faro-web-tracing';
+
+export const faro = initializeFaro({
+  url: import.meta.env.VITE_FARO_URL,
+  apiKey: 'abc123',
+  app: { name: 'shop', version: '1.0.0' },
+  instrumentations: [
+    ...getWebInstrumentations(),
+    new TracingInstrumentation({ instrumentationOptions: { propagateTraceHeaderCorsUrls: [/.*/] } }),
+  ],
+  consoleInstrumentation: { disabledLevels: [] },
+  webVitalsInstrumentation: { reportAllChanges: true },
+  trackGeolocation: true,
+});
+faro.api.setUser({ id: user.id, email: user.email, username: user.login });
+"""
+
+    CLEAN = """import { initializeFaro } from '@grafana/faro-web-sdk';
+import { makeBeforeSend } from './scrub';
+
+export function start(cfg) {
+  const faro = initializeFaro({
+    url: cfg.rum.endpoint,
+    apiKey: cfg.rum.api_key,
+    app: { name: cfg.service.name },
+    beforeSend: makeBeforeSend(),
+    instrumentationOptions: { propagateTraceHeaderCorsUrls: [/^https:\\/\\/api\\.example\\.com(\\/|$)/] },
+  });
+  faro.api.setUser({ id: session.userId });
+}
+
+export const signOut = () => faro.api.resetUser();
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def rules(self):
+        return sorted((f.severity, f.rule, f.location) for f in audit.audit(self.root, ["src/observability"])
+                      if f.rule.startswith(("faro-", "rum-")))
+
+    def test_leaky_setup(self):
+        write(self.root, "src/rum.ts", self.LEAKY)
+        write(self.root, "vite.config.ts", "export default { build: { sourcemap: true } };\n")
+        self.assertEqual(self.rules(), [
+            ("P1", "faro-propagate-all", "src/rum.ts:10"),
+            ("P1", "faro-user-pii", "src/rum.ts:16"),
+            ("P2", "faro-build-env-config", "src/rum.ts:5"),
+            ("P2", "faro-console-all", "src/rum.ts:12"),
+            ("P2", "faro-geolocation", "src/rum.ts:14"),
+            ("P2", "faro-key-literal", "src/rum.ts:6"),
+            ("P2", "faro-no-scrub", "src/rum.ts:4"),
+            ("P2", "faro-public-sourcemaps", "vite.config.ts:1"),
+            ("P2", "faro-report-all-changes", "src/rum.ts:13"),
+            ("P2", "faro-user-not-reset", "src/rum.ts:16"),
+        ])
+        # The public Faro key is reported once, by the Faro rule.
+        self.assertFalse([f for f in audit.audit(self.root, ["src/observability"])
+                          if f.rule == "telemetry-credential-literal"])
+
+    def test_page_url_in_events_and_query_access_log(self):
+        write(self.root, "src/rum.ts", "import { faro } from '@grafana/faro-web-sdk';\n"
+              "faro.api.pushEvent('search', { q, url: window.location.href });\n"
+              "faro.api.pushEvent('view', { path: window.location.pathname });\n")
+        write(self.root, "nginx.conf", "server {\n  access_log /dev/stdout combined;\n"
+              "  log_format j '{\"path\":\"$path_only\",\"m\":\"$request_method\"}';\n}\n")
+        write(self.root, "deploy/default.conf.template", "log_format j '{\"r\":\"$request\"}';\n")
+        self.assertEqual(self.rules(), [
+            ("P1", "faro-event-raw-url", "src/rum.ts:2"),
+            ("P2", "rum-access-log-query", "deploy/default.conf.template:1"),
+            ("P2", "rum-access-log-query", "nginx.conf:2"),
+        ])
+
+    def test_clean_setup(self):
+        write(self.root, "src/observability/rum/init.ts", self.CLEAN)
+        write(self.root, "vite.config.ts", "export default { build: { sourcemap: 'hidden' } };\n")
+        self.assertEqual(self.rules(), [])
+
+    def test_key_in_bundle_with_proxy_transport(self):
+        write(self.root, "observability.yml", "version: 1\nrum:\n  enabled: true\n  transport: proxy\n")
+        write(self.root, "src/rum.ts", "import { initializeFaro } from '@grafana/faro-web-sdk';\n"
+              "initializeFaro({ url: '/telemetry/faro/collect', apiKey: 'k-123', beforeSend: scrub, app: {} });\n")
+        self.assertEqual(self.rules(), [("P0", "faro-key-in-bundle", "src/rum.ts:2")])
+
+    def test_sourcemaps_ignored_without_faro(self):
+        write(self.root, "vite.config.ts", "export default { build: { sourcemap: true } };\n")
+        self.assertEqual(self.rules(), [])
+
+    def test_skill_templates_are_clean(self):
+        assets = Path(audit.__file__).resolve().parents[1] / "assets" / "js" / "faro"
+        for src in assets.glob("*.ts*"):
+            write(self.root, f"src/observability/rum/{src.name}", src.read_text(encoding="utf-8"))
+        self.assertEqual(self.rules(), [])

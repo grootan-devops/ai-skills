@@ -3,32 +3,40 @@
 
 uv run --no-project --with grpcio --with opentelemetry-proto --with protobuf --with pyyaml \
   scripts/receive.py --out <dir> [--grpc-port N] [--http-port N] [--pyroscope-port N] [--seconds N]
-                     [--replay-assets DIR] [--langfuse-keys FILE] [--langfuse-prompts FILE]
-                     [--langfuse-datasets FILE] [--genai-content-destination langfuse|ops] [--canaries FILE]
+                     [--langfuse-keys FILE] [--langfuse-prompts FILE] [--langfuse-datasets FILE]
+                     [--canaries FILE] [--platform NAME]
 
 Starts OTLP/gRPC, OTLP/HTTP and Pyroscope receivers on 127.0.0.1, on free ports unless ports are
-given, and prints their endpoints as one JSON line. The OTLP/HTTP port also serves the
-session-replay stand-in (OneUptime protocol; the recorder needs --replay-assets or
-OBS_RECEIVER_REPLAY_ASSETS) and a Langfuse stand-in (base URL = the OTLP/HTTP endpoint): traces on
+given, and prints their endpoints as one JSON line. The OTLP/HTTP port also takes Grafana Faro
+batches on /collect (browser RUM, CORS allowed for any origin: local testing only), and answers
+browsers' CORS preflights for the Faro OTLP transport. The OTLP/HTTP port also serves a Langfuse
+stand-in (base URL = the OTLP/HTTP endpoint): traces on
 /api/public/otel/v1/traces, kept apart from the ops stream; scores on /api/public/scores and in
 legacy batch ingestion; prompts from --langfuse-prompts (a JSON list of prompts); datasets for
 experiment runners from --langfuse-datasets (a JSON list of {"name", "items": [{"input",
 "expectedOutput", "metadata"}]}); auth compared with --langfuse-keys (a file holding
-`pk-lf-...:sk-lf-...`) and recorded as booleans. --genai-content-destination names where the
-service sends AI content (langfuse, the default, or ops), which decides where the summary expects
-it. While it runs it keeps <dir> up to date:
+`pk-lf-...:sk-lf-...`) and recorded as booleans. AI content is expected in the Langfuse stream
+only. While it runs it keeps <dir> up to date:
 
   <dir>/otlp/NNNN-<signal>-<transport>.json   every decoded export request
   <dir>/profiles/NNNN.bin, uploads.json       profile uploads and their labels
-  <dir>/replay/chunks.json, requests.json     replay chunk metadata (never event content) and requests
+  <dir>/faro/NNNN.json                        every Faro batch (browser RUM), with header names only
   <dir>/langfuse/scores.json, prompts.json,   scores (no text values), prompt and dataset fetches
     datasets.json, media.json                   and media upload attempts the Langfuse stand-in saw
   <dir>/canaries.json                         with --canaries: each canary's label and the streams
-                                              it reached (OTLP, Langfuse, replay events and requests,
-                                              profiles, rejected requests); never the values
+                                              it reached (OTLP, Langfuse, profiles, rejected
+                                              requests); never the values
+  <dir>/conformance.json                      data-model findings (references/data-model.md): the M, C
+                                              and P rows of resources, spans, logs, metric labels and
+                                              profile labels; keys and labels only, never values
   <dir>/summary.md                            resources, span trees, metrics, log records,
-                                              profiles, session replay, LLM observability
-                                              (keys and sizes only) and rejected requests
+                                              profiles, LLM observability
+                                              (keys and sizes only), data-model findings and rejected
+                                              requests
+
+--platform (k8s, ecs, lambda, cloud-run, cloud-run-job, vm, cloud-vm, docker, local) sets which platform rows
+the resource must carry; without it the platform is inferred from each resource (cloud.platform, k8s.*,
+aws.ecs.*, faas.*, container.id, host.name), and a resource with none gets the four service rows only.
 
 Stops on SIGINT or SIGTERM, or after --seconds. Header names are recorded, never their values.
 Exit code 0, or 3 when a requested port is busy.
@@ -48,20 +56,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from receiver import canaries as cn  # noqa: E402
-from receiver import genai, replay  # noqa: E402
+from receiver import conformance  # noqa: E402
+from receiver import genai  # noqa: E402
 from receiver import telemetry as tm  # noqa: E402
 from receiver.sink import PortBusyError, Sinks, Store  # noqa: E402
 
-
-def chunk_metadata(chunk) -> dict:
-    """A replay chunk without its events: the envelope, counts and headers."""
-    return {"seq": chunk.seq, "upload": chunk.upload, "frame": chunk.frame, "session_id": chunk.session_id,
-            "chunk_index": chunk.envelope.get("chunkIndex"), "is_final": chunk.is_final,
-            "has_full_snapshot": replay.has_full_snapshot(chunk.envelope, chunk.events),
-            "events": chunk.event_count if chunk.events is not None else None,
-            "event_types": replay.event_type_counts(chunk.events), "envelope": chunk.envelope,
-            "header_names": chunk.header_names, "token_ok": chunk.token_ok, "app_identifier": chunk.app_identifier,
-            "content_type": chunk.content_type, "received_at": chunk.received_at, "note": chunk.note}
 
 SPAN_KEYS = ("http.request.method", "http.route", "http.response.status_code", "url.full", "url.template",
              "server.address", "server.port", "service.peer.name", "code.function.name", "error.type",
@@ -156,38 +155,17 @@ def render_logs(records: list[tm.Record]) -> list[str]:
     return lines + [""]
 
 
-def render_replay(chunks: list, requests: list) -> list[str]:
-    """Sessions, chunks, full snapshots, masking modes and event counts; never event content."""
-    sessions: dict[str, list] = defaultdict(list)
-    for chunk in chunks:
-        sessions[chunk.session_id or "-"].append(chunk)
-    lines = [f"## Session replay ({len(sessions)} sessions, {len(chunks)} chunks)", ""]
-    if requests:
-        seen = Counter(f"{r['method']} {r['path']} {r['status']}" for r in requests)
-        lines += ["Requests: " + "; ".join(f"{k} x{n}" for k, n in sorted(seen.items())), ""]
-    else:
-        lines += ["No replay requests.", ""]
-    if chunks:
-        token = sum(1 for c in chunks if replay.TOKEN_HEADER in c.header_names)
-        app = sum(1 for c in chunks if c.app_identifier)
-        lines += [f"Chunks with {replay.TOKEN_HEADER}: {token}/{len(chunks)}; with {replay.APP_HEADER}: {app}/{len(chunks)}", "",
-                  "| Session | Chunks | Full snapshot | Final | Masking mode | Events (envelope / decoded) |",
-                  "|---|---|---|---|---|---|"]
-        for session, members in sessions.items():
-            full = "yes" if any(replay.has_full_snapshot(c.envelope, c.events) for c in members) else "no"
-            final = "yes" if any(c.is_final for c in members) else "no"
-            modes = ", ".join(sorted({str(c.envelope.get("maskingMode") or "-") for c in members}))
-            declared = sum(c.envelope.get("eventCount") or 0 for c in members if isinstance(c.envelope.get("eventCount"), int))
-            decoded = sum(c.event_count for c in members)
-            lines.append(f"| {session} | {len(members)} | {full} | {final} | {modes} | {declared} / {decoded} |")
-        lines.append("")
-    return lines
+def data_model_findings(store: Store, platform: str | None = None) -> list:
+    with store.lock:
+        payloads, profiles, faro = list(store.otlp), list(store.profiles), list(store.faro)
+    return conformance.check(payloads, profiles, platform, faro=faro)
 
 
-def render_summary(store: Store, canaries: dict[str, str] | None = None, content_destination: str = "langfuse") -> str:
+def render_summary(store: Store, canaries: dict[str, str] | None = None, platform: str | None = None,
+                   findings: list | None = None) -> str:
     with store.lock:
         payloads, profiles, rejected = list(store.otlp), list(store.profiles), list(store.rejected)
-        chunks, replay_requests = list(store.replay_chunks), list(store.replay_requests)
+        faro = list(store.faro)
         scores, fetches, media = list(store.langfuse_scores), list(store.langfuse_prompt_fetches), list(store.langfuse_media)
         dataset_fetches = list(store.langfuse_dataset_fetches)
     langfuse = [p for p in payloads if p.destination == "langfuse"]
@@ -209,8 +187,7 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None, content
     lines += render_traces(ops_spans)
     if langfuse_spans:
         lines += render_traces(langfuse_spans, "Traces sent to Langfuse")
-    lines += genai.summary(langfuse_spans, ops_spans, scores, fetches, media, langfuse, dataset_fetches,
-                           content_destination)
+    lines += genai.summary(langfuse_spans, ops_spans, scores, fetches, media, langfuse, dataset_fetches)
     lines += render_metrics(tm.metric_points(payloads))
     lines += render_logs(tm.otlp_records(payloads))
     lines += [f"## Profiles ({len(profiles)} uploads)", ""]
@@ -218,7 +195,10 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None, content
         labels = "; ".join(f"{k}={','.join(map(str, v[:5]))}" for k, v in sorted(upload.sample_labels.items()))
         lines.append(f"- {upload.app_name or '-'} ({upload.source}/{upload.format or 'pprof'}) "
                      f"static labels: {upload.labels or '-'}; sample labels: {labels or '-'}")
-    lines += ([""] if profiles else []) + render_replay(chunks, replay_requests)
+    lines += [""] if profiles else []
+    lines += render_faro(faro)
+    findings = data_model_findings(store, platform) if findings is None else findings
+    lines += ["", *conformance.summary(findings, platform)]
     if rejected:
         lines += ["", "## Rejected requests", ""]
         lines += [f"- {r['sink']} {r['path']}: {r['reason']}" for r in rejected]
@@ -227,15 +207,48 @@ def render_summary(store: Store, canaries: dict[str, str] | None = None, content
     return "\n".join(lines) + "\n"
 
 
+def render_faro(batches) -> list[str]:
+    """Browser RUM batches: counts by kind and name, apps, sessions and views; never values."""
+    if not batches:
+        return []
+    from collections import Counter
+    kinds, apps, sessions, views = Counter(), set(), set(), set()
+    spans = 0
+    for batch in batches:
+        data, meta = batch.data, batch.data.get("meta", {})
+        apps.add(f"{(meta.get('app') or {}).get('name', '-')} {(meta.get('app') or {}).get('environment', '-')}")
+        sessions.add((meta.get("session") or {}).get("id"))
+        if meta.get("app"):
+            views.add((meta.get("view") or {}).get("name", "default"))
+        for e in data.get("exceptions", []):
+            kinds[f"exception {e.get('type', '-')}"] += 1
+        for e in data.get("logs", []):
+            kinds[f"log {e.get('level', '-')}"] += 1
+        for e in data.get("events", []):
+            kinds[f"event {e.get('name', '-')}"] += 1
+        for e in data.get("measurements", []):
+            kinds[f"measurement {e.get('type', '-')}"] += 1
+        for rs in (data.get("traces") or {}).get("resourceSpans", []):
+            spans += sum(len(ss.get("spans", [])) for ss in rs.get("scopeSpans", []))
+    keyed = sum(1 for b in batches if b.api_key)
+    lines = [f"## Browser RUM (Faro): {len(batches)} batches, {len(sessions - {None})} sessions, {spans} spans", "",
+             f"Apps: {', '.join(sorted(apps))}. Views: {', '.join(sorted(v for v in views if v))}. "
+             f"X-API-Key present on {keyed} of {len(batches)} batches.", "",
+             "| Record | Count |", "|---|---|"]
+    lines += [f"| {k} | {n} |" for k, n in sorted(kinds.items())]
+    return lines + [""]
+
+
 class Receiver:
     """The sinks plus a writer that mirrors what they receive into the output directory."""
 
     def __init__(self, out: Path, grpc_port: int = 0, http_port: int = 0, pyroscope_port: int = 0,
-                 replay_assets: Path | None = None, langfuse_keys: Path | None = None,
-                 langfuse_prompts: Path | None = None, langfuse_datasets: Path | None = None,
-                 canaries: Path | None = None, content_destination: str = "langfuse"):
+                 langfuse_keys: Path | None = None, langfuse_prompts: Path | None = None,
+                 langfuse_datasets: Path | None = None, canaries: Path | None = None, platform: str | None = None):
+        if platform is not None and platform not in conformance.PLATFORMS:
+            raise ValueError(f"unknown platform {platform!r}; one of {', '.join(conformance.PLATFORMS)}")
         self.out = out
-        self.content_destination = content_destination  # the service's genai.content.destination
+        self.platform = platform
         self.store = Store()
         self.canaries = cn.load(canaries) if canaries else {}  # label -> value; values never leave memory
         if langfuse_keys:  # read once; only its base64 form is kept, for comparison
@@ -246,18 +259,18 @@ class Receiver:
             self.store.langfuse_prompts = json.loads(langfuse_prompts.read_text(encoding="utf-8"))
         if langfuse_datasets:
             self.store.langfuse_datasets = json.loads(langfuse_datasets.read_text(encoding="utf-8"))
-        self.replay_assets = replay.ReplayAssets(replay.resolve_assets_dir(replay_assets))
-        self.sinks = Sinks(self.store, grpc_port, http_port, pyroscope_port, replay_assets=self.replay_assets)
+        self.sinks = Sinks(self.store, grpc_port, http_port, pyroscope_port)
         self._payloads_written = 0
+        self._faro_written = 0
         self._profiles_written = 0
         self._rejected = 0
-        self._replay_seen = 0
         self._langfuse_seen = 0
 
     def start(self) -> dict:
-        for sub in ("otlp", "profiles", "replay", "langfuse"):
+        for sub in ("otlp", "profiles", "langfuse", "faro"):
             shutil.rmtree(self.out / sub, ignore_errors=True)
         (self.out / "canaries.json").unlink(missing_ok=True)
+        (self.out / "conformance.json").unlink(missing_ok=True)
         self.out.mkdir(parents=True, exist_ok=True)
         self.sinks.start()
         self.flush(force=True)
@@ -266,36 +279,36 @@ class Receiver:
                 "otlp_http": f"http://127.0.0.1:{ports['otlp_http']}",
                 "pyroscope": f"http://127.0.0.1:{ports['pyroscope']}",
                 "langfuse": f"http://127.0.0.1:{ports['otlp_http']}",
+                "faro": f"http://127.0.0.1:{ports['otlp_http']}/collect",
                 "summary": str(self.out / "summary.md")}
 
     def flush(self, force: bool = False) -> bool:
         """Write payloads that arrived since the last flush; rewrite the summary when anything did."""
         with self.store.lock:
             payloads = self.store.otlp[self._payloads_written:]
+            faro = self.store.faro[self._faro_written:]
             profiles = list(self.store.profiles)
             rejected = len(self.store.rejected)
-            chunks, replay_requests = list(self.store.replay_chunks), list(self.store.replay_requests)
             langfuse = {"scores": list(self.store.langfuse_scores), "prompts": list(self.store.langfuse_prompt_fetches),
                         "datasets": list(self.store.langfuse_dataset_fetches), "media": list(self.store.langfuse_media)}
         new_profiles = profiles[self._profiles_written:]
-        replay_seen = len(chunks) + len(replay_requests)
         langfuse_seen = sum(len(v) for v in langfuse.values())
-        if not (force or payloads or new_profiles or rejected != self._rejected or replay_seen != self._replay_seen
+        if not (force or payloads or faro or new_profiles or rejected != self._rejected
                 or langfuse_seen != self._langfuse_seen):
             return False
         if langfuse_seen:
             for name, items in langfuse.items():
                 _write_json(self.out / "langfuse" / f"{name}.json", items)
         self._langfuse_seen = langfuse_seen
-        if replay_requests:
-            _write_json(self.out / "replay" / "chunks.json", [chunk_metadata(c) for c in chunks])
-            _write_json(self.out / "replay" / "requests.json", replay_requests)
-        self._replay_seen = replay_seen
         for payload in payloads:
             _write_json(self.out / payload.name, {
                 "signal": payload.signal, "transport": payload.transport, "destination": payload.destination,
                 "auth": payload.auth, "content_type": payload.content_type,
                 "header_names": payload.header_names, "received_at": payload.received_at, "payload": payload.data})
+        for batch in faro:
+            _write_json(self.out / batch.name, {"received_at": batch.received_at, "header_names": batch.header_names,
+                                                "api_key": batch.api_key, "origin": batch.origin, "payload": batch.data})
+        self._faro_written += len(faro)
         for upload in new_profiles:
             (self.out / upload.name).parent.mkdir(parents=True, exist_ok=True)
             (self.out / upload.name).write_bytes(upload.raw)
@@ -312,7 +325,9 @@ class Receiver:
         self._rejected = rejected
         if self.canaries:
             _write_json(self.out / "canaries.json", cn.scan(self.store, self.canaries))
-        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries, self.content_destination),
+        findings = data_model_findings(self.store, self.platform)
+        _write_json(self.out / "conformance.json", {"platform": self.platform, "findings": [asdict(f) for f in findings]})
+        (self.out / "summary.md").write_text(render_summary(self.store, self.canaries, self.platform, findings),
                                              encoding="utf-8")
         return True
 
@@ -328,31 +343,25 @@ def main(argv=None) -> int:
     parser.add_argument("--http-port", type=int, default=0, help="OTLP/HTTP port (default: a free port)")
     parser.add_argument("--pyroscope-port", type=int, default=0, help="Pyroscope port (default: a free port)")
     parser.add_argument("--seconds", type=float, default=0, help="stop after this many seconds (default: until SIGINT/SIGTERM)")
-    parser.add_argument("--replay-assets", type=Path,
-                        help="folder with the OneUptime session-replay loader.js, recorder.js and manifest.json "
-                             f"(default: ${replay.ASSETS_ENV})")
     parser.add_argument("--langfuse-keys", type=Path,
                         help="file holding the expected `pk-lf-...:sk-lf-...` pair; requests are compared, never stored")
     parser.add_argument("--langfuse-prompts", type=Path, help="JSON list of prompts the Langfuse stand-in serves")
     parser.add_argument("--langfuse-datasets", type=Path,
                         help="JSON list of datasets (name, items with input, expectedOutput, metadata) for experiment runners")
-    parser.add_argument("--genai-content-destination", choices=genai.DESTINATIONS, default="langfuse",
-                        help="the service's genai.content.destination: where content may appear (default: langfuse)")
     parser.add_argument("--canaries", type=Path,
                         help="JSON {label: value} (or a list) of test values that must reach no stream; "
                              "the summary and canaries.json name the labels and streams, never the values")
+    parser.add_argument("--platform", choices=conformance.PLATFORMS,
+                        help="the platform whose resource rows are required (default: inferred per resource)")
     args = parser.parse_args(argv)
-    receiver = Receiver(args.out.resolve(), args.grpc_port, args.http_port, args.pyroscope_port, args.replay_assets,
-                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries,
-                        args.genai_content_destination)
+    receiver = Receiver(args.out.resolve(), args.grpc_port, args.http_port, args.pyroscope_port,
+                        args.langfuse_keys, args.langfuse_prompts, args.langfuse_datasets, args.canaries, args.platform)
     try:
         endpoints = receiver.start()
     except PortBusyError as exc:
         print(f"receiver error: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(endpoints), flush=True)
-    if args.replay_assets and not receiver.replay_assets.ok:
-        print(f"receiver warning: {receiver.replay_assets.error}; the replay recorder routes answer 404", file=sys.stderr)
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
@@ -365,8 +374,8 @@ def main(argv=None) -> int:
             break
     receiver.stop()
     with receiver.store.lock:
-        total, uploads, chunks = len(receiver.store.otlp), len(receiver.store.profiles), len(receiver.store.replay_chunks)
-    print(f"received {total} export requests, {uploads} profile uploads and {chunks} replay chunks; "
+        total, uploads = len(receiver.store.otlp), len(receiver.store.profiles)
+    print(f"received {total} export requests and {uploads} profile uploads; "
           f"summary in {receiver.out / 'summary.md'}", flush=True)
     return 0
 

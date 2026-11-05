@@ -23,9 +23,9 @@ Ask for anything missing, and pause until it's given:
 | --- | --- | --- |
 | GitOps repo URL | `https://<git-host>/<group>/<repo>.git` | Reuse the URL from workflow 01 if coming from there |
 | Argo CD URL | `https://argocd.<domain>` | Needed for `argocd` CLI steps |
-| Product name | `oneuptime`, `billing` | Lowercase, DNS-safe |
+| Product name | `storefront`, `billing` | Lowercase, DNS-safe |
 | Environment | `dev`, `qa`, `test`, `uat`, `pre-prod`, `prod` | |
-| Application project(s) | `https://<git-host>/<group>/oneuptime-api` | For the team's own apps: the projects onboarded with `platform onboard`. Checked in step 5. |
+| Application project(s) | `https://<git-host>/<group>/storefront-api` | For the team's own apps: the projects onboarded with `platform onboard`. Checked in step 5. |
 
 From these, derive the names with
 [naming.md](../../../core/references/naming.md) and **show them to the user before writing
@@ -39,10 +39,10 @@ python3 core/scripts/naming.py --repo-url <gitops-url> --readme <default-branch 
 | Name | Example |
 | --- | --- |
 | Cluster label, and where it came from | `edge-east` (repository name) |
-| Chart name (root and extras) | `edge-east-oneuptime` |
-| Branch | `oneuptime/dev` |
-| Default namespace | `oneuptime-dev` |
-| Root Application | `edge-east-oneuptime-dev-root` |
+| Chart name (root and extras) | `edge-east-storefront` |
+| Branch | `storefront/dev` |
+| Default namespace | `storefront-dev` |
+| Root Application | `edge-east-storefront-dev-root` |
 
 Before going further:
 

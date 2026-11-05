@@ -30,7 +30,7 @@ separate error SDK.
    ([genai.md](genai.md)).
 6. **`exception.*` only on the error record.** The keys belong to the one ERROR record per
    failure. A warning about a retry, a fallback or a telemetry upload that failed carries
-   `error.type` and a sanitised `app.error.message` instead: backends such as OneUptime turn any
+   `error.type` and a sanitised `app.error.message` instead: some backends turn any
    record with an `exception.*` key into an exception, whatever its severity.
 7. **Responses keep their format.** The global error handler records the failure, then returns
    the response the application returned before: the existing error format is an API contract.
@@ -40,7 +40,9 @@ separate error SDK.
    instrumentation silently changing the contract.
 9. **Sanitised messages.** `exception.message` is a template without payloads or credentials,
    and the message line inside `exception.stacktrace` uses the same sanitised text
-   ([safe-capture.md](../safe-capture.md)). Model-provider errors need care: their messages
+   ([safe-capture.md](../safe-capture.md)). Secrets never appear, not even masked; any other
+   personal value in a message goes through the shared masking helper, and is dropped if
+   masking fails ([PII masking](../data-model.md#pii-masking)). Model-provider errors need care: their messages
    can quote the prompt, a tool argument or a request id with the key's prefix, so the
    provider's message is replaced by the error type and status code, in records and in the
    status description of AI spans ([genai.md](genai.md#required-behaviour)).
@@ -65,14 +67,25 @@ separate error SDK.
 
 ## Fields
 
-Full definitions are in [data-model.md](../data-model.md).
+Full definitions are in [data-model.md](../data-model.md#logs-errors-and-trace-correlation),
+with a class per log kind. For the error record:
+
+| Class | Fields |
+| --- | --- |
+| M | timestamp, severity, body, event name `exception`, the resource, the logger scope, `correlation.id`, `exception.type`, `exception.message` (sanitised) |
+| C | `traceId`, `spanId`, `flags` (inside a span); personal values, masked |
+| R | `observedTimeUnixNano`, `exception.stacktrace`, `code.function.name`, `code.file.path`, `code.line.number` |
+| O | `thread.id`, `thread.name`, the identity context the code has, HTTP request attributes |
+| P | secrets, allow-listed headers and cookies (access log only), `app.audit.*`, `app.auth.*` |
+
+In short:
 
 | Where | Fields |
 | --- | --- |
 | Log record, native | severity ERROR (17) or FATAL (21), event name `exception`, trace id, span id, flags |
 | Log record, attributes | `exception.type`, `exception.message`, `exception.stacktrace`, `code.function.name`, `code.file.path`, `code.line.number`, `thread.name`, `correlation.id` |
 | Span | status ERROR with a sanitised message, `error.type` |
-| Metrics | the `status_code` label on the HTTP duration metrics (`error` when a call got no response), `outcome="failure"` on `job_runs_total`, failed probes in `app_health_probe_failures_total`; no error ids or messages in labels |
+| Metrics | the `status_code` label on the HTTP and RPC duration metrics (`error` when a call got no response), `outcome` on the messaging, GenAI, MCP and A2A metrics, `outcome="failure"` on `job_runs_total`, failed probes in `app_health_probe_failures_total`; no error ids or messages in labels ([metrics.md](metrics.md)) |
 
 On stdout the record is one line in `json`; in `plain` the stack trace follows on continuation
 lines that the collector joins into the same record ([app-logs.md](app-logs.md#plain)).
@@ -106,6 +119,6 @@ itself throws.
 [acceptance.md](../acceptance.md) checks one ERROR record per failure with `exception.*` and
 native ids, arriving as one record; ERROR and `error.type` on the failing span and its callers;
 no stack trace in a response and the existing error format unchanged; and canary secrets absent
-from exception messages.
+from exception messages, and personal values in them masked.
 
 [Documentation index](../README.md)

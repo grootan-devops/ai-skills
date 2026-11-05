@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import io.opentelemetry.api.common.Attributes;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -45,6 +46,20 @@ public interface ContentGuard {
 
     static boolean isContentKey(String key) {
         return CONTENT_KEYS.contains(key) || CONTENT_PATTERN.matcher(key).find();
+    }
+
+    /**
+     * Request context and HTTP detail, never on the Langfuse path whatever the content mode (references/data-model.md,
+     * "AI feature context"); the older semantic-convention names included. Langfuse keeps the langfuse.* feature
+     * context, the GenAI attributes and content under the policy.
+     */
+    Set<String> REQUEST_CONTEXT_KEYS = Set.of("url.query", "url.full", "http.url", "http.user_agent", "http.client_ip");
+    Pattern REQUEST_CONTEXT_PATTERN = Pattern.compile("^(client|user_agent|network\\.peer|net\\.peer|net\\.sock\\.peer)\\.|"
+            + "^http\\.(request|response)\\.header\\.|^http\\.request\\.cookie\\.");
+
+    /** The client's address, user agent, headers, cookies, query, full URL and peer: dropped from every Langfuse copy. */
+    static boolean isRequestContextKey(String key) {
+        return REQUEST_CONTEXT_KEYS.contains(key) || REQUEST_CONTEXT_PATTERN.matcher(key).find();
     }
 
     /**
@@ -111,13 +126,21 @@ public interface ContentGuard {
         }
         try {
             JsonNode node = Json.MAPPER.readTree(text);
-            if (node instanceof ArrayNode items) {
-                while (!items.isEmpty()) {
-                    String encoded = Json.MAPPER.writeValueAsString(items);
-                    if (encoded.codePointCount(0, encoded.length()) <= limit) {
-                        return encoded;
+            if (node instanceof ArrayNode items && !items.isEmpty()) {
+                // Linear: each item is encoded and measured once, then the oldest go until the rest fit.
+                String[] encoded = new String[items.size()];
+                int[] sizes = new int[encoded.length];
+                long total = 1 + encoded.length; // the brackets and the commas
+                for (int i = 0; i < encoded.length; i++) {
+                    encoded[i] = Json.MAPPER.writeValueAsString(items.get(i));
+                    sizes[i] = encoded[i].codePointCount(0, encoded[i].length());
+                    total += sizes[i];
+                }
+                for (int first = 0; first < encoded.length; first++) {
+                    if (total <= limit) {
+                        return "[" + String.join(",", Arrays.asList(encoded).subList(first, encoded.length)) + "]";
                     }
-                    items.remove(0);
+                    total -= sizes[first] + 1;
                 }
             }
         } catch (Exception notJson) {

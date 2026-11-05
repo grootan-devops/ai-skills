@@ -39,6 +39,22 @@ func IsContentKey(key attribute.Key) bool {
 	return contentExact[string(key)] || contentPattern.MatchString(string(key))
 }
 
+// Request context and HTTP detail, never on the Langfuse path whatever the content mode (references/data-model.md,
+// "AI feature context"); the older semantic-convention names included. Langfuse keeps the langfuse.* feature context,
+// the GenAI attributes and content under the policy.
+var requestContextExact = map[string]bool{
+	"url.query": true, "url.full": true, "http.url": true, "http.user_agent": true, "http.client_ip": true,
+}
+
+var requestContextPattern = regexp.MustCompile(`^(client|user_agent|network\.peer|net\.peer|net\.sock\.peer)\.|` +
+	`^http\.(request|response)\.header\.|^http\.request\.cookie\.`)
+
+// IsRequestContextKey reports a request-context or HTTP detail attribute: the client's address, user agent, headers,
+// cookies, query, full URL and peer. The exporter drops them from every Langfuse copy, in every content mode.
+func IsRequestContextKey(key attribute.Key) bool {
+	return requestContextExact[string(key)] || requestContextPattern.MatchString(string(key))
+}
+
 // FailedStatus is the status message of a failed AI span where content isn't allowed: its error type, never the
 // provider's message, which can quote the input.
 func FailedStatus(set attribute.Set) (attribute.KeyValue, bool) {
@@ -130,22 +146,28 @@ func Cap(text string, limit int) string {
 		return text
 	}
 	var items []json.RawMessage // each item as written: keys keep their order
-	if err := json.Unmarshal([]byte(text), &items); err == nil {
-		for len(items) > 0 {
-			if encoded := encodeList(items); utf8.RuneCountInString(encoded) <= limit {
-				return encoded
+	if err := json.Unmarshal([]byte(text), &items); err == nil && len(items) > 0 {
+		// Linear: each item is compacted and measured once, then the oldest go until the rest fit.
+		compact := make([]string, len(items))
+		total := 1 + len(items) // the brackets and the commas
+		for i, item := range items {
+			var buf bytes.Buffer
+			if json.Compact(&buf, item) != nil {
+				return cut(text, limit)
 			}
-			items = items[1:]
+			compact[i] = buf.String() // Compact leaves <, > and & as written, unlike json.Marshal
+			total += utf8.RuneCountInString(compact[i])
+		}
+		for first := range compact {
+			if total <= limit {
+				return "[" + strings.Join(compact[first:], ",") + "]"
+			}
+			total -= utf8.RuneCountInString(compact[first]) + 1
 		}
 	}
-	return string([]rune(text)[:limit-1]) + "…"
+	return cut(text, limit)
 }
 
-// encodeList writes the items back without escaping <, > and &, which json.Marshal would turn into \u003c and the like.
-func encodeList(items []json.RawMessage) string {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	_ = encoder.Encode(items)
-	return strings.TrimSuffix(buf.String(), "\n")
+func cut(text string, limit int) string {
+	return string([]rune(text)[:limit-1]) + "…"
 }

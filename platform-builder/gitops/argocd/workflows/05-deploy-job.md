@@ -23,7 +23,7 @@ you're unsure.
 
 | Value | Where it comes from |
 | --- | --- |
-| GitOps repository URL and branch | the branch, e.g. `oneuptime/dev` |
+| GitOps repository URL and branch | the branch, e.g. `storefront/dev` |
 | Values file and yq path of the app's entry | `app_add.py` printed both (`values.yaml`, `.apps.<key>` or `.apps.<group>.<release>`). Several entries on one chart use a yq union path. |
 | Image values file and paths | only when the image tag lives apart from the chart version |
 | Manifest file | only for an app deployed from `extras/manifests/`, in manifest mode |

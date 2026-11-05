@@ -28,7 +28,7 @@ last user message change the response:
   [[slow:<ms>]]     wait before the first byte (time to first chunk when streaming)
   [[tool:<name>]]   call that tool            [[no_tool]]       answer without a tool call
   [[args:<json>]]   the tool call's arguments
-  [[cache]], [[cache_write]], [[reasoning]]   report cached-input, cache-creation or reasoning tokens
+  [[cache]], [[cache_creation]], [[reasoning]]   report cached-input, cache-creation or reasoning tokens
 
 Error bodies quote the start of the request's input, as some providers and AI gateways do: a service
 that records provider messages verbatim (logs, span status descriptions) leaks content with them.
@@ -159,10 +159,10 @@ class Turn:
     def usage(self, completion_text: str) -> dict:
         prompt = self.prompt_tokens
         cached = prompt // 2 if "cache" in self.flags else 0
-        written = prompt // 4 if "cache_write" in self.flags else 0
+        written = prompt // 4 if "cache_creation" in self.flags else 0
         reasoning = REASONING_TOKENS if "reasoning" in self.flags else 0
         return {"prompt": prompt, "completion": words(completion_text) + reasoning, "cached": cached,
-                "cache_write": written, "reasoning": reasoning}
+                "cache_creation": written, "reasoning": reasoning}
 
 
 def truncated(text: str, limit) -> tuple[str, bool]:
@@ -366,9 +366,9 @@ class Handler(BaseHTTPRequestHandler):
         content = [{"type": "tool_use", "id": f"toolu_stub_{number}", "name": call[0], "input": call[1]}] if call \
             else [{"type": "text", "text": text}]
         # Anthropic counts cached input apart from input_tokens; the instrumentation adds them up.
-        anthropic_usage = {"input_tokens": usage["prompt"] - usage["cached"] - usage["cache_write"],
+        anthropic_usage = {"input_tokens": usage["prompt"] - usage["cached"] - usage["cache_creation"],
                            "output_tokens": usage["completion"], "cache_read_input_tokens": usage["cached"],
-                           "cache_creation_input_tokens": usage["cache_write"]}
+                           "cache_creation_input_tokens": usage["cache_creation"]}
         message = {"id": f"msg_stub_{number}", "type": "message", "role": "assistant", "model": model, "content": content,
                    "stop_reason": stop, "stop_sequence": None, "usage": anthropic_usage}
         headers = {"request-id": f"req_stub_{number}"}

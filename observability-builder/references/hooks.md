@@ -25,7 +25,8 @@ framework: routing ─► auth ─► handler (nested function spans) ─► glo
   ▼
 response end (response complete or connection closed)
   ├─ http.route: the template captured when the route matched, or unmatched
-  ├─ request attributes from the verified principal → entry span and access log
+  ├─ request attributes from the verified principal (trusted auth/tenant middleware,
+  │    never raw client headers) → entry span and access log
   ├─ span status (UNSET unless the request failed) and error.type
   ├─ HTTP server metrics
   └─ access-log record, sampled or not; for an excluded path nothing on success,
@@ -38,12 +39,17 @@ response end (response complete or connection closed)
    parsing, the framework's own middleware), so it sees and times every request, including
    those rejected before the handler.
 2. **Trace context.** Extract W3C `traceparent` and `tracestate` and the allow-listed baggage
-   keys. At public edges the incoming sampled flag is not trusted
+   keys: at most 8 keys and 512 bytes, never secrets, authorisation or AI context; the rest of
+   the header is dropped ([data-model.md](data-model.md#trace-context)). Baggage is never a
+   source of identity: a key that arrives in it is the caller's claim, not this service's
+   verified context. At public edges the incoming sampled flag is not trusted
    ([signals/traces.md](signals/traces.md)).
 3. **Correlation id.** Take `x-correlation-id` when it is valid: 1 to 128 characters from
    `A-Z`, `a-z`, `0-9`, `.`, `_`, `:` and `-`. Otherwise replace it with a generated random id
    and log a WARN with the reason, never the rejected value. A missing header also gets a
-   generated id. A request is never rejected because of its correlation id.
+   generated id: URL-safe base64 of 16 random bytes (Python `secrets.token_urlsafe(16)`, Node
+   `crypto.randomBytes(16).toString('base64url')`), not hex. A hex UUID can hold a 13 to 19
+   digit run that secret scanners, the receiver included, read as a card number. A request is never rejected because of its correlation id.
 4. **Logger context.** Bind the trace id, span id and `correlation.id` to the logger context,
    so every record written during the request carries them, the ids as native fields
    ([signals/app-logs.md](signals/app-logs.md)).
@@ -55,8 +61,9 @@ response end (response complete or connection closed)
    ([sdk-notes.md](sdk-notes.md)). The span name becomes `{method} {http.route}`, so
    `{method} unmatched` for a 404. The span, the HTTP server metrics and the access log carry
    the same route. `url.path` keeps the raw path, on the span, in the access log and in
-   error-log context, except that a segment holding an email becomes `{email}`; ids stay
-   visible ([safe-capture.md](safe-capture.md)).
+   error-log context, except that a segment holding personal data, such as an email, passes
+   through the shared masking helper (`jane.doe@example.com` becomes `j***@example.com`); ids
+   stay visible ([data-model.md](data-model.md#pii-masking), [safe-capture.md](safe-capture.md)).
 6. **No framework middleware spans.** Configure the framework instrumentation to skip its
    middleware, router and handler layers (Express: `ignoreLayersType` with `middleware`,
    `router` and `request_handler`), which keeps `http.route` on the `SERVER` span. The module's
@@ -67,9 +74,20 @@ response end (response complete or connection closed)
    Either way, the 404 handler sets `unmatched`, so no request keeps a mount path as its route
    ([sdk-notes.md](sdk-notes.md)).
 7. **Request attributes.** User, tenant, session and client app and version are set in code
-   from the auth layer's verified principal, read at response end: auth runs inside the
-   outermost middleware, so its result exists only then. Unverified tokens are never parsed.
-   The attributes go on the entry span and the access log only ([enrichment.md](enrichment.md)).
+   by the trusted auth or tenant middleware after authentication, from its verified principal,
+   read at response end: auth runs inside the outermost middleware, so its result exists only
+   then. They never come from raw client headers, cookies or query values (`X-User-Id`,
+   `X-Tenant-Id`), and unverified tokens are never parsed. An anonymous request has no user
+   attributes at all, never a placeholder. The attributes go on the entry span and the access
+   log only, plus the audit log for audited actions ([enrichment.md](enrichment.md)). The core
+   rows are `user.id`, `tenant.id`, `session.id`, `correlation.id`, `http.route`,
+   `client.address`, the user agent and the client app; every other identity row (roles, user
+   type, plan, organisation or account ids, `app.auth.*`) comes from the reference catalogue and
+   is set only where the service's code has the value
+   ([data-model.md](data-model.md#request-and-identity-context)). There is no `request.id`:
+   `correlation.id` covers it. Request context lives in the request's own context (OpenTelemetry
+   context, async-local or request scope), never in a global or a thread-local that outlives the
+   request, so one tenant's identity never reaches another's spans or logs.
 8. **Client address.** `client.address` comes from the framework's trusted-proxy resolver,
    configured with the real proxy addresses (e.g. Express `trust proxy`, Gin
    `SetTrustedProxies`, Spring's forwarded-header support); without a resolver it is the socket
@@ -77,7 +95,9 @@ response end (response complete or connection closed)
 9. **Bodies.** Tee request and response bodies only when `logging.access_log.*.body` enables
    it, capped at `max_bytes`, without consuming the stream: the handler still reads the whole
    body and responses still stream. Body content goes into the access log only, never into
-   span attributes ([signals/access-log.md](signals/access-log.md)).
+   span attributes ([signals/access-log.md](signals/access-log.md)). A selected field that
+   holds personal data passes through the shared masking helper before it is written; if
+   masking fails, the field is dropped ([data-model.md](data-model.md#pii-masking)).
 10. **Response end.** When the response completes or the connection closes, set the span status
     and `error.type`, record the HTTP server metrics and emit the access-log record. The status
     stays UNSET unless the response is 5xx or an exception escaped, and is never set to OK. The
@@ -125,7 +145,10 @@ The same contract applies, with each entry point's own semantic conventions
 ([data-model.md](data-model.md)), to gRPC server interceptors, message consumers (a
 per-message job log takes the access log's place), WebSocket connections and messages (root
 `SERVER` spans; connected and disconnected records take the access log's place), scheduled jobs
-and CLIs (a `job {name}` root span per run, flushed before exit) and MCP tool calls. An AI
+and CLIs (a `job {name}` root span per run, flushed before exit), MCP tool calls and A2A
+requests from other agents ([workloads/mcp.md](workloads/mcp.md), [workloads/a2a.md](workloads/a2a.md)).
+An identity on these entry points comes from the same trusted auth (a service identity, the
+token of an MCP or A2A client, the user a job runs for), never from the message payload. An AI
 entry point (a route, a WebSocket message type, a job item) declares its feature once, after
 authentication and before the first model call, so every span after it carries the AI trace
 context ([genai.md](signals/genai.md)). The workload pages cover each type:
@@ -179,7 +202,7 @@ These are rules, not recipes; the framework's own docs say how to apply them.
   parent-based sampling.
 - **Backend capabilities** come from the backend's docs: accepted protocols (e.g. Dynatrace
   takes `http/protobuf` only), metric temporality (Dynatrace and New Relic want delta), auth
-  style, attribute limits and profile formats (e.g. OneUptime can't ingest JFR).
+  style, attribute limits and profile formats (some can't ingest JFR).
   OpenTelemetry is deprecating span events, so prefer log-based exceptions.
 
 [Documentation index](README.md)

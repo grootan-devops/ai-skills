@@ -12,12 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "core" / "scripts")
 import repo_check  # noqa: E402
 
 
-def chart(name="oneuptime", pin="1.9.0", library="argocd-gitops-tpl-library"):
+def chart(name="storefront", pin="1.9.0", library="argocd-gitops-tpl-library"):
     return (f"apiVersion: v2\nname: {name}\nversion: 1.0.0\ndependencies:\n"
             f"  - name: {library}\n    version: {pin}\n    repository: oci://registry.example.com/charts\n")
 
 
-def environment(env="dev", branch="oneuptime/dev", pin="1.9.0", extras_pin=None, apps="{}"):
+def environment(env="dev", branch="storefront/dev", pin="1.9.0", extras_pin=None, apps="{}"):
     return {
         "Chart.yaml": chart(pin=pin),
         "values.yaml": f"enabled: true\nproject: developer\nenvironment: {env}\nbranch: {branch}\napps: {apps}\n",
@@ -75,8 +75,8 @@ class RepoCheckTests(unittest.TestCase):
 
     def test_a_gitops_repository_that_follows_its_pattern(self):
         self.branch("main", {"README.md": "# edge-east (cluster name)\n"})
-        self.branch("oneuptime/dev", environment())
-        self.branch("oneuptime/prod", environment("prod", "oneuptime/prod"))
+        self.branch("storefront/dev", environment())
+        self.branch("storefront/prod", environment("prod", "storefront/prod"))
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
         result = repo_check.check(repo_check.Repo(self.repo))
@@ -85,25 +85,25 @@ class RepoCheckTests(unittest.TestCase):
 
     def test_broken_environment_branches_are_problems(self):
         self.branch("main", {"README.md": "# gitops\n"})
-        self.branch("oneuptime/dev", environment(extras_pin="1.8.0"))
-        broken = environment("qa", "oneuptime/dev", apps="[a, b]")
+        self.branch("storefront/dev", environment(extras_pin="1.8.0"))
+        broken = environment("qa", "storefront/dev", apps="[a, b]")
         del broken["extras/Chart.yaml"]
-        self.branch("oneuptime/qa", broken)
+        self.branch("storefront/qa", broken)
         code, out = self.run_check()
         self.assertEqual(code, 1, out)
         self.assertIn("the root pins 1.9.0 but extras/ pins 1.8.0", out)
         self.assertIn("extras/Chart.yaml is missing", out)
         self.assertIn("`apps` is not a map", out)
-        self.assertIn("records branch 'oneuptime/dev', not 'oneuptime/qa'", out)
+        self.assertIn("records branch 'storefront/dev', not 'storefront/qa'", out)
 
     def test_drift_from_the_siblings_is_reported_but_not_a_problem(self):
         self.branch("main", {"README.md": "# gitops\n"})
         for env in ("dev", "qa", "uat"):
-            self.branch(f"oneuptime/{env}", environment(env, f"oneuptime/{env}"))
-        odd = environment("prod", "oneuptime/prod", pin="1.7.0")
+            self.branch(f"storefront/{env}", environment(env, f"storefront/{env}"))
+        odd = environment("prod", "storefront/prod", pin="1.7.0")
         odd["values.yaml"] = odd["values.yaml"].replace("project: developer\n", "")
         del odd["templates/apps.yaml"]
-        self.branch("oneuptime/prod", odd)
+        self.branch("storefront/prod", odd)
         code, out = self.run_check()
         self.assertEqual(code, 0, out)
         self.assertIn("pins 1.7.0; most branches pin 1.9.0", out)

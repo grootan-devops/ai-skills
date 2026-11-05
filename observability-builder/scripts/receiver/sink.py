@@ -22,8 +22,8 @@ from opentelemetry.proto.collector.logs.v1 import logs_service_pb2, logs_service
 from opentelemetry.proto.collector.metrics.v1 import metrics_service_pb2, metrics_service_pb2_grpc
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
 
-from . import genai, pprof, replay
-from .capture import Payload, ProfileUpload, ReplayChunk
+from . import genai, pprof
+from .capture import FaroPayload, Payload, ProfileUpload
 
 REQUESTS = {
     "traces": trace_service_pb2.ExportTraceServiceRequest,
@@ -236,9 +236,7 @@ class Store:
         self.otlp: list[Payload] = []
         self.profiles: list[ProfileUpload] = []
         self.rejected: list[dict] = []
-        self.replay_chunks: list[ReplayChunk] = []
-        self.replay_requests: list[dict] = []
-        self.expected_token: str | None = None  # a token to compare x-oneuptime-token with; compared, never stored
+        self.expected_token: str | None = None  # a backend token to look for in headers; compared, never stored
         self.expected_langfuse_basic: str | None = None  # base64(public:secret) to compare with; never stored
         self.langfuse_prompts: list = []  # prompts the stand-in serves
         self.langfuse_datasets: list = []  # datasets the stand-in serves, each with its items
@@ -246,9 +244,9 @@ class Store:
         self.langfuse_scores: list[dict] = []
         self.langfuse_prompt_fetches: list[dict] = []
         self.langfuse_media: list[dict] = []
+        self.faro: list[FaroPayload] = []
         self._otlp_seq = 0
         self._profile_seq = 0
-        self._upload_seq = 0
 
     def add_otlp(self, signal: str, transport: str, message, raw: bytes, content_type: str, header_names,
                  token_headers=(), destination: str = "ops", auth: dict | None = None) -> Payload:
@@ -259,6 +257,12 @@ class Store:
                               sorted(set(header_names)), time.time(), sorted(set(token_headers)),
                               destination, dict(auth or {}))
             self.otlp.append(payload)
+        return payload
+
+    def add_faro(self, data: dict, raw: bytes, header_names, api_key: bool, origin: str) -> FaroPayload:
+        with self.lock:
+            payload = FaroPayload(len(self.faro) + 1, data, raw, sorted(set(header_names)), time.time(), api_key, origin)
+            self.faro.append(payload)
         return payload
 
     def add_score(self, body: dict, auth: dict) -> dict:
@@ -283,30 +287,6 @@ class Store:
         with self.lock:
             self.langfuse_media.append({"seq": len(self.langfuse_media) + 1, "content_type": content_type,
                                         "bytes": length, "auth": auth, "received_at": time.time()})
-
-    def replay_token_ok(self, value: str | None) -> bool | None:
-        """Whether x-oneuptime-token equals the expected token; None when none was set."""
-        if not self.expected_token:
-            return None
-        return value is not None and value.strip() == self.expected_token
-
-    def add_replay_upload(self, frames: list, header_names, token_ok: bool | None, app_identifier: bool,
-                          content_type: str) -> list[ReplayChunk]:
-        with self.lock:
-            self._upload_seq += 1
-            chunks = [ReplayChunk(len(self.replay_chunks) + i + 1, self._upload_seq, i, frame.envelope, frame.events,
-                                  sorted(set(header_names)), token_ok, app_identifier, content_type, time.time(), frame.note)
-                      for i, frame in enumerate(frames)]
-            self.replay_chunks.extend(chunks)
-        return chunks
-
-    def add_replay_request(self, method: str, path: str, status: int, header_names, token_ok: bool | None,
-                           app_identifier: bool, frames: int = 0) -> None:
-        with self.lock:
-            self.replay_requests.append({
-                "seq": len(self.replay_requests) + 1, "method": method, "path": path, "status": status,
-                "header_names": sorted(set(header_names)), "token_ok": token_ok, "app_identifier": app_identifier,
-                "frames": frames, "received_at": time.time()})
 
     def next_profile_seq(self, count: int = 1) -> int:
         with self.lock:
@@ -345,35 +325,62 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:  # keep the receiver output quiet
         pass
 
-    def reply(self, status: int, body: bytes = b"", content_type: str = "text/plain", cors: bool = False) -> None:
+    def reply(self, status: int, body: bytes = b"", content_type: str = "text/plain") -> None:
         self.send_response(status)
+        self._cors()
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        if cors:
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
 
-CORS_HEADERS = f"content-type, {replay.TOKEN_HEADER}, {replay.APP_HEADER}, x-oneuptime-user-ref"
+    def _cors(self) -> None:
+        """Browsers (Faro, the Faro OTLP transport) post cross-origin; echo the origin, local testing only."""
+        origin = self.headers.get("Origin") if self.headers else None
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
 
 
 class OtlpHttpHandler(_Handler):
-    """POST /v1/{traces,metrics,logs} with protobuf or JSON bodies, gzip accepted; the replay stand-in."""
+    """POST /v1/{traces,metrics,logs} with protobuf or JSON bodies, gzip accepted; the Langfuse stand-in;
+    POST /collect for Grafana Faro batches (browser RUM)."""
 
-    assets: replay.ReplayAssets | None = None  # set per server class
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "Content-Type, Content-Encoding, Idempotency-Key, Traceparent, X-API-Key, X-Faro-Session-Id, "
+                         "X-Scope-OrgID")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _faro_post(self, path: str) -> None:
+        try:
+            body = read_body(self)
+            data = json.loads(body or b"{}")
+        except (OSError, ValueError, EOFError, zlib.error):
+            self.store.reject("faro", path, "unreadable body")
+            return self.reply(400, b"unreadable body")
+        if not isinstance(data, dict) or not isinstance(data.get("meta"), dict):
+            self.store.reject("faro", path, "not a Faro payload (no meta)")
+            return self.reply(400, b"not a Faro payload")
+        self.store.add_faro(data, body, list(self.headers.keys()), bool(self.headers.get("X-API-Key")),
+                            self.headers.get("Origin", ""))
+        self.reply(202, b"ok")
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path.rstrip("/")
-        sink = "replay" if path.startswith(replay.PREFIX) else "langfuse" if path.startswith("/api/public") else "otlp-http"
+        if path == "/collect" or path.startswith("/collect/"):
+            return self._faro_post(path)
+        sink = "langfuse" if path.startswith("/api/public") else "otlp-http"
         try:
             body = read_body(self)
         except (OSError, ValueError, EOFError, zlib.error):
             self.store.reject(sink, path, "unreadable body")
             return self.reply(400, b"unreadable body")
-        if sink == "replay":
-            return self._replay_post(path, body)
         destination, auth = "ops", None
         if sink == "langfuse":
             auth = genai.auth_facts(self.headers, self.store.expected_langfuse_basic)
@@ -473,56 +480,7 @@ class OtlpHttpHandler(_Handler):
         path = url.path
         if path.startswith("/api/public"):
             return self._langfuse_get(path.rstrip("/"), url.query)
-        if not path.startswith(replay.PREFIX):
-            return self.reply(404, b"unknown path")
-        assets = self.assets
-        if path in (replay.LOADER, replay.RECORDER):
-            if assets is None or not assets.ok:
-                status, body, content_type = 404, b"replay assets not configured", "text/plain"
-            else:
-                body = assets.loader if path == replay.LOADER else assets.recorder
-                status, content_type = 200, "application/javascript; charset=utf-8"
-        elif path == replay.CONFIG:
-            status, body, content_type = 200, json.dumps(replay.policy(assets)).encode(), "application/json"
-        elif path == replay.VALIDATE:
-            status, body, content_type = 200, b'{"valid":true}', "application/json"
-        else:
-            self.store.reject("replay", path, "unknown path")
-            status, body, content_type = 404, b"unknown path", "text/plain"
-        self._record_replay("GET", path, status)
-        self.reply(status, body, content_type, cors=True)
-
-    def do_OPTIONS(self) -> None:  # noqa: N802 (CORS preflight from a browser that calls the sink directly)
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", CORS_HEADERS)
-        self.send_header("Access-Control-Max-Age", "600")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def _record_replay(self, method: str, path: str, status: int, frames: int = 0) -> None:
-        self.store.add_replay_request(method, path, status, list(self.headers.keys()),
-                                      self.store.replay_token_ok(self.headers.get(replay.TOKEN_HEADER)),
-                                      self.headers.get(replay.APP_HEADER) is not None, frames)
-
-    def _replay_post(self, path: str, body: bytes) -> None:
-        if path != replay.CHUNK:
-            self.store.reject("replay", path, "unknown path")
-            self._record_replay("POST", path, 404)
-            return self.reply(404, b"unknown path", cors=True)
-        try:
-            frames = replay.parse_chunk_body(body)
-        except replay.ChunkError as exc:
-            self.store.reject("replay", path, f"malformed chunk: {exc}")
-            self._record_replay("POST", path, 400)
-            return self.reply(400, json.dumps({"error": "malformed chunk"}).encode(), "application/json", cors=True)
-        self.store.add_replay_upload(frames, list(self.headers.keys()),
-                                     self.store.replay_token_ok(self.headers.get(replay.TOKEN_HEADER)),
-                                     self.headers.get(replay.APP_HEADER) is not None,
-                                     self.headers.get("Content-Type", ""))
-        self._record_replay("POST", path, 202, len(frames))
-        self.reply(202, json.dumps(replay.CHUNK_REPLY).encode(), "application/json", cors=True)
+        return self.reply(404, b"unknown path")
 
 
 class PyroscopeHandler(_Handler):
@@ -587,13 +545,11 @@ def port_open(port: int, host: str = "127.0.0.1") -> bool:
 
 
 class Sinks:
-    """The three telemetry sinks on 127.0.0.1 (and ::1 when the ports are fixed); replay on the OTLP/HTTP one."""
+    """The three telemetry sinks on 127.0.0.1 (and ::1 when the ports are fixed)."""
 
-    def __init__(self, store: Store, grpc_port: int = 4317, http_port: int = 4318, pyroscope_port: int = 4040,
-                 replay_assets: replay.ReplayAssets | None = None):
+    def __init__(self, store: Store, grpc_port: int = 4317, http_port: int = 4318, pyroscope_port: int = 4040):
         self.store = store
         self.ports = {"otlp_grpc": grpc_port, "otlp_http": http_port, "pyroscope": pyroscope_port}
-        self.replay_assets = replay_assets
         self._grpc = None
         self._http: list[ThreadingHTTPServer] = []
 
@@ -638,7 +594,7 @@ class Sinks:
         self._grpc = server
 
     def _start_http(self, key: str, handler: type) -> None:
-        handler_class = type(handler.__name__, (handler,), {"store": self.store, "assets": self.replay_assets})
+        handler_class = type(handler.__name__, (handler,), {"store": self.store})
         requested = self.ports[key]
         server = _Server(("127.0.0.1", requested), handler_class)
         self.ports[key] = server.server_address[1]

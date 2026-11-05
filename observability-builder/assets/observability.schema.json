@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/observability-library/observability.schema.json",
   "title": "observability.yml",
-  "description": "Observability settings for one service: a shared resource, one section per signal and the GenAI section. A thin wrapper that the loader turns into standard OTEL_* settings; see references/config.md.",
+  "description": "Observability settings for one service: a shared resource, one section per signal the GenAI section and the page's browser RUM settings. A thin wrapper that the loader turns into standard OTEL_* settings; see references/config.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -50,17 +50,39 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "attributes": {
-          "description": "The pod identity from the downward API: k8s.namespace.name, k8s.pod.name, k8s.pod.uid and k8s.node.name; plus k8s.cluster.name where several clusters send to one backend, which the downward API doesn't provide, so the chart sets it per cluster. The standard adds nothing else. Values that resolve empty are dropped. Identity keys have their own fields.",
+          "description": "Kubernetes only: the pod identity from the downward API, k8s.namespace.name, k8s.pod.name and k8s.node.name; plus k8s.cluster.name where several clusters send to one backend, which the downward API doesn't provide, so the chart sets it per cluster. Other platforms (ECS, Lambda, Cloud Run, VM, plain Docker) get their rows from the SDK's platform detectors, not from here. The standard never adds k8s.pod.uid, service.instance.id, host.id, deployment.id, process.* or vcs.*, and never a per-request value. Values that resolve empty are dropped. Identity keys have their own fields.",
           "type": "object",
           "propertyNames": {
             "pattern": "^[^\\s,=]+$",
             "not": {
-              "enum": [
-                "service.name",
-                "service.namespace",
-                "service.version",
-                "service.instance.id",
-                "deployment.environment.name"
+              "anyOf": [
+                {
+                  "enum": [
+                    "service.name",
+                    "service.namespace",
+                    "service.version",
+                    "service.instance.id",
+                    "deployment.environment.name",
+                    "deployment.id",
+                    "k8s.pod.uid",
+                    "host.id",
+                    "process.pid",
+                    "process.command_line",
+                    "process.command_args",
+                    "process.executable.name",
+                    "process.executable.path",
+                    "user.id",
+                    "tenant.id",
+                    "session.id",
+                    "correlation.id"
+                  ]
+                },
+                {
+                  "pattern": "^vcs\\."
+                },
+                {
+                  "pattern": "^process\\.(pid|command|command_line|command_args|executable)(\\.|$)"
+                }
               ]
             }
           },
@@ -381,101 +403,8 @@
         }
       }
     },
-    "rum": {
-      "description": "Browser RUM and session replay. Configuration is served to the browser at runtime.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "$ref": "#/$defs/boolean",
-          "default": false
-        },
-        "exporter": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "endpoint": {
-              "description": "Backend OTLP base URL the same-origin proxy forwards to (the browser posts to /telemetry/v1/<signal> on its own origin).",
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            "headers": {
-              "description": "Added server-side by the proxy; never sent to the browser.",
-              "$ref": "#/$defs/headers"
-            }
-          }
-        },
-        "app_identifier": {
-          "description": "Identifier of the browser application in the RUM backend.",
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "session_replay": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "description": "Record sessions. Starts only with input masking in place.",
-              "$ref": "#/$defs/boolean",
-              "default": false
-            },
-            "host": {
-              "description": "Origin of the replay backend the proxy forwards to; the recorder appends /telemetry/session-replay/... itself.",
-              "$ref": "#/$defs/nonEmptyString"
-            },
-            "headers": {
-              "description": "Headers the replay proxy adds, e.g. the replay backend's key, when rum.exporter goes to a collector that holds the OTLP key; defaults to rum.exporter.headers. Never sent to the browser.",
-              "$ref": "#/$defs/headers"
-            }
-          }
-        },
-        "sample_ratio": {
-          "description": "The browser's root sampling ratio (traceidratio).",
-          "$ref": "#/$defs/ratio",
-          "default": 1.0
-        }
-      },
-      "if": {
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "const": true
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "exporter",
-          "app_identifier"
-        ],
-        "properties": {
-          "exporter": {
-            "required": [
-              "endpoint"
-            ]
-          },
-          "session_replay": {
-            "if": {
-              "required": [
-                "enabled"
-              ],
-              "properties": {
-                "enabled": {
-                  "const": true
-                }
-              }
-            },
-            "then": {
-              "required": [
-                "host"
-              ]
-            }
-          }
-        }
-      }
-    },
     "genai": {
-      "description": "LLM and agent telemetry: the GenAI client metrics, the AI feature context, the content policy and Langfuse as a second trace destination; OneUptime's AI views read the same spans. Off by default; see references/signals/genai.md.",
+      "description": "LLM and agent telemetry: the GenAI client metrics, the AI feature context, the content policy and Langfuse as a second trace destination, the only one that receives content. Off by default; see references/signals/genai.md.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -485,7 +414,7 @@
           "default": false
         },
         "content": {
-          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on spans bound for the one content destination, never in logs or metrics.",
+          "description": "Prompts, completions, tool arguments and results, retrieved documents and media. Recorded only on Langfuse-bound spans, never on the ops path, in logs or in metrics.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
@@ -506,34 +435,18 @@
               ],
               "default": "off"
             },
-            "destination": {
-              "description": "The one tool that receives content: langfuse (Langfuse-bound spans; the ops path carries none) or ops (AI spans on the ops path, for an ops backend with AI views such as OneUptime's; Langfuse, when on, gets no content). ops needs Langfuse mode hybrid or otel, or Langfuse off.",
-              "type": "string",
-              "anyOf": [
-                {
-                  "enum": [
-                    "langfuse",
-                    "ops"
-                  ]
-                },
-                {
-                  "$ref": "#/$defs/interpolated"
-                }
-              ],
-              "default": "langfuse"
-            },
             "sample_ratio": {
               "description": "Share of traces that carry content, decided from the trace id.",
               "$ref": "#/$defs/ratio",
               "default": 1.0
             },
             "max_chars": {
-              "description": "Characters per content attribute after redaction; a longer value is cut, keeping valid JSON and the newest turn.",
+              "description": "Characters per content attribute after redaction; a longer value is cut, keeping valid JSON and the newest turn. At most the span attribute value limit (8192 by default); a project that needs more raises both together and records the exception in the report.",
               "$ref": "#/$defs/positiveInteger",
-              "default": 20000
+              "default": 8000
             },
             "media": {
-              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full and the langfuse destination).",
+              "description": "Images, audio and files: reference (type, size and hash only) or upload (to Langfuse's media store, only with capture full).",
               "type": "string",
               "anyOf": [
                 {
@@ -661,6 +574,108 @@
               }
             }
           }
+        }
+      }
+    },
+    "rum": {
+      "description": "Browser RUM with Grafana Faro (references/signals/rum.md). The page reads the service block and this block at run time; api_key_file and upstream are for the proxy only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "$ref": "#/$defs/boolean",
+          "default": false
+        },
+        "transport": {
+          "description": "faro: a public faro.receiver; proxy: the page's own origin, the proxy adds the key; otlp: a collector's OTLP/HTTP receiver (experimental Faro package).",
+          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "faro",
+                "proxy",
+                "otlp"
+              ]
+            },
+            {
+              "$ref": "#/$defs/interpolated"
+            }
+          ],
+          "default": "faro"
+        },
+        "endpoint": {
+          "description": "faro: the receiver's /collect URL; proxy: the page's path, e.g. /telemetry/faro/collect; otlp: the collector base URL.",
+          "type": "string"
+        },
+        "api_key": {
+          "description": "The receiver's public spam-filter key (faro, otlp). Reaches every browser: never a secret.",
+          "type": "string"
+        },
+        "api_key_file": {
+          "description": "proxy only: the mounted key file the proxy adds as X-API-Key.",
+          "type": "string"
+        },
+        "upstream": {
+          "description": "proxy only: the in-cluster receiver the proxy forwards to.",
+          "type": "string"
+        },
+        "session_sample_rate": {
+          "$ref": "#/$defs/ratio",
+          "default": 1.0
+        },
+        "propagate_trace_origins": {
+          "description": "Exact API origins that get traceparent. Never a wildcard.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "console_disabled_levels": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "trace",
+              "debug",
+              "log",
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "trace",
+            "debug",
+            "log"
+          ]
+        },
+        "ignore_urls": {
+          "description": "URLs never traced or timed, as regular expressions.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "allowed_query_params": {
+          "description": "Query parameters whose values may stay in URLs; every other value is removed.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "track_resources": {
+          "$ref": "#/$defs/boolean",
+          "default": true
+        },
+        "track_navigation": {
+          "$ref": "#/$defs/boolean",
+          "default": true
         }
       }
     }
@@ -1058,6 +1073,18 @@
               "$ref": "#/$defs/interpolated"
             }
           ]
+        }
+      ]
+    },
+    "origin": {
+      "description": "An exact origin, scheme://host[:port], or an interpolation.",
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^https?://[^/*?#\\s]+$"
+        },
+        {
+          "$ref": "#/$defs/interpolated"
         }
       ]
     }

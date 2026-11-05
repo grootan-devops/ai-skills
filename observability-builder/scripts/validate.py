@@ -215,7 +215,7 @@ def check_resolved(doc, schema: dict, env: dict, require_env: bool, use_jsonsche
     """Pass 2: the resolved document against the schema again, reporting only what the raw pass didn't."""
     resolved = resolve(doc, env, schema, use_jsonschema)
     found = (schema_errors(resolved, resolved_schema(schema), use_jsonschema, safe=True)
-             + check_rum_required(resolved) + check_genai_required(resolved))
+             + check_genai_required(resolved))
     raw = {(item["path"], item["message"])
            for item in schema_errors(doc, schema, use_jsonschema, safe=True) + check_genai_required(doc)}
     level = "error" if require_env else "warning"
@@ -223,23 +223,9 @@ def check_resolved(doc, schema: dict, env: dict, require_env: bool, use_jsonsche
             for item in _unique(found) if (item["path"], item["message"]) not in raw]
 
 
-def check_rum_required(doc) -> list[dict]:
-    """Keys RUM needs when on; the schema's if/then fires only for a boolean true, not a quoted "true"."""
-    rum = doc.get("rum")
-    if not isinstance(rum, dict) or not _is_on(rum.get("enabled")):
-        return []
-    missing = [("$.rum", key) for key in ("exporter", "app_identifier") if key not in rum]
-    exporter, replay = rum.get("exporter"), rum.get("session_replay")
-    if isinstance(exporter, dict) and "endpoint" not in exporter:
-        missing.append(("$.rum.exporter", "endpoint"))
-    if isinstance(replay, dict) and _is_on(replay.get("enabled")) and "host" not in replay:
-        missing.append(("$.rum.session_replay", "host"))
-    return [_finding("error", path, REASONS["required"].format(key)) for path, key in missing]
-
-
 def check_genai_required(doc) -> list[dict]:
-    """Keys Langfuse needs when on: base_url, and both keys when the app sends the spans or the scores. Like RUM's,
-    the check counts a quoted "true" as on, which the schema can't express."""
+    """Keys Langfuse needs when on: base_url, and both keys when the app sends the spans or the scores. The
+    check counts a quoted "true" as on, which the schema can't express."""
     genai = _mapping(doc, "genai")
     langfuse = _mapping(genai, "langfuse")
     if not (_is_on(genai.get("enabled")) and _is_on(langfuse.get("enabled"))):
@@ -261,11 +247,50 @@ def check_genai(doc, schema: dict | None, env: dict, use_jsonschema: bool = True
         return [_finding("warning", "$.genai.langfuse.enabled", "on while genai.enabled is off, so Langfuse stays off")] \
             if _is_on(langfuse.get("enabled")) else []
     findings = _genai_content(resolved, _mapping(genai, "content"))
-    findings += _content_destination(_mapping(genai, "content"), langfuse)
+    findings += _content_nowhere(_mapping(genai, "content"), langfuse)
     if _is_on(langfuse.get("enabled")):
         findings += _langfuse_mode(langfuse)
         findings += _langfuse_route(resolved, langfuse)
         findings += _langfuse_target(resolved, langfuse)
+    return findings
+
+
+def check_rum(doc, schema: dict | None, env: dict, use_jsonschema: bool = True) -> list[dict]:
+    """Browser RUM settings that pass the schema but break the transport rules; never prints a value."""
+    resolved = resolve(doc, env, schema, use_jsonschema) if schema is not None else doc
+    rum = _mapping(resolved, "rum")
+    if not _is_on(rum.get("enabled")):
+        return []
+    findings = []
+    transport = rum.get("transport", "faro")
+    endpoint = rum.get("endpoint") if isinstance(rum.get("endpoint"), str) else ""
+    if not endpoint:
+        findings.append(_finding("error", "$.rum", REASONS["required"].format("endpoint")))
+    for key in ("api_key_file", "upstream"):
+        if rum.get(key) and transport != "proxy":
+            findings.append(_finding("error", f"$.rum.{key}",
+                                     f"used only by the proxy transport; with '{transport}' the page talks to the receiver itself"))
+    if transport == "proxy":
+        if rum.get("api_key"):
+            findings.append(_finding("error", "$.rum.api_key",
+                                     "set with the proxy transport: the proxy adds the key from api_key_file, the page holds none"))
+        if endpoint and not endpoint.startswith("/"):
+            findings.append(_finding("error", "$.rum.endpoint", "the proxy transport posts to a path on the page's own origin"))
+        if not rum.get("upstream"):
+            findings.append(_finding("warning", "$.rum.upstream", "the proxy transport needs the in-cluster receiver it forwards to"))
+    elif endpoint:
+        parts = urlsplit(endpoint)
+        if parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")):
+            findings.append(_finding("error", "$.rum.endpoint",
+                                     "browsers post to this receiver over the internet: https only (http only for localhost)"))
+    origins = rum.get("propagate_trace_origins") or []
+    for i, origin in enumerate(origins if isinstance(origins, list) else []):
+        if not isinstance(origin, str) or "*" in origin or not re.match(r"^https?://[^/?#\s]+$", origin):
+            findings.append(_finding("error", f"$.rum.propagate_trace_origins[{i}]",
+                                     "an exact origin only: a wildcard sends trace headers and CORS preflights to every host"))
+    rate = rum.get("session_sample_rate", 1.0)
+    if isinstance(rate, (int, float)) and rate == 0:
+        findings.append(_finding("warning", "$.rum.session_sample_rate", "0 while RUM is on: no session sends anything"))
     return findings
 
 
@@ -302,33 +327,21 @@ def _genai_content(doc: dict, content: dict) -> list[dict]:
         body, base = _mapping(_mapping(access, side), "body"), f"$.logging.access_log.{side}.body"
         if _is_on(body.get("full")):
             findings.append(_finding("warning", f"{base}.full",
-                                     "full bodies of AI routes hold prompts and completions; content goes only to the "
-                                     "content destination (genai.content.destination)"))
+                                     "full bodies of AI routes hold prompts and completions; content goes only to "
+                                     "Langfuse"))
         fields = body.get("fields") if isinstance(body.get("fields"), list) else []
         findings += [_finding("warning", f"{base}.fields[{index}]",
-                              "looks like AI content (prompts, messages, completions); content goes only to the "
-                              "content destination (genai.content.destination)")
+                              "looks like AI content (prompts, messages, completions); content goes only to "
+                              "Langfuse")
                      for index, field in enumerate(fields) if isinstance(field, str) and CONTENT_FIELD.search(field)]
     return findings
 
 
-def _content_destination(content: dict, langfuse: dict) -> list[dict]:
-    """The one content destination against Langfuse: ops needs the conventions' content keys, which the sdk mode
-    doesn't write, and langfuse needs Langfuse on, or the content is recorded nowhere."""
-    destination, capture = content.get("destination", "langfuse"), content.get("capture", "off")
-    langfuse_on = _is_on(langfuse.get("enabled"))
-    if destination == "ops" and langfuse_on and langfuse.get("mode", "hybrid") == "sdk":
-        return [_finding("error", "$.genai.content.destination",
-                         "ops with Langfuse mode sdk, whose spans keep content in Langfuse's own keys; the ops destination "
-                         "needs mode hybrid or otel, or Langfuse off")]
-    if destination == "ops" and content.get("media") == "upload":
-        return [_finding("warning", "$.genai.content.media",
-                         "upload goes to Langfuse's media store, which gets no content with the ops destination; media is "
-                         "recorded as a reference")]
-    if destination == "langfuse" and not langfuse_on and capture != "off":
+def _content_nowhere(content: dict, langfuse: dict) -> list[dict]:
+    """Content goes to Langfuse only, so capturing it with Langfuse off records it nowhere."""
+    if not _is_on(langfuse.get("enabled")) and content.get("capture", "off") != "off":
         return [_finding("warning", "$.genai.content.capture",
-                         "on with the langfuse destination while Langfuse is off, so content is recorded nowhere; turn "
-                         "Langfuse on, or set genai.content.destination to ops for an ops backend with AI views")]
+                         "on while Langfuse is off, so content is recorded nowhere; turn Langfuse on, or capture off")]
     return []
 
 
@@ -521,21 +534,6 @@ def check_version_default(doc) -> list[dict]:
     return []
 
 
-def check_rum_identity(doc, schema: dict | None, env: dict, use_jsonschema: bool = True) -> list[dict]:
-    """rum.app_identifier names the RUM application; OneUptime keys those by the browser's service.name."""
-    resolved = resolve(doc, env, schema, use_jsonschema) if schema is not None else doc
-    rum = resolved.get("rum") if isinstance(resolved, dict) else None
-    if not isinstance(rum, dict) or not _is_on(rum.get("enabled")):
-        return []
-    app = rum.get("app_identifier")
-    service = ((resolved.get("resource") or {}).get("service") or {}).get("name")
-    if isinstance(app, str) and isinstance(service, str) and app and service and app != service:
-        return [_finding("warning", "$.rum.app_identifier",
-                         "differs from resource.service.name; OneUptime keys a RUM application by the browser's "
-                         "service.name, so session replays would land in a second application")]
-    return []
-
-
 def validate(file: Path, schema: dict | None, env: dict, require_env: bool, use_jsonschema: bool = True) -> list[dict]:
     try:
         doc = yaml.safe_load(file.read_text(encoding="utf-8"))
@@ -552,8 +550,8 @@ def validate(file: Path, schema: dict | None, env: dict, require_env: bool, use_
     findings += check_interpolation(doc, env, require_env)
     if schema is not None:
         findings += check_resolved(doc, schema, env, require_env, use_jsonschema)
-    findings += check_rum_identity(doc, schema, env, use_jsonschema)
     findings += check_genai(doc, schema, env, use_jsonschema)
+    findings += check_rum(doc, schema, env, use_jsonschema)
     return findings
 
 

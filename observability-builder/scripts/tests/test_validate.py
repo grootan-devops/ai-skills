@@ -84,7 +84,6 @@ resource:
   environment: "${OBS_ENVIRONMENT}"
   attributes:
     team: payments
-    vcs.ref.head.revision: "${GIT_SHA:-}"
 tracing:
   enabled: "${OBS_TRACING:-true}"
   exporter:
@@ -112,14 +111,6 @@ logging:
         max_bytes: "${OBS_MAX_BYTES:-4096}"
 profiling:
   sample_rate: "${OBS_SAMPLE_RATE:-100}"
-rum:
-  enabled: "${OBS_RUM:-true}"
-  exporter:
-    endpoint: "${OBS_RUM_ENDPOINT:-/telemetry}"
-  app_identifier: "${OBS_SERVICE_NAME}"
-  session_replay:
-    enabled: "${OBS_REPLAY:-true}"
-    host: "${OBS_RUM_HOST:-/telemetry/session-replay}"
 """
 
 ENV = {"OBS_SERVICE_NAME": "shop", "OBS_SERVICE_VERSION": "1.4.2", "OBS_ENVIRONMENT": "dev", "OBS_SAMPLER_ARG": "1.0"}
@@ -339,43 +330,24 @@ logging:
                                           "$.tracing.sampler.arg", "$.metrics.prometheus.port", "$.logging.output",
                                           "$.logging.application.level"}, paths)
 
-    def test_rum_keys_required_when_on(self):
-        quoted = RESOURCE + 'rum:\n  enabled: "true"\n  exporter:\n    endpoint: /telemetry\n'
-        replay = RESOURCE + ('rum:\n  enabled: "${OBS_RUM}"\n  exporter:\n    endpoint: /telemetry\n  app_identifier: shop\n'
-                             '  session_replay:\n    enabled: true\n    host: "${OBS_RUM_HOST}"\n')
-        literal = RESOURCE + 'rum:\n  enabled: true\n  exporter:\n    endpoint: /telemetry\n'
-        for use_jsonschema in (True, False):
-            self.assertEqual(validate.validate(self.write(quoted), self.schema, {}, False, use_jsonschema),
-                             [validate._finding("warning", "$.rum", "after resolution: missing required key 'app_identifier'")])
-            self.assertEqual(validate.validate(self.write(replay), self.schema, {"OBS_RUM": "true"}, True, use_jsonschema), [
-                validate._finding("error", "$.rum.session_replay.host", "OBS_RUM_HOST is not set and has no default"),
-                validate._finding("error", "$.rum.session_replay", "after resolution: missing required key 'host'"),
-            ])
-            findings = validate.validate(self.write(literal), self.schema, {}, False, use_jsonschema)
-            self.assertEqual([(f["level"], f["path"]) for f in findings], [("error", "$.rum")])
-            self.assertIn("app_identifier", findings[0]["message"])
+    def test_excluded_resource_keys_are_rejected(self):
+        try:
+            import jsonschema  # noqa: F401  (propertyNames needs the library; the fallback doesn't read it)
+        except ImportError:
+            self.skipTest("needs jsonschema")
+        for key in ("vcs.ref.head.revision", "process.pid", "process.command", "process.executable.name", "k8s.pod.uid"):
+            doc = RESOURCE.replace("  environment: dev\n", f"  environment: dev\n  attributes:\n    {key}: x\n")
+            findings = validate.validate(self.write(doc), self.schema, {}, True)
+            self.assertTrue(any(f["path"].startswith("$.resource.attributes") for f in findings), key)
+        for key in ("team", "process.runtime.name", "k8s.cluster.name"):
+            doc = RESOURCE.replace("  environment: dev\n", f"  environment: dev\n  attributes:\n    {key}: x\n")
+            self.assertEqual(validate.validate(self.write(doc), self.schema, {}, True), [], key)
 
-    def test_replay_headers_for_the_collector_route(self):
-        rum = RESOURCE + ('rum:\n  enabled: true\n  exporter:\n    endpoint: http://collector:4318\n  app_identifier: shop\n'
-                          '  session_replay:\n    enabled: true\n    host: https://oneuptime.example.com\n'
-                          '    headers:\n      x-oneuptime-token: %s\n')
+    def test_removed_oneuptime_rum_keys_are_rejected(self):
+        rum = RESOURCE + 'rum:\n  enabled: false\n  app_identifier: shop\n  session_replay: {enabled: true}\n'
         for use_jsonschema in (True, False):
-            self.assertEqual(validate.validate(self.write(rum % '"${env:REPLAY_TOKEN}"'), self.schema,
-                                               {"REPLAY_TOKEN": "t"}, True, use_jsonschema), [])
-            findings = validate.validate(self.write(rum % "plain-key"), self.schema, {}, True, use_jsonschema)
-            self.assertEqual([(f["level"], f["path"]) for f in findings],
-                             [("error", "$.rum.session_replay.headers.x-oneuptime-token")])
-            self.assertNotIn("plain-key", json.dumps(findings))
-
-    def test_rum_app_identifier_matches_service_name(self):
-        rum = RESOURCE + 'rum:\n  enabled: true\n  exporter:\n    endpoint: /telemetry\n  app_identifier: %s\n'
-        for use_jsonschema in (True, False):
-            self.assertEqual(validate.validate(self.write(rum % "shop"), self.schema, {}, True, use_jsonschema), [])
-            self.assertEqual(validate.validate(self.write(rum % '"${OBS_APP:-shop}"'), self.schema, {}, True, use_jsonschema), [])
-            findings = validate.validate(self.write(rum % "shop-web"), self.schema, {}, True, use_jsonschema)
-            self.assertEqual([(f["level"], f["path"]) for f in findings], [("warning", "$.rum.app_identifier")])
-        off = RESOURCE + 'rum:\n  enabled: false\n  app_identifier: shop-web\n'
-        self.assertEqual(validate.validate(self.write(off), self.schema, {}, True), [])
+            findings = validate.validate(self.write(rum), self.schema, {}, True, use_jsonschema)
+            self.assertEqual(sorted(f["path"] for f in findings), ["$.rum.app_identifier", "$.rum.session_replay"])
 
     def test_temporality_and_tls_keys(self):
         for value in ("cumulative", "delta", "lowmemory", '"${OBS_TEMPORALITY:-cumulative}"'):
@@ -421,8 +393,7 @@ genai:
 """
 
 
-NOWHERE = ("on with the langfuse destination while Langfuse is off, so content is recorded nowhere; turn Langfuse on, "
-           "or set genai.content.destination to ops for an ops backend with AI views")
+NOWHERE = "on while Langfuse is off, so content is recorded nowhere; turn Langfuse on, or capture off"
 
 
 @unittest.skipUnless(LIBRARY_SCHEMA.exists(), "assets/observability.schema.json is missing")
@@ -550,7 +521,8 @@ class GenAITests(unittest.TestCase):
                                     + "genai:\n  enabled: true\n"), [])
 
     def test_content_capture_rules(self):
-        ceiling = "  content:\n    capture: \"${OBS_GENAI_CONTENT:-off}\"\n    destination: ops\n"
+        ceiling = "  content:\n    capture: \"${OBS_GENAI_CONTENT:-off}\"\n"
+        nowhere = ("warning", "$.genai.content.capture", NOWHERE)
         full = ("warning", "$.genai.content.capture", "full in a production environment; production takes off, or "
                 "redacted for features with a redactor")
         for environment, value, expected in (("production", "full", [full]), ("prod-eu", "full", [full]),
@@ -558,46 +530,33 @@ class GenAITests(unittest.TestCase):
                                              ("production", "off", []), ("product-demo", "full", [])):
             path = self.write(RESOURCE.replace("environment: dev", f"environment: {environment}")
                               + "genai:\n  enabled: true\n" + ceiling)
-            self.assert_both(path, expected, {"OBS_GENAI_CONTENT": value})
+            self.assert_both(path, expected + ([nowhere] if value != "off" else []), {"OBS_GENAI_CONTENT": value})
         media = self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    media: upload\n")
         self.assert_both(media, [("warning", "$.genai.content.media",
                                   "upload needs capture full; media is recorded as a reference otherwise")])
         self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n    media: upload\n"), [
             ("warning", "$.genai.content.capture", NOWHERE)])
 
-    def test_content_destination_rules(self):
+    def test_content_needs_langfuse(self):
         base = "    base_url: https://cloud.langfuse.com\n" + self.keys()
-        ops = "  content:\n    capture: full\n    destination: ops\n"
-        sdk_ops = ("error", "$.genai.content.destination", "ops with Langfuse mode sdk, whose spans keep content in "
-                   "Langfuse's own keys; the ops destination needs mode hybrid or otel, or Langfuse off")
-        self.assert_both(self.langfuse(base + "    mode: sdk\n", genai=ops), [sdk_ops])
-        for mode in ("hybrid", "otel"):
-            self.assert_both(self.langfuse(base + f"    mode: {mode}\n", genai=ops), [])
-        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n" + ops), [])
-        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n"),
+        full = "  content:\n    capture: full\n"
+        for mode in ("hybrid", "sdk", "otel"):
+            self.assert_both(self.langfuse(base + f"    mode: {mode}\n", genai=full), [])
+        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n" + full),
                          [("warning", "$.genai.content.capture", NOWHERE)])
         self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: \"off\"\n"), [])
-        self.assert_both(self.write(RESOURCE + "genai:\n  enabled: true\n" + ops + "    media: upload\n"), [(
-            "warning", "$.genai.content.media", "upload goes to Langfuse's media store, which gets no content with the ops "
-            "destination; media is recorded as a reference")])
-        switched = self.write(RESOURCE + "genai:\n  enabled: true\n  content:\n    capture: full\n"
-                                         '    destination: "${OBS_GENAI_DESTINATION:-langfuse}"\n')
-        self.assert_both(switched, [], {"OBS_GENAI_DESTINATION": "ops"})
-        self.assert_both(switched, [("warning", "$.genai.content.capture", NOWHERE)])
-        for findings in self.found(self.write(RESOURCE + "genai:\n  content:\n    destination: both\n")):
+        for findings in self.found(self.write(RESOURCE + "genai:\n  content:\n    destination: langfuse\n")):
             self.assertEqual([p for _, p, _ in findings], ["$.genai.content.destination"])
 
     def test_access_log_content_fields(self):
         logging = ("logging:\n  access_log:\n    request:\n      body:\n        fields: [amount, prompt, order.messages]\n"
                    "    response:\n      body:\n        full: true\n")
-        warning = ("looks like AI content (prompts, messages, completions); content goes only to the content "
-                   "destination (genai.content.destination)")
+        warning = "looks like AI content (prompts, messages, completions); content goes only to Langfuse"
         self.assert_both(self.write(RESOURCE + logging + "genai:\n  enabled: true\n"), [
             ("warning", "$.logging.access_log.request.body.fields[1]", warning),
             ("warning", "$.logging.access_log.request.body.fields[2]", warning),
             ("warning", "$.logging.access_log.response.body.full",
-             "full bodies of AI routes hold prompts and completions; content goes only to the content destination "
-             "(genai.content.destination)")])
+             "full bodies of AI routes hold prompts and completions; content goes only to Langfuse")])
         self.assert_both(self.write(RESOURCE + logging + "genai:\n  enabled: false\n"), [])
         self.assert_both(self.write(RESOURCE + logging.replace("  access_log:\n", "  access_log:\n    enabled: false\n")
                                     + "genai:\n  enabled: true\n"), [])
@@ -644,3 +603,55 @@ genai:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(LIBRARY_SCHEMA.exists(), "assets/observability.schema.json is missing")
+class RumTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def found(self, rum: str) -> list[list[tuple]]:
+        path = self.root / "observability.yml"
+        path.write_text(RESOURCE + "rum:\n  enabled: true\n" + rum, encoding="utf-8")
+        return [[(f["level"], f["path"]) for f in validate.validate(path, self.schema, {}, True, lib)]
+                for lib in (True, False)]
+
+    def assert_both(self, rum, expected):
+        for findings in self.found(rum):
+            self.assertEqual(findings, expected)
+
+    def test_direct_receiver_passes(self):
+        self.assert_both("  transport: faro\n  endpoint: https://faro.example.com/collect\n  api_key: public\n"
+                         "  propagate_trace_origins: [https://api.example.com]\n", [])
+
+    def test_proxy_passes(self):
+        self.assert_both("  transport: proxy\n  endpoint: /telemetry/faro/collect\n"
+                         "  api_key_file: /var/run/secrets/faro/key\n  upstream: http://alloy.observability:12347/collect\n", [])
+
+    def test_wildcard_origin_rejected(self):
+        for findings in self.found("  endpoint: https://faro.example.com/collect\n  propagate_trace_origins: ['*']\n"):
+            self.assertIn(("error", "$.rum.propagate_trace_origins[0]"), findings)
+
+    def test_plain_http_receiver_rejected(self):
+        self.assert_both("  endpoint: http://faro.example.com/collect\n", [("error", "$.rum.endpoint")])
+
+    def test_localhost_http_allowed(self):
+        self.assert_both("  endpoint: http://localhost:12347/collect\n", [])
+
+    def test_key_file_outside_proxy_rejected(self):
+        self.assert_both("  endpoint: https://faro.example.com/collect\n  api_key_file: /k\n", [("error", "$.rum.api_key_file")])
+
+    def test_proxy_with_page_key_rejected(self):
+        self.assert_both("  transport: proxy\n  endpoint: /telemetry/faro/collect\n  api_key: x\n  upstream: http://alloy:12347/collect\n",
+                         [("error", "$.rum.api_key")])
+
+    def test_missing_endpoint_rejected(self):
+        self.assert_both("  transport: faro\n", [("error", "$.rum")])

@@ -8,10 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -276,5 +279,137 @@ func TestExporterTranslation(t *testing.T) {
 	}
 	if _, ok := attrs["gen_ai.input.messages"]; ok {
 		t.Error("the guard still applies with a translation")
+	}
+}
+
+// A batch is split so each request stays under the cap; a span that alone exceeds it is dropped and counted.
+func TestExporterSplitsRequestsUnderTheSizeCap(t *testing.T) {
+	stand, server := newStandIn(t)
+	ctx := context.Background()
+	const limit = 4096
+	exporter, err := NewExporter(ctx, Config{BaseURL: server.URL, PublicKey: "pk-lf-1", SecretKey: "sk-lf-2",
+		MaxRequestBytes: limit}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := sdktrace.NewTracerProvider()
+	tracer := provider.Tracer("test")
+	var spans []sdktrace.ReadOnlySpan
+	add := func(name string, size int) {
+		_, span := tracer.Start(ctx, name, trace.WithAttributes(attribute.String("langfuse.trace.name", "assistant"),
+			attribute.String("gen_ai.operation.name", "chat"), attribute.String("gen_ai.input.messages", strings.Repeat("x", size))))
+		span.End()
+		spans = append(spans, span.(sdktrace.ReadOnlySpan))
+	}
+	for i := 0; i < 12; i++ {
+		add("chat "+strconv.Itoa(i), 900)
+	}
+	add("chat huge", 2*limit)
+	if err := exporter.ExportSpans(ctx, spans); err != nil {
+		t.Fatal(err)
+	}
+	if len(stand.raw) < 3 {
+		t.Errorf("expected the batch split into several requests, got %d", len(stand.raw))
+	}
+	for _, raw := range stand.raw {
+		if len(raw) > limit {
+			t.Errorf("request body %d bytes > cap %d", len(raw), limit)
+		}
+	}
+	if len(stand.spans) != 12 {
+		t.Errorf("%d spans arrived, want 12", len(stand.spans))
+	}
+	if _, ok := stand.spans["chat huge"]; ok {
+		t.Error("the oversized span was sent")
+	}
+}
+
+// Capping a long list is linear: thousands of items cap quickly.
+func TestCapLongListIsLinear(t *testing.T) {
+	items := make([]string, 20000)
+	for i := range items {
+		items[i] = `{"role":"user","content":"message ` + strconv.Itoa(i) + `"}`
+	}
+	start := time.Now()
+	got := Cap("["+strings.Join(items, ",")+"]", 200)
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("Cap took %v", time.Since(start))
+	}
+	if !strings.HasSuffix(got, `"message 19999"}]`) || utf8.RuneCountInString(got) > 200 {
+		t.Errorf("Cap = %q", got)
+	}
+}
+
+// Request context and HTTP detail never reach Langfuse, in any content mode and without a guard; the feature context,
+// the GenAI attributes and allowed content stay.
+func TestExporterDropsRequestContext(t *testing.T) {
+	requestContext := []attribute.KeyValue{
+		attribute.String("client.address", "203.0.113.7"), attribute.Int("client.port", 51000),
+		attribute.String("user_agent.original", "curl/8.0"), attribute.String("url.query", "token=CANARY-Q"),
+		attribute.String("url.full", "https://shop.example/api/chat?token=CANARY-Q"),
+		attribute.StringSlice("http.request.header.x-forwarded-for", []string{"198.51.100.1"}),
+		attribute.StringSlice("http.response.header.set-cookie", []string{"sid=CANARY-C"}),
+		attribute.String("http.request.cookie.sid", "CANARY-C"), attribute.String("network.peer.address", "10.0.0.9"),
+		attribute.String("http.user_agent", "curl/8.0"),
+	}
+	for _, guard := range []Guard{NewGuard(decide, 100), nil} {
+		stand, server := newStandIn(t)
+		ctx := context.Background()
+		exporter, err := NewExporter(ctx, Config{BaseURL: server.URL, PublicKey: "pk-lf-1", SecretKey: "sk-lf-2"}, guard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+		tracer := provider.Tracer("test")
+		for _, feature := range []string{"assistant", "quiet", "masked"} {
+			attrs := append([]attribute.KeyValue{attribute.String("langfuse.trace.name", feature),
+				attribute.String("langfuse.user.id", "u-1"), attribute.String("http.route", "/api/chat"),
+				attribute.String("gen_ai.operation.name", "chat"), attribute.String("gen_ai.input.messages", "hello")},
+				requestContext...)
+			_, span := tracer.Start(ctx, "POST "+feature, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attrs...))
+			span.End()
+		}
+		if err := provider.Shutdown(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for _, feature := range []string{"assistant", "quiet", "masked"} {
+			got, ok := stand.spans["POST "+feature]
+			if !ok {
+				t.Fatalf("guard %v: %q missing", guard != nil, feature)
+			}
+			for _, kv := range requestContext {
+				if _, leaked := got[string(kv.Key)]; leaked {
+					t.Errorf("guard %v, %s: %s reached Langfuse", guard != nil, feature, kv.Key)
+				}
+			}
+			for _, key := range []string{"langfuse.trace.name", "langfuse.user.id", "http.route", "gen_ai.operation.name"} {
+				if _, kept := got[key]; !kept {
+					t.Errorf("guard %v, %s: %s missing", guard != nil, feature, key)
+				}
+			}
+			if _, kept := got["gen_ai.input.messages"]; kept != (guard == nil || feature != "quiet") {
+				t.Errorf("guard %v, %s: content kept = %v", guard != nil, feature, kept)
+			}
+		}
+		for _, raw := range stand.raw {
+			if bytes.Contains(raw, []byte("CANARY")) || bytes.Contains(raw, []byte("203.0.113.7")) {
+				t.Error("request context reached Langfuse")
+			}
+		}
+	}
+}
+
+func TestIsRequestContextKey(t *testing.T) {
+	for _, key := range []string{"client.address", "user_agent.original", "http.request.header.authorization",
+		"http.response.header.set-cookie", "http.request.cookie.sid", "url.query", "url.full", "network.peer.port"} {
+		if !IsRequestContextKey(attribute.Key(key)) {
+			t.Errorf("%s not request context", key)
+		}
+	}
+	for _, key := range []string{"http.route", "http.request.method", "http.response.status_code", "url.path", "url.scheme",
+		"server.address", "network.protocol.version", "langfuse.user.id", "gen_ai.request.model", "clientele.id"} {
+		if IsRequestContextKey(attribute.Key(key)) {
+			t.Errorf("%s dropped", key)
+		}
 	}
 }

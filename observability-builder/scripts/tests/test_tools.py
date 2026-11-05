@@ -85,6 +85,12 @@ class HoldPortTests(unittest.TestCase):
                 with socket.socket(family, socket.SOCK_STREAM) as other:
                     with self.assertRaises(OSError):
                         other.bind((host, port))
+            # An app that sets SO_REUSEADDR (as Python's HTTPServer does) must not slip past on macOS either.
+            for family, host in [(socket.AF_INET, "0.0.0.0")] + list(hold_port.LOOPBACKS) + hold_port.local_addresses():
+                with socket.socket(family, socket.SOCK_STREAM) as other:
+                    other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    with self.assertRaises(OSError, msg=f"{host} bound beside the held port"):
+                        other.bind((host, port))
             if f"[::]:{port}" in held:
                 with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as other:
                     with self.assertRaises(OSError):

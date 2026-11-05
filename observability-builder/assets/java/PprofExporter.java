@@ -35,7 +35,7 @@ import jdk.jfr.consumer.RecordingFile;
 
 /**
  * Uploads each profiling interval as pprof to the Pyroscope ingest API, one upload per event type: CPU, allocated
- * bytes and lock wait time. Some backends (OneUptime) reject JFR and keep one sample type per pprof upload, so the
+ * bytes and lock wait time. Some backends reject JFR and keep one sample type per pprof upload, so the
  * agent's JFR snapshot is converted in-process with the JDK's own JFR reader. Samples keep their labels: the agent's
  * context labels ({@code controller}), and {@code span_id} and {@code trace_id} when the agent recorded them.
  */

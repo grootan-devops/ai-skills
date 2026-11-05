@@ -12,7 +12,8 @@ AI work a tool does. This page adds what MCP needs:
 - the feature context for tools that reach a model.
 
 The names follow OpenTelemetry's MCP semantic conventions (Development) as of 2026-10. Check
-the registry before relying on one.
+the registry before relying on one. Calls from one agent to another remote agent use A2A, not
+MCP ([a2a.md](a2a.md)).
 
 ## What changes
 
@@ -67,6 +68,31 @@ metrics can't tell tools apart: per-tool latency and errors come from the MCP sp
   ([sdk-notes](../sdk-notes.md)).
 - **Ops path:** the status description is replaced by the error type there, as on every AI span.
 
+## Attribute classes
+
+The class of each attribute (M, C, R, O, P) is in
+[data-model.md](../data-model.md#mcp-client-and-server-context-via-params_meta). In short:
+
+- **M:** `mcp.method.name` on every span.
+- **C:** each only when its condition holds, never fabricated:
+  - `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name` on `tools/call`;
+  - `gen_ai.prompt.name` on `prompts/get`;
+  - `mcp.resource.uri` on `resources/*`;
+  - `mcp.session.id` on a session transport;
+  - `server.address` and `server.port` on the client, `client.address` and `client.port` on the
+    server, over a network transport;
+  - `rpc.response.status_code` on a JSON-RPC error, `error.type` on any failure.
+- **R:** `mcp.protocol.version`, `jsonrpc.request.id`, `network.transport`.
+- **O:** `jsonrpc.protocol.version`, `network.protocol.name` and `network.protocol.version`.
+- **P on the ops path:** tool arguments and results, resource contents and prompt text. On the
+  Langfuse path they follow the content policy ([below](#tools-that-reach-a-model)).
+
+Both paths get the same M, C and R rows, with one exception: on the ops path a `prompts/get` span
+loses `gen_ai.prompt.name` ([ops path](#ops-path)). Otherwise only content differs. On the
+Langfuse path the spans of
+an AI feature also carry the feature stamps
+([data-model.md](../data-model.md#ai-feature-context-set-by-genaifeature-from-what-the-apps-code-has)).
+
 ## Context propagation
 
 - **The client** writes `traceparent` and `tracestate` into the `params._meta` of every request
@@ -109,7 +135,7 @@ message handling and the client's send, through the middleware or hooks the SDK 
   feature context.
 - **Content:** tool arguments and results (`gen_ai.tool.call.arguments`,
   `gen_ai.tool.call.result`) and prompt arguments are content. They are recorded only through the
-  content helper, at the content destination ([genai](../signals/genai.md#content)). Resource
+  content helper, on the Langfuse path only ([genai](../signals/genai.md#content)). Resource
   contents are never recorded.
 
 ## Metrics
@@ -134,12 +160,16 @@ Both sides record the duration where each message completes, so unsampled traffi
 - **Buckets:** the standard list, plus `120` and `300` for long tool calls
   ([metrics](../signals/metrics.md)).
 
+Both metrics are C: a service that serves or calls MCP records them
+([data-model.md](../data-model.md#ai-metrics-logs-and-profiling)). MCP calls get no profiling
+label: they are I/O.
+
 ## Ops path
 
 A `tools/call` span carries `execute_tool`, so it is an AI span, and the ops allow-list keeps its
 MCP keys ([genai](../signals/genai.md#the-ops-allow-list)). Other MCP spans keep their
 attributes, except that `prompts/get` loses `gen_ai.prompt.name`: a span that isn't an AI call
-carries no `gen_ai.*` key, so OneUptime doesn't count it as one. The span name keeps the prompt
+carries no `gen_ai.*` key, so LLM views don't count it as one. The span name keeps the prompt
 name.
 
 ## Verification

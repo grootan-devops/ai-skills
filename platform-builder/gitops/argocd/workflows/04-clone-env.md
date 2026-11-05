@@ -1,7 +1,7 @@
 # Workflow 04: Clone an environment (same product, new env)
 
 > Creates a new environment of an existing product from one of its
-> branches, e.g. `oneuptime/dev` → `oneuptime/qa`. It rewrites everything
+> branches, e.g. `storefront/dev` → `storefront/qa`. It rewrites everything
 > environment-specific and bootstraps the new environment's databases when permissions
 > allow. Read [discovery.md](../references/discovery.md) and
 > [kubernetes-rules.md](../../../core/references/kubernetes-rules.md) first.
@@ -14,9 +14,9 @@
 
 ## Step 1: Source and target
 
-1. Ask for the GitOps repo URL, the **source branch** (e.g. `oneuptime/dev`) and the **target environment** (e.g. `qa`).
+1. Ask for the GitOps repo URL, the **source branch** (e.g. `storefront/dev`) and the **target environment** (e.g. `qa`).
 2. **Validate the repo** ([discovery.md](../references/discovery.md) §10). Stop on exit 2 or 3. The source branch must be an environment the check lists without problems. If it has problems, show them; it can't be cloned as it is.
-3. Derive the target names ([naming.md](../../../core/references/naming.md)): branch `oneuptime/qa`, namespace `oneuptime-qa`, root `edge-east-oneuptime-qa-root`. The chart name stays the same as the source (`edge-east-oneuptime`).
+3. Derive the target names ([naming.md](../../../core/references/naming.md)): branch `storefront/qa`, namespace `storefront-qa`, root `edge-east-storefront-qa-root`. The chart name stays the same as the source (`edge-east-storefront`).
 4. Stop if the target branch or root Application already exists.
 
 ## Step 2: Inventory the source (read-only)
@@ -27,13 +27,13 @@
 
    | Category | Typical places | Source → target example |
    | --- | --- | --- |
-   | Namespace | `values.yaml` `namespace`, `extras/values.yaml`, manifests `metadata.namespace` | `oneuptime-dev` → `oneuptime-qa` |
-   | Branch / env | `branch`, `environment` | `oneuptime/dev`, `dev` → `oneuptime/qa`, `qa` |
-   | Hostnames | values `routes`, `global.routes.domain`, `httproute*.yaml`, ingress hosts | `oneuptime-chat-dev.dev.example.com` → agreed qa host |
+   | Namespace | `values.yaml` `namespace`, `extras/values.yaml`, manifests `metadata.namespace` | `storefront-dev` → `storefront-qa` |
+   | Branch / env | `branch`, `environment` | `storefront/dev`, `dev` → `storefront/qa`, `qa` |
+   | Hostnames | values `routes`, `global.routes.domain`, `httproute*.yaml`, ingress hosts | `storefront-chat-dev.dev.example.com` → agreed qa host |
    | TLS / gateway | `tlsSecretName`, `sectionName`, gateway name | follow the target's domain |
    | Image repos | `image.repository` paths with env suffix | `.../chat/dev` → `.../chat/qa` (confirm it exists) |
    | Chart versions | `chart.version` (often `rc` builds on dev) | ask: pin the same version, or a release version for qa/prod |
-   | Databases | `database.postgresql.name`/`user`, redis DB index, mariadb | `oneuptime-chat-dev` → new per-env name |
+   | Databases | `database.postgresql.name`/`user`, redis DB index, mariadb | `storefront-chat-dev` → new per-env name |
    | OAuth / Keycloak | client IDs, redirect URIs, realm URL | new clients per env, or the same realm with env URLs |
    | Cross-app URLs | `hub.url`, `internalUrl`, `endpoints.*` | rewrite to target hosts and namespaces |
    | Secrets | values secrets, `secret.yaml` | ask for each; generate new ones for new DB users |
@@ -51,7 +51,7 @@ Run [02-new-env-and-app.md](02-new-env-and-app.md) **steps 1–4**: preflight, s
 2. Apply the rewrite table from step 2. Re-search afterwards for any leftover source-env strings (env name, namespace, domain, DB names) and show the user every hit.
 3. **Versions follow the target's channel.** A source that runs pre-releases (e.g. `dev`) may feed a target that takes only releases (e.g. `prod`). For each app from an application project, run the readiness gate ([app-readiness.md](../../../core/references/app-readiness.md)) at the target's channel, and set the chart version and image tag it finds. Never carry a pre-release into a release-only environment.
 4. Re-check every app against [kubernetes-rules.md](../../../core/references/kubernetes-rules.md). The target may be stricter (prod), so fix anything the source let through.
-5. Render and audit ([kubernetes-rules.md](../../../core/references/kubernetes-rules.md) §4). Every Application name must end with the new env, e.g. `edge-east-oneuptime-chat-qa`.
+5. Render and audit ([kubernetes-rules.md](../../../core/references/kubernetes-rules.md) §4). Every Application name must end with the new env, e.g. `edge-east-storefront-chat-qa`.
 
 ## Step 5: Database bootstrap (approval, permission-aware)
 
@@ -90,7 +90,7 @@ Run [02-new-env-and-app.md](02-new-env-and-app.md) **steps 1–4**: preflight, s
    3. the apps
 
    ```bash
-   argocd app sync argo-cd/edge-east-oneuptime-qa-root
+   argocd app sync argo-cd/edge-east-storefront-qa-root
    argocd app sync argo-cd/<extras parent>
    argocd app sync argo-cd/<app> ...       # names from helm template
    ```

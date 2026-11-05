@@ -12,14 +12,16 @@ files a project needs are created.
 2. **One entrypoint** (`init`, `setup` or `register`) runs before the framework loads — after
    the fork for pre-fork servers — and a `shutdown` flushes telemetry on exit.
 3. **Fixed file responsibilities:** config (`observability.yml` → standard `OTEL_*`
-   settings), tracing (with the function wrapper), logging (with the access log), metrics (the
+   settings, the platform detection and the filtered resource detectors:
+   [config.md](config.md#resource-per-platform)), tracing (with the function wrapper and the
+   allow-listed baggage propagator), the shared masking helper (the one way personal data
+   reaches telemetry: [data-model.md](data-model.md#pii-masking)), logging (with the access log), metrics (the
    ops metrics and the `/metrics` server), profiling (with the controller-label helper), jobs
    (the job-run helper, when the service runs jobs), errors, genai (when the service calls a
    model: [below](#per-workload)), and `adapters/` holding only the frameworks the project
-   actually uses. Frontends add RUM; fullstack apps add the
-   same-origin telemetry proxy routes.
+   actually uses.
 4. **Business code** uses only the OpenTelemetry API and the module's helpers: the span
-   wrapper or decorator, the controller-label helper and the logger.
+   wrapper or decorator, the controller-label helper, the masking helper and the logger.
 5. **`observability.yml`** sits at the repository root for local runs and is mounted at
    `/etc/observability/observability.yml` in Kubernetes; `OBSERVABILITY_CONFIG` points at it.
 6. **The audit flags** SDK or exporter setup outside the module (Langfuse clients and GenAI
@@ -72,7 +74,7 @@ src/main/resources/META-INF/spring.factories     # registers the post-processor
 ├── __init__.py                      # setup() / shutdown(); before the framework import or in post_fork
 ├── config.py                        # yml → OTEL_* settings
 ├── tracing.py                       # provider, @traced decorator
-├── logging.py                       # json | plain + OTel handler
+├── logs.py                          # json | plain + OTel handler; never logging.py (below)
 ├── access_log.py                    # ASGI / WSGI middleware
 ├── metrics.py                       # prometheus_client ops metrics, /metrics on its own port
 ├── jobs.py                          # job-run helper: root span, job log, job metrics
@@ -83,6 +85,13 @@ src/main/resources/META-INF/spring.factories     # registers the post-processor
 └── adapters/                        # fastapi.py | django.py | flask.py | celery.py
 gunicorn.conf.py                     # post_fork → observability.setup()
 ```
+
+Name no module file after a standard-library module. In Python a `logging.py` in the package
+shadows the standard `logging` wherever the package folder is on `sys.path` (a script run from
+inside it, a test runner that inserts its rootdir), and the SDK's own `import logging` then
+loads the module's file. So the logging file is `logs.py`, and the same goes for `profile.py`,
+`trace.py`, `types.py` and `json.py`. Go, Java and Node.js resolve imports by package path or
+explicit relative path, so their file names don't shadow the standard library.
 
 ### Node.js (TypeScript)
 
@@ -108,22 +117,18 @@ Instrumentation files go under `src/` when the project uses a `src/` folder.
 
 ```text
 instrumentation.ts                   # register(): Node-runtime server setup; onRequestError
-instrumentation-client.ts            # RUM bootstrap before hydration
+instrumentation-client.ts            # browser RUM: readRumConfig() + startRum()
 src/observability/
 ├── server/                          # config.ts tracing.ts access-log-processor.ts logger.ts metrics.ts profiling.ts
-├── client/                          # rum.ts web-vitals.ts route-spans.ts errors.ts replay.ts
+├── rum/                             # config.ts init.ts scrub.ts (assets/js/faro), client-only
 └── shared/                          # attributes.ts sanitize-url.ts
-app/telemetry/v1/[signal]/route.ts               # same-origin OTLP proxy
-app/telemetry/session-replay/[version]/[artifact]/route.ts   # session-replay proxy
-app/error.tsx, app/global-error.tsx              # report through client/errors.ts
 ```
 
-### Single-page app (React, Vue, Angular with Vite) served by nginx
+### Single-page app (browser RUM)
 
 ```text
-src/observability/                   # rum.ts web-vitals.ts route-spans.ts errors.ts replay.ts config.ts
-public/observability.json            # runtime RUM config, mounted per environment by the chart
-nginx default.conf                   # JSON access log with $http_traceparent; /telemetry/ → collector (chart file mount)
+src/observability/rum/               # config.ts init.ts scrub.ts react.tsx (assets/js/faro)
+public/observability.json            # RUM off by default; the deployment mounts the real one
 ```
 
 ## Per workload
@@ -134,11 +139,13 @@ Each workload adds to the language module above.
 | --- | --- |
 | API backend | `adapters/<framework>` only |
 | WebSocket endpoints | `adapters/websocket` — connection and message root spans, lifecycle records, `websocket_*` metrics |
-| Async workers and messaging | `adapters/consumer` — context from message headers, per-message job log, span links, lag and job metrics |
+| Async workers and messaging | `adapters/consumer` — context from message headers, per-message job log, span links, the messaging metrics |
 | BFF / integration service | `adapters/clients` — outbound client setup, propagation allow-list, retry and timeout attributes |
 | Gateway (APISIX, Envoy Gateway, Traefik, Kong) | no application code; plugin and values snippets in the gateway's configuration repository |
 | MCP server or client | `adapters/mcp` — `params._meta` trace propagation, `SERVER` and `CLIENT` spans per message (none where the SDK traces MCP itself), the MCP duration metrics, stdio logs to stderr ([mcp](workloads/mcp.md)) |
+| A2A agent or client | `adapters/a2a` — the `invoke_agent` CLIENT span per remote agent call, the SERVER span per A2A method, `traceparent` on the HTTP call, the A2A duration metrics ([a2a](workloads/a2a.md)) |
 | AI features and agents | the genai files: the feature registry and `genai.feature()`, the stamping processor, the content helper and redactors, the ops guard, the GenAI metrics hook, the GenAI instrumentations, and, when Langfuse is on, its processor or exporter, the one Langfuse client app code takes for its prompts and datasets, and the score client |
+| Pages (single-page app, fullstack page side) | `rum/` — Faro start-up from the runtime config, the `beforeSend` scrubber, the router and error hooks ([rum](signals/rum.md), [spa](workloads/spa.md)) |
 | Batch job, cron job, scheduled job, CLI | `job` helper — `job {name}` root span, job log, job metrics, flush before a process exits |
 
 [Documentation index](README.md)

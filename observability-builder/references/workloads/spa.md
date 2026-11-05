@@ -1,115 +1,131 @@
-# Single-page app (React, Vue, Angular)
+# Single-page app (React, Vue, Angular, Svelte)
 
-A static bundle (built with Vite or similar) served by nginx, calling APIs that are
-instrumented on their own. The browser code is the same as in a [fullstack app](fullstack.md)
-and follows [browser RUM and session replay](../signals/rum.md). What differs is that nothing
-in the app runs on a server: nginx serves the configuration and is the proxy.
+A static bundle (built with Vite, webpack or the framework's CLI) served by nginx or a CDN,
+calling APIs that are instrumented on their own. The page follows
+[browser RUM](../signals/rum.md) with Grafana Faro. Nothing in the app runs on a server, so the
+deployment serves the runtime config, and nginx is the proxy when transport `proxy` is chosen.
+
+`detect.py` reports such a project as workload `spa`.
 
 ## Module layout
 
 ```text
-src/observability/                   # rum, web vitals, route spans, errors, replay loader, config
-public/observability.json            # runtime RUM config, mounted per environment by the chart
-nginx default.conf                   # JSON access log with $http_traceparent; /telemetry/ proxy locations
+src/observability/rum/               # config.ts, init.ts, scrub.ts, react.tsx (assets/js/faro)
+public/observability.json            # default with RUM off; the deployment mounts the real one
+nginx default.conf                   # JSON access log, CSP, /observability.json, optional proxy
 ```
 
-## What differs from a fullstack app
+## Start-up
 
-| Concern | Single-page app |
-| --- | --- |
-| Start-up | the bundle's entry imports `src/observability/rum` first, before the router and the app, and runs it synchronously |
-| Runtime configuration | `observability.json`, fetched once at start-up, mounted by the chart per environment, never baked into the bundle. Until it arrives, the page buffers nothing and exports nothing, so the RUM code can be a lazily loaded chunk the bundle imports only when the file switches RUM on. Ship a default with RUM off. nginx serves it from an exact location with `try_files $uri =404`: under the SPA fallback a missing file answers `index.html` with 200, so the page also checks the content type and keeps RUM off on anything that isn't JSON |
-| Route changes | the router's navigation events (React Router, Vue Router, Angular Router) start the `route.change` span. `app.route` is the router's own pattern for the matched route |
-| OTLP proxy | nginx `location /telemetry/v1/` forwards to the collector's OTLP/HTTP receiver, or to the backend with the key added by `proxy_set_header` from a mounted Secret (an nginx include file holding the `proxy_set_header` line, or an `envsubst` template) |
-| Replay proxy | nginx `location /telemetry/session-replay/` forwards to the OneUptime host with the key and `x-oneuptime-app-identifier` added the same way. Allow only the recorder, config and chunk paths, return the recorder bytes unchanged and set `client_max_body_size 2m` |
-| Access log | nginx writes a JSON access log with `$http_traceparent`, so each page and asset request can be joined to the browser trace that made it. It logs the path without its query (`$uri`): `$request` and `$request_uri` put OAuth codes, state and tokens from callback URLs into the pod logs. The proxy routes log only their failures |
-| Server-side errors | none: browser errors are the only error records the app produces; the APIs report their own |
+- The entry module starts the config fetch and `startRum` before rendering and doesn't wait for
+  them ([rum.md](../signals/rum.md#configuration-at-run-time)).
+- **React:** `instrumentRouter(createBrowserRouter(routes))`, `RumErrorBoundary` around the
+  router, and `RouteErrorReporter` as the root route's `errorElement`
+  ([assets/js/faro](../../assets/js/faro/README.md)).
+- **Vue Router, Angular Router, SvelteKit:** the router's after-navigation hook calls
+  `faro.api.setView({ name })` with the matched route's pattern (`/orders/:id`), never the
+  path. The framework's global error handler calls `faro.api.pushError(error)`. Errors it doesn't
+  see (`window.onerror`, unhandled rejections) are Faro's own.
+- `user.id` comes from the app's verified auth state: after sign-in `faro.api.setUser({ id })`,
+  after sign-out `faro.api.resetUser()`.
 
-Without a proxy, the page would need a OneUptime **Browser** ingestion key restricted to the
-app's origins and a CSP that allows the OneUptime origin. Prefer the proxy: the key stays on
-the server and the CSP stays `'self'`.
+## Runtime configuration
 
-## The nginx proxy
+- `observability.json` holds the `service` and `rum` blocks, rendered per environment by the
+  deployment from `observability.yml` ([config.md](../config.md#rum)). The image ships a default
+  with `"enabled": false`.
+- nginx serves it from an exact location, `location = /observability.json { expires epoch;
+  try_files $uri =404; }`. Under the SPA fallback a missing file would answer `index.html` with
+  200, so the loader also checks the content type and keeps RUM off on anything that isn't JSON.
 
-Tested with nginx 1.30 against the skill's receiver and against Alloy with OneUptime; in those
-runs the replay location used a plain `upstream` over http, and the `resolver` + variable HTTPS
-form below is its production shape. The `map`s and `upstream` go inside `http {}`, the locations
-inside `server {}`. Replace the origin, the collector address and the OneUptime host; the key
-file comes from a Secret.
+## Source maps
+
+- Build source maps hidden: Vite `build: { sourcemap: 'hidden' }`, webpack
+  `devtool: 'hidden-source-map'`. The bundle then has no `sourceMappingURL`.
+- Move the `.map` files out of the served output in the build, and deliver them to the
+  directory Alloy's `faro.receiver` reads, for example a volume or an object-store sync per
+  release (`location` `path` may contain `{{ .Release }}`). nginx also answers 404 for `\.map$`.
+- With hidden maps and `download = false` on the receiver, Alloy makes no outbound requests
+  ([collector](../collector/README.md#browser-rum-faroreceiver)).
+
+## nginx
+
+Tested with nginx 1.30 against Alloy 1.21. The `map`s and `log_format` go inside `http {}` (a
+`conf.d` file is included there), the rest inside `server {}`. Nothing in it names an
+environment: one image serves every environment, and the per-environment parts come from mounts.
 
 ```nginx
 # http {}
-map "$request_method:$http_origin" $telemetry_origin_ok {
-  default 0;
-  "~^GET:$" 1;                          # script loads send no Origin
-  "GET:https://app.example.com" 1;
-  "POST:https://app.example.com" 1;
-}
+map $request_uri $path_only { "~^(?<p>[^?]*)" $p; }
+map $http_x_forwarded_proto $page_scheme { default $http_x_forwarded_proto; "" $scheme; }
 map $status $telemetry_failed { ~^[23] 0; default 1; }
-upstream otel_collector { server otel-collector.observability:4318; }
+log_format rum_json escape=json '{"time":"$time_iso8601","method":"$request_method","path":"$path_only",'
+  '"status":$status,"bytes":$body_bytes_sent,"duration_s":$request_time,"traceparent":"$http_traceparent"}';
 
 # server {}
+access_log /dev/stdout rum_json;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self' https://api.example.com" always;
+
 location = /observability.json { expires epoch; try_files $uri =404; }
+location ~ \.map$ { return 404; }
+location / { try_files $uri /index.html; }
+```
 
-location ^~ /telemetry/ {
-  client_max_body_size 2m;
-  access_log /var/log/nginx/access.log main if=$telemetry_failed;
+- **Access log:** JSON with the request path cut at `?`. Not `$uri`: after `try_files` falls
+  back, `$uri` is `/index.html` for every route. Not `$request` or `$request_uri`: they put OAuth
+  codes, state and tokens from callback URLs into the logs. `$http_traceparent` joins an asset or
+  page request to a browser trace.
+- **CSP `connect-src`:** `'self'`, the API origins and, for transport `faro` or `otlp`, the
+  receiver's origin. Faro needs no `script-src` exception: it is part of the bundle.
 
-  location ~ ^/telemetry/v1/(?<otlp_signal>traces|metrics|logs)$ {
-    if ($telemetry_origin_ok = 0) { return 403; }
-    if ($request_method != POST) { return 404; }
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_set_header Cookie "";
-    proxy_set_header Referer "";
-    proxy_set_header Authorization "";
-    proxy_pass http://otel_collector/v1/$otlp_signal;
-  }
+### The proxy transport (`proxy`)
 
-  location ~ ^/telemetry/session-replay/(?<replay_artifact>v1/recorder\.js|latest/recorder\.js|v1/config|v1/chunk)$ {
-    if ($telemetry_origin_ok = 0) { return 403; }
-    include /etc/nginx/secrets/oneuptime-replay.conf;   # proxy_set_header x-oneuptime-token "...";
-    proxy_set_header x-oneuptime-app-identifier my-app;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_set_header Cookie "";
-    proxy_set_header Referer "";
-    proxy_set_header Authorization "";
-    proxy_hide_header Set-Cookie;
-    proxy_hide_header Access-Control-Allow-Origin;
-    proxy_hide_header Access-Control-Allow-Credentials;
-    proxy_hide_header Cache-Control;
-    expires epoch;
-    resolver <cluster DNS IP> valid=30s;
-    set $oneuptime_host oneuptime.example.com;
-    proxy_ssl_server_name on;
-    proxy_set_header Host $oneuptime_host;
-    proxy_pass https://$oneuptime_host/telemetry/session-replay/$replay_artifact;
-  }
+When `rum.transport` is `proxy`, nginx forwards the page's batches to an in-cluster receiver and
+adds the key. The CSP stays `connect-src 'self'` plus the APIs.
 
-  return 404;
+```nginx
+location = /telemetry/faro/collect {
+  access_log /dev/stdout rum_json if=$telemetry_failed;
+  client_max_body_size 1m;
+  set $rum_upstream "";
+  include /etc/nginx/rum/*.conf;        # mounted from a Secret; see below
+  if ($rum_upstream = "") { return 503; }
+  if ($request_method != POST) { return 405; }
+  if ($http_origin != "$page_scheme://$http_host") { return 403; }
+  proxy_http_version 1.1;
+  proxy_set_header Connection "";
+  proxy_set_header Cookie "";
+  proxy_set_header Referer "";
+  proxy_set_header Authorization "";
+  proxy_pass $rum_upstream;
 }
 ```
 
-What each part guards against, all seen in practice:
+The mounted file, one per environment:
 
-- **Named captures.** A `map` with regex entries overwrites the numbered captures when it's
-  evaluated, so `$1` in `proxy_pass` turns empty after the `Origin` check and the request goes to
-  the wrong path.
-- **`proxy_set_header` doesn't inherit** into a location that sets any of its own, so each
-  location repeats its list, including the session headers it clears.
-- **No `add_header` in these locations.** A location with its own `add_header` drops every header
-  set at `http` or `server` level, the Content-Security-Policy included. `expires epoch` gives
-  `Cache-Control: no-cache` without one.
-- **`^~` on the prefix.** Otherwise a static-asset regex location (`\.(js|css|…)$`) catches
-  `recorder.js` first.
-- **A variable upstream with a `resolver`** for an external host: an `upstream` block or a literal
-  host is resolved at start-up, and an unresolvable host would stop nginx from serving the app.
-- **Empty `Origin` only for GET:** the recorder's script loads send none.
+```nginx
+resolver <cluster DNS address> valid=30s;
+set $rum_upstream "http://alloy.observability.svc.cluster.local:12347/collect";
+proxy_set_header X-API-Key "<receiver key>";
+```
+
+- **One image, every environment.** The origin check compares `Origin` with the page's own
+  scheme and host (`X-Forwarded-Proto` behind an ingress that terminates TLS), so no origin is
+  written down. The upstream, the resolver and the key come from the mount.
+- **Starts without the mount.** A glob `include` that matches nothing is allowed, and the
+  upstream is a variable resolved per request, so nginx starts with no Secret and with an
+  unresolvable host; the proxy then answers 503 and the page keeps working.
+- **Only the page's own posts:** `POST` (405 otherwise) from its own origin (403 otherwise),
+  bodies up to the receiver's payload cap.
+- **No session data upstream.** `proxy_set_header` doesn't inherit into a location that sets any
+  of its own, so this location repeats the session headers it clears: no `Cookie`, `Referer` (it
+  can carry OAuth codes) or `Authorization` reaches the receiver.
+- **No `add_header` in this location:** one would drop the server-level CSP.
+- **Only failures are logged** for the proxy route.
 
 ## Verification
 
-The browser checks apply as for a fullstack app; the server checks apply to the APIs the page
-calls ([acceptance.md](../acceptance.md)).
+Run the browser checks in [acceptance.md](../acceptance.md#browser-rum). The APIs the page calls
+get the server checks.
 
 [Documentation index](../README.md)

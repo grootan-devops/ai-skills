@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 
 @dataclass
@@ -20,6 +19,9 @@ class Exchange:
     error: str | None = None
     started_ns: int = 0
     ended_ns: int = 0
+    # The identity the scenario authenticated this request as ({"user.id": ..., "tenant.id": ...}); {} for an
+    # anonymous request; None when the scenario doesn't say. The conformance checks compare, never print, the values.
+    identity: dict | None = None
 
     @property
     def path_only(self) -> str:
@@ -89,93 +91,20 @@ class Payload:
 
 
 @dataclass
-class ReplayChunk:
-    """One frame of a session-replay upload: its envelope and decoded rrweb events."""
-
-    seq: int  # frame number across all uploads
-    upload: int  # upload (request) number
-    frame: int  # position of the frame in its upload
-    envelope: dict
-    events: list | None  # None when the recorder sent only the payload's size
-    header_names: list = field(default_factory=list)
-    token_ok: bool | None = None  # x-oneuptime-token equals the expected token; None without one
-    app_identifier: bool = False  # x-oneuptime-app-identifier was present
-    content_type: str = ""
-    received_at: float = 0.0
-    note: str = ""
-
-    @property
-    def session_id(self) -> str:
-        return str(self.envelope.get("sessionId") or "")
-
-    @property
-    def is_final(self) -> bool:
-        return self.envelope.get("isFinal") is True
-
-    @property
-    def event_count(self) -> int:
-        return len(self.events or [])
-
-
-@dataclass
-class BrowserStep:
-    """One step (B1-B6) of the browser scenario."""
-
-    id: str
-    ok: bool = False
-    detail: str = ""  # never holds a canary value
-    started_ns: int = 0
-    ended_ns: int = 0
-    facts: dict = field(default_factory=dict)
-
-
-@dataclass
-class PageRequest:
-    """One request the page made, from the browser's network events."""
+class FaroPayload:
+    """One Grafana Faro batch posted to /collect (browser RUM)."""
 
     seq: int
-    url: str  # as sent; may hold a canary (redacted in artifacts)
-    method: str
-    resource_type: str
-    step: str  # the browser step it was sent in
-    same_origin: bool = False
+    data: dict  # the JSON body: meta plus exceptions, logs, events, measurements, traces
+    raw: bytes
     header_names: list = field(default_factory=list)
-    traceparent: str | None = None  # same-origin /api/ requests only
-    tracestate: str | None = None
-    token_in_url: bool = False  # the expected backend token in the URL
-    token_headers: list = field(default_factory=list)  # names of the headers whose value carried it
-    token_in_body: bool | None = None  # document and script responses: the body carries it
-    status: int | None = None
-    failure: str | None = None
-    started_ns: int = 0
+    received_at: float = 0.0
+    api_key: bool = False  # an X-API-Key header was present; its value is never kept
+    origin: str = ""  # the browser's Origin header
 
     @property
-    def path(self) -> str:
-        """Path without query or fragment (never a canary from the query)."""
-        return urlsplit(self.url).path or "/"
-
-
-@dataclass
-class BrowserRun:
-    """The browser scenario: steps, the page's network requests and what went wrong."""
-
-    attempted: bool = False
-    started: bool = False  # a browser launched
-    browser: str = ""
-    error: str | None = None
-    origin: str = ""
-    started_ns: int = 0
-    ended_ns: int = 0
-    steps: list = field(default_factory=list)
-    requests: list = field(default_factory=list)
-    page_errors: list = field(default_factory=list)  # redacted messages
-    console: list = field(default_factory=list)  # redacted error and warning messages
-
-    def step(self, step_id: str) -> BrowserStep | None:
-        return next((s for s in self.steps if s.id == step_id), None)
-
-    def in_window(self, time_ns: int) -> bool:
-        return bool(self.started_ns and time_ns and self.started_ns <= time_ns <= (self.ended_ns or time_ns))
+    def name(self) -> str:
+        return f"faro/{self.seq:04d}.json"
 
 
 @dataclass
@@ -223,19 +152,9 @@ class Capture:
     upstream: list = field(default_factory=list)  # requests the fake upstream received
     upstream_port: int | None = None
     audit: dict | None = None
-    # RUM runs
-    browser: BrowserRun | None = None
-    browser_otlp: list[Payload] = field(default_factory=list)  # payloads of resources with browser.* attributes
-    replay_chunks: list[ReplayChunk] = field(default_factory=list)
-    replay_requests: list = field(default_factory=list)  # every request to the replay stand-in
-    replay_assets: dict = field(default_factory=dict)  # ReplayAssets.facts()
     token_set: bool = False  # a backend token file was written for the yml's ${file:...} references
     telemetry_ports: dict = field(default_factory=dict)
 
     @property
     def helpers(self) -> list[str]:
         return list((self.contract or {}).get("helpers") or [])
-
-    @property
-    def rum(self) -> bool:
-        return bool((self.contract or {}).get("rum"))

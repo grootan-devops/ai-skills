@@ -58,18 +58,11 @@ TRACE_CONTEXT = {
 }
 SCORE_TYPES = {"NUMERIC", "BOOLEAN", "CATEGORICAL"}
 # A span the ops guard treats as an AI call (references/signals/genai.md, "The ops allow-list"); any other span that
-# carries a key with an AI prefix counts as an extra AI call in OneUptime.
+# carries a key with an AI prefix reads as an extra AI call in LLM views.
 AI_MARKERS = ("gen_ai.operation.name", "langfuse.observation.type", "openinference.span.kind", "llm.request.type",
               "traceloop.span.kind")
 AI_KEY_PREFIXES = ("gen_ai.", "llm.", "traceloop.")
-# The GenAI conventions' own content keys: with the ops content destination, the only content AI spans keep there.
-CONVENTION_CONTENT = frozenset({
-    "gen_ai.input.messages", "gen_ai.output.messages", "gen_ai.system_instructions", "gen_ai.tool.definitions",
-    "gen_ai.tool.call.arguments", "gen_ai.tool.call.result", "gen_ai.retrieval.documents",
-    "gen_ai.retrieval.query.text", "gen_ai.memory.query.text", "gen_ai.memory.records",
-})
-DESTINATIONS = ("langfuse", "ops")
-IDENTITY = ("user.id", "team.id", "gen_ai.conversation.id")
+CONVERSATION = "gen_ai.conversation.id"
 # JSON-RPC errors a caller causes: an MCP server leaves them UNSET (references/workloads/mcp.md).
 MCP_CALLER_ERRORS = frozenset({"-32700", "-32600", "-32601", "-32602", "-32002"})
 
@@ -264,9 +257,9 @@ def mcp_lines(spans: list) -> list[str]:
 
 
 def summary(langfuse_spans: list, ops_spans: list, scores: list, fetches: list, media: list,
-            langfuse_payloads: list, dataset_fetches: tuple = (), destination: str = "langfuse") -> list[str]:
-    """The GenAI section of summary.md: per destination, keys and counts only. `destination` is the service's
-    genai.content.destination, which decides where content may appear."""
+            langfuse_payloads: list, dataset_fetches: tuple = ()) -> list[str]:
+    """The GenAI section of summary.md: per stream, keys and counts only. Content may appear in the Langfuse
+    stream only."""
     if not (langfuse_spans or scores or fetches or media or dataset_fetches
             or any(is_ai_span(s.attrs, s.scope) or "mcp.method.name" in s.attrs for s in ops_spans)):
         return []
@@ -301,8 +294,6 @@ def summary(langfuse_spans: list, ops_spans: list, scores: list, fetches: list, 
                     content.setdefault(key, []).append(value_chars(value))
         lines += ["Content keys in Langfuse spans: " + (", ".join(
             f"{k} x{len(v)} (max {max(v)} chars)" for k, v in sorted(content.items())) or "none"), ""]
-        if content and destination == "ops":
-            lines += ["CONTENT IN THE LANGFUSE STREAM: the content destination is ops, so Langfuse gets none.", ""]
         links: dict[str, int] = {}
         for span in langfuse_spans:
             name = span.attrs.get("langfuse.observation.prompt.name")
@@ -313,16 +304,13 @@ def summary(langfuse_spans: list, ops_spans: list, scores: list, fetches: list, 
     ai_ops = [s for s in ops_spans if is_ai_span(s.attrs, s.scope)]
     calls = [s for s in ops_spans if is_ai_call(s.attrs)]
     leaked: dict[str, int] = {}
-    allowed: dict[str, int] = {}
     stamps: dict[str, int] = {}
     stray: dict[str, int] = {}
     for span in ops_spans:
         call = is_ai_call(span.attrs)
         for key in span.attrs:
             if is_content_key(key):
-                # The ops destination lets the conventions' content keys stay on AI calls; nothing else.
-                bucket = allowed if destination == "ops" and call and key in CONVENTION_CONTENT else leaked
-                bucket[key] = bucket.get(key, 0) + 1
+                leaked[key] = leaked.get(key, 0) + 1
             elif key.startswith("langfuse."):
                 stamps[key] = stamps.get(key, 0) + 1
             elif not call and key.startswith(AI_KEY_PREFIXES):
@@ -335,21 +323,16 @@ def summary(langfuse_spans: list, ops_spans: list, scores: list, fetches: list, 
               + (", ".join(f"{k} x{v}" for k, v in sorted(leaked.items())) or "none")
               + "; langfuse.* keys: " + (", ".join(f"{k} x{v}" for k, v in sorted(stamps.items())) or "none")
               + f"; status descriptions other than the error type: {described}", ""]
-    if destination == "ops":
-        lines += ["Content on AI calls in the ops stream (the ops destination): "
-                  + (", ".join(f"{k} x{v}" for k, v in sorted(allowed.items())) or "none"), ""]
     if leaked:
-        lines += [("CONTENT IN THE OPS STREAM: prompts or completions reached the ops destination." if destination != "ops"
-                   else "CONTENT OUTSIDE AI CALLS IN THE OPS STREAM: content on other spans, in span events or in "
-                        "other conventions' keys."), ""]
+        lines += ["CONTENT IN THE OPS STREAM: prompts or completions reached the ops backend.", ""]
     if described:
         lines += ["PROVIDER MESSAGES IN THE OPS STREAM: AI spans keep status descriptions that can quote the input.", ""]
     if calls:
-        lines += [f"Who spent what on the {len(calls)} AI calls in the ops stream: "
-                  + ", ".join(f"{key} {sum(1 for s in calls if s.attrs.get(key))}/{len(calls)}" for key in IDENTITY), ""]
+        lines += [f"Conversation ids on the {len(calls)} AI calls in the ops stream: "
+                  f"{CONVERSATION} {sum(1 for s in calls if s.attrs.get(CONVERSATION))}/{len(calls)}", ""]
     if stray:
         lines += ["AI keys on spans that aren't AI calls: " + ", ".join(f"{k} x{v}" for k, v in sorted(stray.items())), "",
-                  "AI KEYS ON OTHER SPANS: OneUptime counts each of these spans as an AI call.", ""]
+                  "AI KEYS ON OTHER SPANS: LLM views count each of these spans as an AI call.", ""]
     retrievals = [s for s in (ops_spans or langfuse_spans) if s.name.startswith("retrieval ")]
     if retrievals:
         typed = sum(1 for s in retrievals if s.attrs.get("gen_ai.operation.name") == "retrieval")

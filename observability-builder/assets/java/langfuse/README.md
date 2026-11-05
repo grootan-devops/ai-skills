@@ -5,9 +5,9 @@ Java has no Langfuse SDK, so these classes are the module's Langfuse side
 
 | File | What it gives the module |
 | --- | --- |
-| `LangfuseExporter.java` | `LangfuseExporter.create(config, guard)`: an `OtlpHttpSpanExporter` to `{base_url}/api/public/otel/v1/traces` with Basic auth from the keys, `x-langfuse-ingestion-version: 4` and gzip; the export scope and the content guard work on a copy of each span. A guard that throws keeps the span out (fail closed). `withTranslation` adds the module's Langfuse-only keys to that copy. |
+| `LangfuseExporter.java` | `LangfuseExporter.create(config, guard)`: an `OtlpHttpSpanExporter` to `{base_url}/api/public/otel/v1/traces` with Basic auth from the keys, `x-langfuse-ingestion-version: 4` and gzip; the export scope and the content guard work on a copy of each span. A guard that throws keeps the span out (fail closed). `withTranslation` adds the module's Langfuse-only keys to that copy. Each request's estimated body stays under `LangfuseConfig.maxRequestBytes` before gzip (3 MiB by default): a batch is split, and a span that alone exceeds it is dropped with a counted warning, at most one a minute. |
 | `ExportScope.java` | `shouldExport` (`ai_context`, `ai_only`) and `isAiSpan` |
-| `ContentGuard.java` | `ContentGuard.of(decide, maxChars)`, built from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `cap` and `failedStatus` |
+| `ContentGuard.java` | `ContentGuard.of(decide, maxChars)`, built from the module's decision (the feature's content mode, the content sample, the redactor); the content keys, `cap`, `failedStatus` and `isRequestContextKey`. The exporter drops the request-context and HTTP detail keys (`client.*`, `user_agent.*`, request and response headers, cookies, `url.query`, `url.full`, `network.peer.*`) from every Langfuse copy, in every mode and with or without a guard. |
 | `GuardedSpanData.java` | The guarded copy: a `DelegatingSpanData` with its own attributes, status and events |
 | `LangfuseClient.java` | `prompt` for app code (it behaves as in the Go copy, with the version's `config`), or `fetchPrompt` (one fetch, no cache) where the app keeps its own cache. `scores(size, onError)` is a bounded queue whose `send` never blocks and whose `close(grace)` sends what is left; `createScore` takes a stable id; `dataset(name, version)` is for an experiment runner. Pass the module's traced `HttpClient` to the constructor so a prompt fetch inside a request gets its CLIENT span. |
 | `LangfuseConfig.java` | The yml's values. `toString` leaves the keys out. |
@@ -25,9 +25,7 @@ The exporter brings the OkHttp sender. Where the service pins another OkHttp, ex
 Then:
 
 - **Build the guard.** Implement `ContentGuard.Decide` from the feature registry and the yml's
-  content ceiling. An experiment item may hold content whenever the ceiling is `full`. With
-  `genai.content.destination: ops`, `Decide` always refuses: content then goes to the ops
-  backend's AI views, and Langfuse gets none.
+  content ceiling. An experiment item may hold content whenever the ceiling is `full`.
 - **Wire it per mode** (`genai.langfuse.mode`, export `app`):
   - `hybrid`: `BatchSpanProcessor.builder(LangfuseExporter.create(...))` on the module's
     `SdkTracerProvider`, next to the ops processor, plus one `LangfuseClient` for app prompts and
@@ -39,8 +37,10 @@ Then:
   (`AutoConfigurationCustomizer.addTracerProviderCustomizer`), or prefer the collector route.
 - **Make the model spans.** The module's model-call helper makes the `chat {model}` CLIENT spans,
   unless an instrumentation such as Spring AI's already does.
-- **Set the span attribute limit.** `SpanLimits` must allow at least `genai.content.max_chars`
-  per value: a shorter limit cuts content blindly before `cap` can shorten it.
+- **Set the span attribute limit.** `SpanLimits` at 8192 per value, with
+  `genai.content.max_chars` (8000 by default) at or below it: a shorter limit cuts content
+  blindly before `cap` can shorten it. A project that needs longer content raises both
+  together and records the exception.
 - **Shut down in order:** the provider first (it flushes the exporter), then `Scores.close`, within
   the grace period.
 

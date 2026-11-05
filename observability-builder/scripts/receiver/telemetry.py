@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 
-from opentelemetry.proto.logs.v1 import logs_pb2
+try:  # the enum names; the checks over captured telemetry also run without opentelemetry-proto
+    from opentelemetry.proto.logs.v1 import logs_pb2
+except ImportError:  # pragma: no cover - depends on the environment
+    logs_pb2 = None
 
 LEVELS = {"TRACE": 1, "DEBUG": 5, "INFO": 9, "WARN": 13, "WARNING": 13, "ERROR": 17, "FATAL": 21, "CRITICAL": 21}
 
@@ -66,6 +69,11 @@ def severity_number(value) -> int | None:
         return None
     if isinstance(value, int):
         return value or None
+    if logs_pb2 is None:
+        match = re.fullmatch(r"SEVERITY_NUMBER_([A-Z]+)(\d?)", str(value))
+        if match:
+            return LEVELS.get(match.group(1), 0) + max(0, int(match.group(2) or 1) - 1) or None
+        return as_int(value) or None
     try:
         return logs_pb2.SeverityNumber.Value(value) or None
     except ValueError:
@@ -88,6 +96,7 @@ class Span:
     scope: str = ""  # instrumentation scope name
     events: list = field(default_factory=list)  # {"name", "time_ns", "attrs"}
     status_message: str = ""  # the status description
+    links: list = field(default_factory=list)  # {"trace_id", "span_id"}
 
 
 @dataclass
@@ -134,29 +143,6 @@ def resources(payload) -> list[dict]:
     return [attributes((r.get("resource") or {}).get("attributes")) for r in payload.data.get(RESOURCE_KEYS[payload.signal], [])]
 
 
-def is_browser_resource(res: dict) -> bool:
-    """RUM is classified by the browser.* resource attributes (or the user agent)."""
-    return "user_agent.original" in res or any(str(key).startswith("browser.") for key in res)
-
-
-def split_browser(payloads) -> tuple[list, list]:
-    """(server payloads, browser payloads), split per resource; a mixed payload yields one of each."""
-    server, browser = [], []
-    for payload in payloads:
-        key = RESOURCE_KEYS[payload.signal]
-        groups = payload.data.get(key, [])
-        flags = [is_browser_resource(attributes((g.get("resource") or {}).get("attributes"))) for g in groups]
-        if not any(flags):
-            server.append(payload)
-        elif all(flags):
-            browser.append(payload)
-        else:  # never seen in practice: the browser's proxy forwards the browser's own requests
-            for want, out in ((False, server), (True, browser)):
-                data = {**payload.data, key: [g for g, flag in zip(groups, flags) if flag == want]}
-                out.append(replace(payload, data=data, raw=json.dumps(data).encode()))
-    return server, browser
-
-
 def spans(payloads) -> list[Span]:
     out = []
     for payload in payloads:
@@ -183,6 +169,8 @@ def spans(payloads) -> list[Span]:
                         scope=scope,
                         events=[{"name": ev.get("name", ""), "time_ns": as_int(ev.get("timeUnixNano")),
                                  "attrs": attributes(ev.get("attributes"))} for ev in sp.get("events", [])],
+                        links=[{"trace_id": str(ln.get("traceId", "")).lower(), "span_id": str(ln.get("spanId", "")).lower()}
+                               for ln in sp.get("links", [])],
                     ))
     return out
 

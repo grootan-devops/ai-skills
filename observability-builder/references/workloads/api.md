@@ -30,12 +30,12 @@ the order a request sees; [hooks.md](../hooks.md) has the full rules.
 | # | Where | Rule |
 | --- | --- | --- |
 | 1 | Process start | `init` runs before the framework loads; pre-fork and multi-process servers create providers after the fork, in each worker |
-| 2 | Outermost hook | extract W3C `traceparent`, `tracestate` and baggage and start the SERVER span; at a public edge, don't trust the incoming sampling flag |
+| 2 | Outermost hook | extract W3C `traceparent`, `tracestate` and allow-listed baggage (at most 8 keys and 512 bytes) and start the SERVER span; at a public edge, don't trust the incoming sampling flag |
 | 3 | Request start | accept `x-correlation-id` when valid (length and charset capped), otherwise generate one and log the replacement — never reject the request; bind trace, span and correlation IDs to the logger context |
 | 4 | Request start | `client.address` from the framework's trusted-proxy resolver, never the raw, spoofable `X-Forwarded-For` |
 | 5 | Request start | tee bodies only when the access log enables them: capped, without consuming the stream, into logs only |
 | 6 | After routing | `http.route` is the route **template** (`unmatched` when nothing matched); the span is named `{method} {http.route}`; the framework's middleware, router and handler layers get no spans |
-| 7 | After authentication | request attributes come from the auth layer's verified principal and are read at response end — never from parsing an unverified token |
+| 7 | After authentication | request attributes come from the trusted auth or tenant middleware's verified principal and are read at response end — never from raw client headers or an unverified token; an anonymous request has none |
 | 8 | Handler | function spans, enrichment and step logs ([functions.md](../functions.md), [enrichment.md](../enrichment.md)) |
 | 9 | Error | one global error handler records the failure once and keeps the existing error response format |
 | 10 | Response end | the access log (independent of trace sampling; it records `sampled`), the HTTP server metrics and the span status (UNSET unless the request failed, never OK) |
@@ -72,9 +72,9 @@ Pitfalls the contract guards against:
 | Access log | one record per request at response end, on by default; level by status (5xx ERROR, 4xx WARN, otherwise INFO); allow-listed headers, cookies and body fields only; the framework's default access log turned off | [signals/access-log.md](../signals/access-log.md) |
 | Application logs | all logging through the app's logger (the language's standard logger with the OpenTelemetry bridge), `json` or `plain`, native trace and span IDs, step logs for every wrapped function at the policy's levels | [signals/app-logs.md](../signals/app-logs.md) |
 | Traces | a SERVER entry span per request, nested INTERNAL spans for the project's own functions on the request path, a CLIENT span for every outbound call, no framework middleware spans; root spans for job runs and WebSocket traffic; semantic-convention groups chosen from what the code does | [signals/traces.md](../signals/traces.md), [functions.md](../functions.md) |
-| Metrics | the ops metrics from the stack's Prometheus client library on `/metrics`, on its own port: HTTP server and client, process and runtime, the database pool, WebSocket, failed probes and jobs; short, bounded labels only | [signals/metrics.md](../signals/metrics.md) |
+| Metrics | the ops metrics from the stack's Prometheus client library on `/metrics`, on its own port: HTTP server and client, process and runtime, the database pool, WebSocket, failed probes and jobs, and where they apply RPC, messaging and `auth_attempts_total{method,result}` (the service authenticates); short, bounded labels only | [signals/metrics.md](../signals/metrics.md), [data-model.md](../data-model.md#metrics) |
 | Errors | one ERROR log record with `exception.*` where the failure is handled; span status ERROR with `error.type`; process hooks for uncaught errors; 4xx not reported by default; no stack traces in responses | [signals/errors.md](../signals/errors.md) |
-| Profiling | continuous profiles over the Pyroscope protocol (or OTLP profiles where the backend takes them); the resource attributes as static labels; `controller` labels on slow or CPU-, memory- or lock-heavy code only | [signals/profiling.md](../signals/profiling.md) |
+| Profiling | continuous profiles over the Pyroscope protocol (or OTLP profiles where the backend takes them); the resource's M and C rows as static labels; `controller` labels on slow or CPU-, memory- or lock-heavy code only | [signals/profiling.md](../signals/profiling.md) |
 
 A sampled request then reads as one tree, and every log record written on the way carries its
 trace and span IDs:
@@ -91,8 +91,11 @@ SERVER    POST /orders             http.route=/orders  user.id=u-123  tenant.id=
 
 The resource is created once per process, so per-request facts go on each service's entry span
 (the local root — SERVER for a request) and on its access log: never on the resource, and not
-on every child span. The middleware sets them. Values are written as they are, except secrets,
-which are never captured ([safe-capture.md](../safe-capture.md)).
+on every child span. The trusted auth or tenant middleware sets them after authentication.
+Internal opaque IDs and the client address are written as they are; personal data only masked,
+through the shared masking helper; secrets never ([safe-capture.md](../safe-capture.md),
+[data-model.md](../data-model.md#pii-masking)). Each row has a class (M, C, R, O or P) per
+location in [data-model.md](../data-model.md#request-and-identity-context).
 
 | Attributes | Source | Rule |
 | --- | --- | --- |
@@ -102,8 +105,9 @@ which are never captured ([safe-capture.md](../safe-capture.md)).
 | `client.address` | trusted-proxy resolver | the real client; `X-Forwarded-For` from an untrusted peer is ignored |
 | `http.request.header.<name>` | request headers | allow-list only; never `Authorization` or `Cookie` |
 | `http.request.body.size`, `http.response.body.size` | server | sizes only — bodies never go on spans |
-| `user.id`, `user.roles`, `tenant.id`, `session.id` | verified principal and session, after authentication | read at response end |
-| `correlation.id` | `x-correlation-id`, or generated | also on every log record |
+| `user.id`, `tenant.id`, `session.id` | verified principal, tenant resolver and session, after authentication | read at response end; absent for an anonymous request |
+| `correlation.id` | `x-correlation-id`, or generated | also on every log record; there is no `request.id` |
+| reference catalogue: `user.roles`, `app.user.type`, `app.tenant.tier`, `app.organization.id`, `app.account.id`, `app.auth.method`, `app.auth.result` and the others | the auth, session or tenant code, where it has the value | added only when the code has it; never fabricated ([data-model.md](../data-model.md#request-and-identity-context)) |
 | `app.client.name`, `app.client.version`, `app.client.platform` | allow-listed request headers | custom namespace (`app.` by default) |
 | `http.response.status_code`, `error.type` | response | status ERROR on 5xx; a 4xx leaves the server span UNSET |
 
@@ -111,7 +115,11 @@ which are never captured ([safe-capture.md](../safe-capture.md)).
   result and status.
 - Request attributes are never resource attributes, metric labels or profile labels.
 - Another service receives request context only through allow-listed baggage, which its own
-  middleware puts on its own entry span ([enrichment.md](../enrichment.md)).
+  middleware puts on its own entry span ([enrichment.md](../enrichment.md)). Baggage holds at
+  most 8 keys and 512 bytes, never secrets, authorisation or AI context, and is never the
+  callee's source of verified identity: the callee authenticates the call itself.
+- Request context lives in the request's own context, never in a global or a thread-local that
+  outlives it, so concurrent requests of different tenants never see each other's identity.
 
 ### GraphQL
 
@@ -126,7 +134,8 @@ allow-listed operations).
 
 Each call gets a SERVER span named `{rpc.method}` with `rpc.system.name`, `rpc.method` and
 `rpc.response.status_code`, status ERROR for the server-error codes the conventions list, and the
-`rpc.server.call.duration` metric. The SDK may need the semantic-convention opt-in for these
+`rpc_server_duration_seconds{method,status_code}` metric (`rpc_client_duration_seconds` for
+outbound calls; [data-model.md](../data-model.md#metrics)). The SDK may need the semantic-convention opt-in for these
 names; legacy `rpc.system` and `rpc.service` are accepted. Each call writes one access-log
 record, and the standard gRPC health service is excluded like the HTTP probes.
 
@@ -224,9 +233,13 @@ request. A dedicated workers page will follow; in short:
 - **Per-message job log** instead of an access log: one record per message when processing ends,
   with the outcome, duration, destination and attempt; `job.retry_scheduled` and
   `job.dead_lettered` events when they happen.
-- **Metrics:** the job metrics `job_runs_total{job_name,outcome}` and `job_duration_seconds{job_name}`
-  per message type; consumer lag and queue depth from the broker's own exporter. Never message
-  IDs as labels.
+- **Metrics:** `messaging_process_duration_seconds` and `messaging_messages_total` with
+  `system`, `destination` (bounded) and `operation`, plus `outcome` on the counter
+  ([data-model.md](../data-model.md#metrics)); consumer lag and queue depth from the broker's own
+  exporter. Never message IDs as labels.
+- **Identity:** a consumer takes user or tenant context only from what its own code verifies
+  (a signed claim in the message, the producer's service identity), never from an unverified
+  header or the payload.
 - **Adapter:** `adapters/consumer` ([layout.md](../layout.md)).
 
 ## Conformance

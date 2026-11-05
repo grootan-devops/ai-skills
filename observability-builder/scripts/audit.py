@@ -11,16 +11,30 @@ app logger, scheduled jobs that start no job root span, and patches of observabi
 are reported too. For GenAI: prompt and completion content recorded outside the module's content
 policy or written to logs, capture switches turned on in code, Langfuse secret keys in source or in
 the page, AI context in baggage, two instrumentations of one AI library, and a second sender of spans to
-Langfuse's OTLP endpoint. Heuristic by design:
+Langfuse's OTLP endpoint. For the data model (references/data-model.md): identity rows set from raw
+client headers, `request.id` and `code.namespace` attributes, ID-like metric labels, personal data
+logged without the masking helper, static profile labels that don't come from the resource, baggage
+over its limits, and resource keys the standard never adds (a process or host detector whose output passes an
+allow-list in the same file is accepted). For the telemetry's own cost and safety (references/overhead-and-security.md):
+synchronous span or log processors, module OTLP exporters built without a timeout option (the option or an
+OTEL_EXPORTER_OTLP_*TIMEOUT within 15 lines counts; options built elsewhere are not followed), plaintext export to a
+remote host (accepted with a comment on the line or above naming a private hop: sidecar, in-cluster, NetworkPolicy,
+mesh, mTLS), literal telemetry credentials in code or config, metrics or profiling servers bound to 0.0.0.0 without
+a comment saying who reaches them, attribute value length limits above 8192 (accepted when equal to the yml's
+genai.content.max_chars, with a comment on the line or above naming max_chars), module log formatters that copy every
+LogRecord attribute, and module debug calls that format their message before the level check. The skill's own
+scripts are skipped when they sit inside the scanned project. Heuristic by design:
 the agent judges the rest (see references/audit.md). Add `obs-audit: ignore` to a line to accept it.
 
 Usage: python3 audit.py <project> [--module PATH ...] [--include-tests] [--json] [--strict]
+--module takes a path relative to the project, relative to the working directory, or absolute.
 Exit codes: 0 no findings, 1 findings with --strict, 2 any P0.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -39,6 +53,7 @@ TEST_RE = re.compile(
     r"|(^|/)tests?\.rs$"
 )
 IGNORE_RE = re.compile(r"obs-audit:\s*ignore")
+SKILL_SCRIPTS = Path(__file__).resolve().parent
 
 # Telemetry sinks: span attributes and events, baggage, log calls.
 ATTR_SINK = re.compile(r"\b(setAttributes?|set_attributes?|SetAttributes|addEvent|add_event|AddEvent|attribute\.(String|Int|Bool)\w*)\s*\(")
@@ -71,7 +86,7 @@ SECRET_READ = re.compile(
     re.IGNORECASE,
 )
 # Identifiers named like secrets: `token`, `apiKey`, `x_debug_token`, `clientSecret`, `sessionCookie`.
-SECRET_IDENT = re.compile(r"(authorization|auth_?header|cookies?|api_?key|token|password|passwd|secret|credentials?)$", re.IGNORECASE)
+SECRET_IDENT = re.compile(r"(authorization|auth_?header|cookies?|api_?key|token|password|passwd|secret|credentials?|card_?(?:number|num|no)|cvv|cvc)$", re.IGNORECASE)
 NOT_SECRET_IDENT = re.compile(r"(page|next|cancellation|continuation|resume|sync)_?token$|^(is|has|should|use|with|no|max|min|num|count)(_|[A-Z])", re.IGNORECASE)
 # Assignments: `const x =`, `x :=`, `String x =`, `a, b :=`, `x =` (never ==, !=, <=, >=, =>).
 ASSIGN = re.compile(r"\b([A-Za-z_]\w*)\s*(?::=|(?<![=!<>])=(?![=>]))\s*(.+)$")
@@ -110,7 +125,9 @@ QUERY_SECRET = re.compile(
     re.IGNORECASE,
 )
 ID_KEY = re.compile(
-    r"""['"]?\b(user[._]?id|userId|session[._]?id|sessionId|tenant[._]?id|tenantId|order[._]?id|orderId|request[._]?id|requestId|trace[._]?id|traceId|correlation[._]?id|correlationId|email)\b['"]?\s*[:=,)]""",
+    r"""['"]?\b(user[._]?id|userId|session[._]?id|sessionId|tenant[._]?id|tenantId|order[._]?id|orderId|request[._]?id|requestId|trace[._]?id|traceId|correlation[._]?id|correlationId|email"""
+    r"""|(?:org|organi[sz]ation|account|customer|conversation|span)[._]?id|(?:org|organi[sz]ation|account|customer|conversation|span)Id"""
+    r"""|url\.full|url\.path|http\.target|http\.url|db\.query\.text|db\.statement)\b['"]?\s*[:=,)]""",
     re.IGNORECASE,
 )
 SDK_SETUP = re.compile(
@@ -128,16 +145,143 @@ OBS_ENV_PREFIX = r"(?:OTEL|LANGFUSE|TRACELOOP|OPENINFERENCE)_"
 OTEL_ENV = re.compile(rf"""process\.env(\.|\[\s*['"]){OBS_ENV_PREFIX}|os\.environ[^\n]*['"]{OBS_ENV_PREFIX}"""
                       rf"""|os\.getenv\s*\(\s*['"]{OBS_ENV_PREFIX}|os\.Getenv\s*\(\s*"{OBS_ENV_PREFIX}|System\.getenv\s*\(\s*"{OBS_ENV_PREFIX}""")
 XFF = re.compile(r"""x-forwarded-for""", re.IGNORECASE)
-# Browser code: a backend key, propagation to every origin, typed values or page text in telemetry.
-BROWSER_KEY = re.compile(r"""x-oneuptime-(token|service-token|ingestion-key)""", re.IGNORECASE)
+# Browser code: a telemetry backend key in code that runs in the page.
+BROWSER_KEY = re.compile(r"""['"`]Api-Token\s""")  # Dynatrace's auth scheme; other keys show up as PUBLIC_KEY names
 # A telemetry key in a build-time public variable or in public runtime config: bundlers ship these to the page.
 # Only telemetry credentials count; other secrets in a bundle belong to another review, not this audit.
-TELEMETRY_HINT = r"(?:ONEUPTIME|OTEL|OTLP|TELEMETRY|RUM|REPLAY|PYROSCOPE|OBSERVABILITY|INGESTION)"
+TELEMETRY_HINT = r"(?:OTEL|OTLP|TELEMETRY|PYROSCOPE|OBSERVABILITY|INGESTION)"
 PUBLIC_KEY = re.compile(
     rf"""\b(?:(?:NEXT_|NUXT_)?PUBLIC_|VITE_|REACT_APP_|NG_APP_)\w*{TELEMETRY_HINT}\w*(?:TOKEN|SECRET|KEY)"""
     rf"""|\.public\.\w*{TELEMETRY_HINT}\w*(?:token|secret|key)""", re.IGNORECASE)
-PROPAGATE_ALL = re.compile(r"""propagateTraceHeaderCorsUrls[^\n]*(/\.\*/|/\.\+/|RegExp\(\s*['"]\.[*+]['"])""")
-PAGE_VALUE = re.compile(r"""\.(value|textContent|innerText|innerHTML)\b""")
+
+# Data model (references/data-model.md).
+# Metric declarations whose label list names an ID, a URL, a path, SQL or an email.
+METRIC_DECL = re.compile(r"\blabel_?[Nn]ames\b|\blabelnames\b|\bNew(?:Counter|Histogram|Gauge|Summary)Vec\s*\("
+                         r"|\bnew\s+(?:[\w.]+\.)?(?:Counter|Histogram|Gauge|Summary)\s*\(|(?<![\w.])(?:Counter|Histogram|Gauge|Summary)\s*\(")
+METRIC_ID_LABEL = re.compile(
+    r"""['"](?:user|tenant|session|org|organi[sz]ation|account|customer|order|request|correlation|trace|span|conversation)"""
+    r"""[_.-]?id['"]|['"](?:user|tenant|session|org|account|customer|order|request|correlation|trace|span)Id['"]"""
+    r"""|['"](?:email|user_email|url|path|raw_path|uri|full_url|sql|query|statement|error_message)['"]""")
+# Identity read from what the client sends: a header, cookie or query value.
+IDENTITY_HEADER = r"x-(?:user|tenant|org|organi[sz]ation|account|customer|session)(?:[-_]?id)?|x-(?:user-)?roles?"
+IDENTITY_READ = re.compile(
+    rf"""headers?\s*(?:\[\s*['"]|\.\s*get\s*\(\s*['"]|\.)(?:{IDENTITY_HEADER})\b"""
+    rf"""|get(?:Header|HeaderString)?\s*\(\s*['"](?:{IDENTITY_HEADER})['"]"""
+    rf"""|(?<![\w.])header\s*\(\s*['"](?:{IDENTITY_HEADER})['"]"""
+    r"""|META\s*(?:\[\s*|\.\s*get\s*\(\s*)['"]HTTP_X_(?:USER|TENANT|ORG|ORGANI[SZ]ATION|ACCOUNT|CUSTOMER|SESSION)(?:_ID)?['"]"""
+    r"""|\bcookies?\s*(?:\[\s*|\.\s*get\s*\(\s*)['"](?:user|tenant|session|org|account)[-_]?id['"]"""
+    r"""|\b(?:query|args|searchParams|query_params|queryParams|URL\.Query\(\))\s*(?:\.\s*[Gg]et\s*\(\s*['"]|\[\s*['"]|\.)"""
+    r"""(?:user|tenant|org|account|customer)[-_]?[iI]d\b""",
+    re.IGNORECASE,
+)
+IDENTITY_PARAM = re.compile(r"^x_?(?:user|tenant|org|organi[sz]ation|account|customer|session)_?id$|^x_?(?:user_?)?roles?$",
+                            re.IGNORECASE)
+IDENTITY_KEY = re.compile(
+    r"""['"](?:user\.id|tenant\.id|session\.id|user\.roles|enduser\.id|app\.(?:organization|account|customer)\.id)['"]"""
+    r"""|\b(?:ATTR_|SEMATTRS_)?(?:USER_ID|ENDUSER_ID|SESSION_ID|USER_ROLES)\b|\bsemconv\.(?:UserID|EnduserID|SessionID|UserRoles)\w*""")
+# request.id: the attribute name anywhere, request_id / requestId as a field of a log, span or logger context.
+REQUEST_ID_ATTR = re.compile(r"""['"](?:app\.)?request\.id['"]""")
+REQUEST_ID_FIELD = re.compile(r"""['"](?:request_id|requestId|request-id)['"]\s*[:,)]|\brequest_id\s*=(?!=)""")
+LOG_CONTEXT = re.compile(r"\bMDC\s*\.\s*put\s*\(|\bbind_contextvars\s*\(|\b(?:ThreadContext|LogContext)\s*\.\s*(?:put|push)\w*\s*\("
+                         r"|\.\s*(?:bind|child|with)\s*\(|\bextra\s*=")
+CODE_NAMESPACE = re.compile(r"""['"]code\.namespace['"]|\b(?:ATTR_|SEMATTRS_)?CODE_NAMESPACE\b|\bCodeNamespace(?:Key)?\b""")
+# Personal data by name: the identifier lower-cased with `_` removed ends with one of these.
+PII_SUFFIXES = ("email", "emails", "emailaddress", "phone", "phonenumber", "mobile", "mobilenumber", "msisdn", "firstname",
+                "lastname", "fullname", "givenname", "familyname", "surname", "dateofbirth", "birthdate", "dob", "ssn",
+                "socialsecuritynumber", "nationalid", "nationalinsurancenumber", "passport", "passportnumber", "taxid",
+                "iban", "bankaccount", "bankaccountnumber", "accountnumber", "streetaddress", "postaladdress",
+                "homeaddress", "billingaddress", "shippingaddress", "mailingaddress", "postcode", "zipcode")
+NOT_PII = re.compile(r"^(?:is|has|should|valid|validate|send|verify|verified|use|with|no|max|min|num|count)(?:_|[A-Z])")
+MASKED = re.compile(r"(?:mask|redact|sanitiz|sanitis|hash|scrub|anonymi|pseudonym|obfuscat|truncat)\w*\s*\(\s*[\w$.]*$",
+                    re.IGNORECASE)
+# Profiler start: static labels come from the module's resolved resource values.
+PROFILE_START = re.compile(r"\bpyroscope\s*\.\s*(?:configure|Start|init)\s*\(|\bPyroscope\s*\.\s*init\s*\(|\bPyroscopeAgent\s*\.\s*start\s*\("
+                           r"|\bnew\s+Config\s*\.\s*Builder\s*\(|\bpyroscope\.Config\s*\{")
+PROFILE_LITERAL = re.compile(
+    r"""['"]?\b(service_version|service_namespace|deployment_environment_name|application_?[Nn]ame|applicationName|ApplicationName|appName|app_name)\b['"]?"""
+    r"""\s*(?:[:=]|,)\s*['"]([^'"$%{}]+)['"]""")
+PROFILE_RO = re.compile(r"""['"]?\b(telemetry_\w+|process_runtime_\w+|process_\w+|os_type|os_\w+|host_arch|host_type|host_id"""
+                        r"""|container_name|container_image_\w+|service_instance_id|k8s_pod_uid|vcs_\w+)\b['"]?\s*(?:[:=]|,)""")
+# Baggage: an allow-list of at most 8 keys, a 512-byte cap, set only in the module.
+BAGGAGE_LIST = re.compile(r"\b\w*(?i:baggage)\w*(?i:allow|keys|whitelist|allowed|permitted)\w*\s*(?::\s*[\w<>\[\], .]+)?\s*[:=]")
+BAGGAGE_SET = re.compile(r"\b(?:setBaggage|set_baggage|setEntry|baggage\.NewMember|propagation\.setBaggage|Baggage\.builder|"
+                         r"createBaggage)\b")
+BAGGAGE_BAD_KEY = re.compile(r"authori[sz]ation|token|password|secret|cookie|api[-_.]?key|^langfuse\.|^gen_ai\.|prompt", re.IGNORECASE)
+BAGGAGE_LIMIT = 8
+# Resource keys the standard never adds, and detectors that add them.
+EXCLUDED_RESOURCE = re.compile(
+    r"\bk8s\.pod\.uid\b|\bK8S_POD_UID\b|\bk8s\.node\.uid\b|\bservice\.instance\.id\b|\bhost\.id\b|\bdeployment\.id\b"
+    r"|\bprocess\.(?:pid|parent_pid|command|command_line|command_args|executable\.\w+)\b|\bvcs\.[a-z][\w.]*"
+    r"|\bATTR_(?:SERVICE_INSTANCE_ID|HOST_ID|K8S_POD_UID|PROCESS_PID|PROCESS_COMMAND(?:_LINE|_ARGS)?)\b")
+RESOURCE_DETECTOR = re.compile(
+    r"\b(?:processDetector|hostDetector|ProcessResourceDetector|HostResourceDetector|ProcessResourceProvider"
+    r"|HostIdResourceProvider|HostResourceProvider|ProcessResource|HostIdResource)\b|\bresource\.With(?:Process\w*|Host(?:ID)?)\s*\("
+    r"|OTEL_NODE_RESOURCE_DETECTORS[^\n]*\b(?:process|host|all)\b|OTEL_PYTHON_RESOURCE_DETECTORS?[^\n]*\b(?:process|host)\b")
+EXCLUSION_CONTEXT = re.compile(r"disabl|exclud|drop|remov|deny|denied|block|ban|filter|delete|strip|omit|forbid|prohibit|never|reject",
+                               re.IGNORECASE)
+
+# Performance and security of the telemetry itself (references/overhead-and-security.md).
+# Synchronous export: one network call per span or record on the request path.
+SYNC_EXPORTER = re.compile(r"(?<![\w.])(?:new\s+)?Simple(?:Span|LogRecord)Processor\s*(?:\(|<|\.\s*create\s*\()"
+                           r"|\b(?:sdktrace\.)?WithSyncer\s*\(|\bsdklog\.NewSimpleProcessor\s*\(")
+# OTLP exporters, and the options that bound how long one export may take.
+OTLP_EXPORTER = re.compile(
+    r"(?<![\w.])(?:new\s+)?OTLP(?:Span|Trace|Metric|Log|Logs)Exporter\s*\("
+    r"|\botlp(?:trace|metric|log)(?:grpc|http)\s*\.\s*New\s*\("
+    r"|\bOtlp(?:Grpc|Http)(?:Span|Metric|LogRecord)Exporter\s*\.\s*builder\s*\(")
+EXPORT_TIMEOUT = re.compile(r"\btimeout\s*[=:]|\btimeoutMillis\b|\bWithTimeout\s*\(|\.\s*setTimeout\s*\("
+                            r"|OTEL_EXPORTER_OTLP_\w*TIMEOUT|\bexport_?timeout", re.IGNORECASE)
+# Plaintext export: an insecure switch, or an http:// telemetry endpoint off this host.
+INSECURE = re.compile(r"""\binsecure['"]?\s*[:=]\s*['"]?(?:true|True|1)\b|\bWithInsecure\s*\(|\.\s*usePlaintext\s*\(""")
+TELEMETRY_URL_CONTEXT = re.compile(r"endpoint|otlp|otel|pyroscope|profil|langfuse|collector|exporter|server_?address"
+                                   r"|ingest|tempo|loki|jaeger|zipkin|alloy", re.IGNORECASE)
+HTTP_URL = re.compile(r"""http://(\[[^\]]*\]|\$\{[^}]*\}|[^/:\s'"`,;)]+)""")
+LOCAL_HOST = re.compile(r"^(?:localhost|127(?:\.\d+){3}|\[?::1\]?|0\.0\.0\.0)$", re.IGNORECASE)
+# A comment on the line or the line above that says the plaintext hop is private.
+PRIVATE_HOP = re.compile(r"loopback|localhost|sidecar|in[- ]cluster|cluster[- ]local|network[- ]?polic|\bmesh\b|mtls|mutual tls"
+                         r"|private hop|same pod|same host", re.IGNORECASE)
+# A credential written into code or config: a header value or a Langfuse key, not a ${file:}/${env:} reference.
+CREDENTIAL_HEADER = r"authorization|x-api-key|api[-_]?key|x-honeycomb-team|dd-api-key|x-scope-orgid-token|signoz-ingestion-key"
+CREDENTIAL_PAIRS = (
+    # 'Authorization': 'Bearer …' in code, or a quoted yml value
+    re.compile(rf"""['"]?\b(?P<name>{CREDENTIAL_HEADER})['"]?\s*[:=]\s*(?P<q>['"])(?P<value>(?:(?!(?P=q)).)*)(?P=q)""", re.IGNORECASE),
+    # OTEL_EXPORTER_OTLP_HEADERS=authorization=Basic …,x-api-key=…
+    re.compile(rf"""\b(?P<name>{CREDENTIAL_HEADER})=(?P<value>(?:(?:Bearer|Basic|Token)(?:\s+|%20))?[^,'"\s]+)""", re.IGNORECASE),
+    # an unquoted yml value
+    re.compile(rf"""^\s*-?\s*(?P<name>{CREDENTIAL_HEADER})\s*:\s*(?P<value>[^\s'"#{{$][^#]*?)\s*$""", re.IGNORECASE),
+)
+LANGFUSE_KEY_LITERAL = re.compile(r"\b[sp]k-lf-[A-Za-z0-9-]{6,}")
+CREDENTIAL_SCHEME = re.compile(r"^(?:Bearer|Basic|Token|Api-Token|ApiKey|DD-API-KEY)\s+", re.IGNORECASE)
+PLACEHOLDER_VALUE = re.compile(r"^(?:x+|\*+|\.+|changeme|change-me|redacted|none|null|example\w*|your[-_\w]*|<[^>]*>|\w*placeholder\w*)$",
+                               re.IGNORECASE)
+# A metrics or profiling server open on every interface.
+PUBLIC_BIND = re.compile(r"""(?<![\d.])0\.0\.0\.0\b""")
+METRICS_CONTEXT = re.compile(r"metric|prometheus|prom_|scrape|profil|pprof|pyroscope|start_http_server|9464|9090|6060", re.IGNORECASE)
+BIND_REASON = re.compile(r"remote|scrape|network|pod|container|cluster|prometheus|collector", re.IGNORECASE)
+YML_PUBLIC_HOST = re.compile(r"""^\s*(?:host|address|bind|listen)\w*\s*:\s*['"]?0\.0\.0\.0\b""")
+# Attribute value length limits: the standard caps values at 8192 characters.
+ATTRIBUTE_LIMIT = re.compile(
+    r"""\b\w*(?:attribute_?value_?length_?limit|max_?(?:span_?)?attribute_?(?:value_?)?length)\w*['"]?\s*\]?\s*[:=,(]\s*['"]?"""
+    r"""(-?\d[\d_]*)""", re.IGNORECASE)
+ATTRIBUTE_LIMIT_MAX = 8192
+# A raised limit is accepted only together with genai.content.max_chars: equal to it, with a comment naming it.
+LIMIT_REASON = re.compile(r"max_chars", re.IGNORECASE)
+YML_MAX_CHARS = re.compile(r"^\s*max_chars\s*:\s*['\"]?(\d[\d_]*)")
+# A log formatter that copies every LogRecord attribute or extra key instead of an allow-list.
+RECORD_DICT = re.compile(r"\b(?:record|rec|r|log_record)\s*\.\s*__dict__\b|\bvars\s*\(\s*(?:record|rec|r|log_record)\s*\)")
+ALLOW_MEMBERSHIP = re.compile(r"\bif\s+[\w\[\]'\"]+\s+in\s+(?!\(?\s*['\"])[\w.]+")
+# A debug-level log call whose message is built before the level check.
+DEBUG_CALL = re.compile(r"(?<![\w$])(?:self\.|this\.)?_{0,2}(?:logger|log|logging|LOG|LOGGER|Logger|slog|console)\s*\.\s*"
+                        r"(?:debug|trace|Debug|Trace|fine|finer|finest|Debugf|Tracef)\s*\(")
+STRING_LITERAL = r"""(?:(['"])(?:\\.|(?!\1).)*\1)"""
+EAGER_MESSAGE = re.compile(
+    r"""[fF][rR]?['"]|`[^`]*\$\{|(?:fmt\.Sprint\w*|String\.format|string\.Format|\w+\.format)\s*\("""
+    rf"""|{STRING_LITERAL}\s*(?:%(?!=)|\.\s*format\s*\(|\+)|[\w.]+(?:\(\))?\s*\+\s*['"]""")
+LEVEL_GUARD = re.compile(r"(?:\bif\b|\bwhen\b|&&|\band\b).*(?:is\w*Enabled\w*|\bEnabled\s*\(|isEnabledFor|getEffectiveLevel"
+                         r"|\b[Ll]evel\w*\s*(?:<=|>=|==|<|>)|\bLevel(?:Debug|Trace)\b|\bDEBUG\b|\b[Dd]ebug_?[Ee]nabled)")
+# Resource detectors whose output is filtered through an allow-list of keys.
+ALLOW_NAME = re.compile(r"\b(\w*(?:ALLOW|Allow|allow|KEEP|Keep|keep|PERMIT|Permit|permit|WHITELIST|Whitelist|whitelist)\w*)\b")
+OBS_YML = re.compile(r"(?:^|/)observability(?:\.[\w-]+)?\.ya?ml$")
 
 # GenAI (references/signals/genai.md). Content keys: prompts, completions, tool arguments and results,
 # retrieved documents, in the GenAI conventions and in Langfuse, OpenLLMetry and OpenInference.
@@ -231,8 +375,7 @@ ANGULAR_IMPORT = re.compile(r"""from\s+['"]@angular/""")
 
 def is_browser_file(rel: str, lines: list[str]) -> bool:
     """Code that runs in the page: a `'use client'` module, `instrumentation-client`, a `.vue` or `.svelte`
-    component, a `*.client.*` module (SvelteKit `hooks.client`, Nuxt client plugins), Angular app code,
-    observability client code, or public/."""
+    component, a `*.client.*` module (SvelteKit `hooks.client`, Nuxt client plugins), Angular app code or public/."""
     first = next((line.strip() for line in lines if line.strip()), "")
     parts = rel.split("/")
     name = parts[-1]
@@ -241,19 +384,77 @@ def is_browser_file(rel: str, lines: list[str]) -> bool:
     return (first.strip(";") in ("'use client'", '"use client"') or name.startswith("instrumentation-client.")
             or name.endswith((".vue", ".svelte")) or ".client." in name
             or any(ANGULAR_IMPORT.search(line) for line in lines[:40])
-            or "public" in parts[:-1] or ("client" in parts[:-1] and "observability" in parts))
+            or "public" in parts[:-1])
 
 
 def browser_findings(line: str, loc: str) -> list[Finding]:
     found = []
     if BROWSER_KEY.search(line) or PUBLIC_KEY.search(line):
-        found.append(Finding("P0", "browser-key", loc, "backend key or key header in code that runs in the page; "
-                             "send RUM and replay through the same-origin proxy, which adds the key"))
-    if PROPAGATE_ALL.search(line):
-        found.append(Finding("P1", "rum-propagate-all", loc, "trace headers propagated to every origin; list the API origins explicitly"))
-    if (ATTR_SINK.search(line) or LOG_SINK.search(line)) and PAGE_VALUE.search(line):
-        found.append(Finding("P1", "rum-input-capture", loc, "an input value or page text goes into browser telemetry; "
-                             "record the action, not what the user typed or read"))
+        found.append(Finding("P0", "browser-key", loc, "telemetry backend key or key header in code that runs in "
+                             "the page; telemetry keys stay on the server"))
+    return found
+
+
+FARO_IMPORT = re.compile(r"""@grafana/faro-|\binitializeFaro\s*\(""")
+FARO_PROPAGATE_ALL = re.compile(r"""propagateTraceHeaderCorsUrls\s*:\s*\[[^\]]*(/\.[*+]/|['"`]\*['"`]|RegExp\(\s*['"`]\.[*+]|/\^?https?:?\\?/?\\?/?\.[*+])""")
+FARO_SET_USER = re.compile(r"""\bsetUser\s*\(|\buser\s*:\s*\{""")
+FARO_USER_PII = re.compile(r"""\b(email|username|fullName|full_name|phone)\s*[:,}]""")
+FARO_CONSOLE_ALL = re.compile(r"""disabledLevels\s*:\s*\[\s*\]""")
+FARO_BUILD_ENV = re.compile(r"""\b(url|apiKey|endpoint|environment|logsURL|tracesURL)\s*:\s*(import\.meta\.env\.|process\.env\.(NEXT_PUBLIC_|REACT_APP_|VITE_|NUXT_PUBLIC_|PUBLIC_))""")
+FARO_API_KEY = re.compile(r"""\bapiKey\s*:\s*['"`][^'"`]+['"`]""")
+FARO_GEO = re.compile(r"""trackGeolocation\s*:\s*true""")
+FARO_ALL_CHANGES = re.compile(r"""reportAllChanges\s*:\s*true""")
+PUBLIC_SOURCEMAPS = re.compile(r"""\bsourcemap\s*:\s*(true|['"]inline['"])|\bdevtool\s*:\s*['"](inline-)?source-map['"]|productionBrowserSourceMaps\s*:\s*true""")
+BUNDLER_CONFIG = re.compile(r"(^|/)(vite|webpack|next|rollup|rspack|astro|svelte|nuxt)\.config\.[cm]?[jt]s$|(^|/)angular\.json$")
+RUM_PROXY = re.compile(r"^\s*transport:\s*['\"]?proxy\b")
+FARO_PUSH_URL = re.compile(r"""\bpush(Event|Log|Measurement|Error)\s*\(.*\b(location\.href|document\.URL|window\.location(?!\.pathname))""")
+NGINX_QUERY_LOG = re.compile(r"""^\s*access_log\s+\S+\s+combined\b|^\s*access_log\s+\S+\s*;|\$request_uri\b|\$request(?![_a-z])|\$args\b|\$query_string\b""")
+NGINX_CONF = re.compile(r"(^|/)(nginx[^/]*\.conf|[^/]*\.conf\.template|default\.conf|conf\.d/[^/]+\.conf)$")
+
+
+def faro_findings(rel: str, lines: list[str], proxy_mode: bool) -> list[Finding]:
+    """Grafana Faro set-up rules (references/signals/rum.md); the file already imports or starts Faro."""
+    found = []
+    has_init, has_scrub = False, False
+    for lineno, raw in enumerate(lines, 1):
+        if IGNORE_RE.search(raw) or raw.lstrip().startswith(("//", "*")):
+            continue
+        loc, line = f"{rel}:{lineno}", strip_comment(raw)
+        text = braced(lines, lineno - 1)
+        has_init = has_init or "initializeFaro(" in line
+        has_scrub = has_scrub or "beforeSend" in line
+        if "propagateTraceHeaderCorsUrls" in line and FARO_PROPAGATE_ALL.search(text):
+            found.append(Finding("P1", "faro-propagate-all", loc, "match-all propagateTraceHeaderCorsUrls sends traceparent "
+                                 "and CORS preflights to every host the page calls; list the exact API origins"))
+        if FARO_SET_USER.search(line) and FARO_USER_PII.search(blank_strings(text)):
+            found.append(Finding("P1", "faro-user-pii", loc, "email, username, name or phone given to Faro's user meta; "
+                                 "Faro copies it onto every record and span. Pass the opaque user id only"))
+        if FARO_CONSOLE_ALL.search(line):
+            found.append(Finding("P2", "faro-console-all", loc, "every console level captured, debug and log included; "
+                                 "keep trace, debug and log disabled"))
+        if FARO_BUILD_ENV.search(line):
+            found.append(Finding("P2", "faro-build-env-config", loc, "Faro endpoint, key or environment from a build-time "
+                                 "public variable; read them from the runtime config so one build serves every environment"))
+        if FARO_API_KEY.search(line):
+            if proxy_mode:
+                found.append(Finding("P0", "faro-key-in-bundle", loc, "receiver key in page code while rum.transport is "
+                                     "proxy; the proxy adds the key and the page holds none"))
+            else:
+                found.append(Finding("P2", "faro-key-literal", loc, "receiver key as a literal in page code; read the "
+                                     "public key from the runtime config"))
+        if FARO_GEO.search(line):
+            found.append(Finding("P2", "faro-geolocation", loc, "geolocation tracking on; it is Grafana Cloud only and "
+                                 "personal data, keep trackGeolocation false"))
+        if FARO_PUSH_URL.search(line):
+            found.append(Finding("P1", "faro-event-raw-url", loc, "the page URL (with its query and fragment) sent in a "
+                                 "Faro event or log; send the route template, and let the scrubber handle page_url"))
+        if FARO_ALL_CHANGES.search(line):
+            found.append(Finding("P2", "faro-report-all-changes", loc, "reportAllChanges sends every web-vital change; "
+                                 "a debugging setting, off in production"))
+    if has_init and not has_scrub:
+        first = next(i for i, raw in enumerate(lines, 1) if "initializeFaro(" in raw)
+        found.append(Finding("P2", "faro-no-scrub", f"{rel}:{first}", "Faro starts without a beforeSend scrubber; URLs "
+                             "with query values, emails and tokens in messages leave the page as they are"))
     return found
 
 
@@ -355,6 +556,292 @@ def genai_findings(lines: list[str], index: int, loc: str, in_module: bool, brow
     return found
 
 
+def pii_named(refs: str) -> str | None:
+    """The first value on the line named like personal data, used as a value and not through the masking helper."""
+    for match in re.finditer(r"[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*", refs):
+        chain = re.split(r"\s*\.\s*", match.group(0))
+        last = chain[-1].lstrip("_$")
+        if re.fullmatch(r"[A-Z0-9_]+", last) or NOT_PII.match(last):
+            continue  # constants such as ErrorCode.INVALID_EMAIL, and tests such as isEmail
+        if not last.lower().replace("_", "").endswith(PII_SUFFIXES):
+            continue
+        before, after = refs[:match.start()], refs[match.end():]
+        if re.match(r"\s*\(", after) or MASKED.search(before) or DERIVED_BEFORE.search(before) \
+                or DERIVED_SIZE.search(before) or DERIVED_AFTER.match(after) \
+                or re.match(r"\s*(?:\?\.|\.)\s*(?:length|size|count)\b", after):
+            continue
+        return last
+    return None
+
+
+def profile_region(lines: list[str], index: int) -> str:
+    """A profiler start call with its configuration: the statement and any object literal opened in it."""
+    return statement(lines, index, limit=20) + " " + braced(lines, index, limit=20)
+
+
+def data_model_findings(lines: list[str], index: int, loc: str, in_module: bool) -> list[Finding]:
+    """Data-model rules for one line (references/data-model.md); multi-line calls are read as one statement."""
+    found: list[Finding] = []
+    line = strip_comment(lines[index])
+    if not line.strip():
+        return found
+    own = blank_strings(line)
+    sink = is_sink(own) or ERROR_SINK.search(own) is not None or LOG_CONTEXT.search(own) is not None
+    stmt = statement(lines, index) if sink or METRIC_DECL.search(own) else line
+    if IDENTITY_KEY.search(stmt) and IDENTITY_READ.search(stmt):
+        found.append(Finding("P1", "identity-from-header", loc, "identity row set from a raw client header, cookie or "
+                             "query value; take it from the trusted auth or tenant middleware after authentication"))
+    if REQUEST_ID_ATTR.search(line) or (sink and REQUEST_ID_FIELD.search(stmt)):
+        found.append(Finding("P2", "request-id-attribute", loc, "request.id attribute or log field; the standard uses "
+                             "correlation.id only"))
+    if CODE_NAMESPACE.search(line):
+        found.append(Finding("P2", "code-namespace", loc, "code.namespace is deprecated; code.function.name carries the "
+                             "fully qualified name"))
+    if METRIC_DECL.search(own) and METRIC_ID_LABEL.search(stmt) and not METRIC_SINK.search(own):
+        found.append(Finding("P1", "id-metric-label", loc, "metric declared with an ID, URL, path, SQL or email label; "
+                             "keep labels bounded and IDs on spans and logs"))
+    if PROFILE_START.search(own):
+        region = profile_region(lines, index)
+        literal = PROFILE_LITERAL.search(region)
+        if literal:
+            found.append(Finding("P2", "profile-label-mismatch", loc, f"profiler started with a literal {literal.group(1)}; "
+                                 "static labels come from the module's resolved resource values"))
+        ro = PROFILE_RO.search(region)
+        if ro:
+            found.append(Finding("P2", "profile-label-mismatch", loc, f"static profile label {ro.group(1)} is an R/O or "
+                                 "excluded resource row; profiles carry the resource's M and C rows only"))
+    if not in_module and BAGGAGE_SET.search(own):
+        found.append(Finding("P2", "baggage-over-limit", loc, "baggage set outside the observability module; the module's "
+                             "middleware writes the allow-listed keys"))
+    if (EXCLUDED_RESOURCE.search(line) or RESOURCE_DETECTOR.search(line)) and not EXCLUSION_CONTEXT.search(line) \
+            and not (RESOURCE_DETECTOR.search(line) and filtered_detector(lines, index)):
+        found.append(Finding("P2", "resource-excluded-key", loc, "resource key the standard never adds (pod or node UID, "
+                             "instance or host id, process id or command line, VCS data, release id), or a process or "
+                             "host detector; build the resource from the yml and the platform rows only"))
+    if not in_module and (LOG_SINK.search(own) or PRINT_SINK.search(own) or ATTR_SINK.search(own)
+                          or ERROR_SINK.search(own)):
+        name = pii_named(code_refs(stmt))
+        if name:
+            found.append(Finding("P1", "pii-unmasked", loc, f"'{name}' looks like personal data and reaches a log, print, "
+                                 "span or error message without the masking helper"))
+    return found
+
+
+def yml_strip(line: str) -> str:
+    """A config line without its `#` comment; `//` in a URL is not a comment here."""
+    cut = re.search(r"(?:^|\s)#", blank_strings(line))
+    return line[:cut.start()].rstrip() if cut else line
+
+
+def comment_says(lines: list[str], index: int, pattern: re.Pattern, strip=None) -> bool:
+    """A comment on the line, or on the line above, that matches: the reason a finding is accepted."""
+    strip = strip or strip_comment
+    for offset in (0, 1):
+        if index - offset < 0:
+            break
+        raw = lines[index - offset]
+        code = strip(raw)
+        comment = raw if not code.strip() else raw[len(code):]
+        if pattern.search(comment):
+            return True
+    return False
+
+
+def credential_literal(line: str, skip_langfuse_secret: bool = False) -> str | None:
+    """The header or key named by a literal credential on the line."""
+    for match in (m for pattern in CREDENTIAL_PAIRS for m in pattern.finditer(line)):
+        name = match.group("name")
+        value = CREDENTIAL_SCHEME.sub("", re.sub(r"%20", " ", match.group("value")).strip())
+        if not value or re.search(r"\$\{|\{|%[sd(]|\$[A-Za-z_]", value) or PLACEHOLDER_VALUE.match(value):
+            continue
+        if len(value) >= 8 and re.fullmatch(r"[A-Za-z0-9+/=_.:~-]+", value):
+            return name
+    for match in LANGFUSE_KEY_LITERAL.finditer(line):
+        if not (skip_langfuse_secret and match.group(0).startswith("sk-")):
+            return match.group(0)[:6]
+    return None
+
+
+def plaintext_endpoint(lines: list[str], index: int, code: str, strip=None) -> str | None:
+    """An insecure switch or an http:// telemetry endpoint to another host, without a private-hop comment."""
+    strip = strip or strip_comment
+    if comment_says(lines, index, PRIVATE_HOP, strip):
+        return None
+    if INSECURE.search(code):
+        window = " ".join(strip(line) for line in lines[max(0, index - 5):index + 6])
+        hosts = [m.group(1) for m in HTTP_URL.finditer(window)] + re.findall(r"""['"]((?:localhost|127\.0\.0\.1)(?::\d+)?)['"]""", window)
+        if not any(_local(h.split(":")[0] if not h.startswith(("[", "$")) else h) for h in hosts):
+            return "insecure (plaintext) export switched on"
+    if TELEMETRY_URL_CONTEXT.search(code):
+        for match in HTTP_URL.finditer(code):
+            host = match.group(1)
+            if not _local(host):
+                return f"plaintext http:// telemetry endpoint {host}"
+    return None
+
+
+def _local(host: str) -> bool:
+    """Loopback, or a ${...} placeholder whose default is loopback; a placeholder without a default can't be judged."""
+    if host.startswith("${"):
+        default = re.search(r":-([^}]*)\}", host) or re.search(r"\$\{[^}]*?:([^}:]*)\}$", host)
+        return default is None or LOCAL_HOST.match(default.group(1).split(":")[0].strip("[]") or "localhost") is not None
+    return LOCAL_HOST.match(host.strip("[]")) is not None or LOCAL_HOST.match(host) is not None
+
+
+def attribute_limit(line: str) -> int | None:
+    for match in ATTRIBUTE_LIMIT.finditer(line):
+        value = int(match.group(1).replace("_", ""))
+        if value > ATTRIBUTE_LIMIT_MAX:
+            return value
+    return None
+
+
+def limit_accepted(limit: int, max_chars: int | None, lines: list[str], index: int, strip=None) -> bool:
+    """A raised limit equal to the yml's genai.content.max_chars, with a comment naming max_chars: the recorded exception."""
+    return max_chars is not None and limit == max_chars and comment_says(lines, index, LIMIT_REASON, strip)
+
+
+def content_max_chars(files: list[tuple[Path, str]]) -> int | None:
+    """genai.content.max_chars from the project's observability yml, when one sets it."""
+    for path, rel in files:
+        if not OBS_YML.search(rel):
+            continue
+        try:
+            for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                match = YML_MAX_CHARS.search(raw)
+                if match:
+                    return int(match.group(1).replace("_", ""))
+        except OSError:
+            continue
+    return None
+
+
+def eager_debug(lines: list[str], index: int, line: str) -> bool:
+    call = DEBUG_CALL.search(blank_strings(line))
+    if not call:
+        return False
+    first = statement(lines, index)[call.end():].lstrip() if call.end() >= len(line.rstrip()) else line[call.end():].lstrip()
+    if not EAGER_MESSAGE.match(first):
+        return False
+    above = next((strip_comment(prev) for prev in reversed(lines[max(0, index - 3):index]) if strip_comment(prev).strip()), "")
+    return not (LEVEL_GUARD.search(above) or LEVEL_GUARD.search(line[:call.start()]))
+
+
+def safety_findings(lines: list[str], index: int, loc: str, rel: str, in_module: bool,
+                    max_chars: int | None = None) -> list[Finding]:
+    """Rules that keep the telemetry itself cheap and safe (references/overhead-and-security.md)."""
+    found: list[Finding] = []
+    line = strip_comment(lines[index])
+    if not line.strip():
+        return found
+    own = blank_strings(line)
+    if SYNC_EXPORTER.search(own) and not TEST_RE.search(rel):
+        found.append(Finding("P1", "sync-exporter", loc, "synchronous span or log processor: every span or record is "
+                             "exported on the request path; use the batch processor"))
+    if in_module and OTLP_EXPORTER.search(own):
+        window = "\n".join(strip_comment(l) for l in lines[max(0, index - 15):index + 16])
+        if not EXPORT_TIMEOUT.search(window):
+            found.append(Finding("P2", "exporter-no-timeout", loc, "OTLP exporter built without a timeout option; set it "
+                                 "from the yml so a slow backend can't hold a flush or shutdown for the SDK default"))
+    plain = plaintext_endpoint(lines, index, line)
+    if plain:
+        found.append(Finding("P1", "plaintext-remote-endpoint", loc, f"{plain}; telemetry carries identity rows and "
+                             "credentials, so use TLS off this host, or say on the line why the hop is private "
+                             "(sidecar, in-cluster with a NetworkPolicy, mesh mTLS)"))
+    key = credential_literal(line, skip_langfuse_secret=LANGFUSE_SECRET.search(line) is not None)
+    if key:
+        found.append(Finding("P0", "telemetry-credential-literal", loc, f"literal {key} credential; reference a mounted "
+                             "file or the environment (${file:...} or ${env:...}) instead"))
+    if PUBLIC_BIND.search(line) and (in_module or METRICS_CONTEXT.search(line)) and not comment_says(lines, index, BIND_REASON):
+        found.append(Finding("P2", "metrics-public-bind", loc, "metrics or profiling server bound to 0.0.0.0 with no "
+                             "comment saying who scrapes it from the network; bind 127.0.0.1 unless it must be remote"))
+    limit = attribute_limit(line)
+    if limit and not limit_accepted(limit, max_chars, lines, index):
+        found.append(Finding("P2", "attribute-limit-raised", loc, f"attribute value length limit {limit} is above "
+                             f"{ATTRIBUTE_LIMIT_MAX}; long values cost memory, export size and can carry payloads. A "
+                             "project that needs longer AI content sets it equal to genai.content.max_chars, with a "
+                             "comment naming max_chars, and records the exception in the report"))
+    if in_module and RECORD_DICT.search(own):
+        stmt = statement(lines, index, limit=6)
+        if not ALLOW_MEMBERSHIP.search(blank_strings(stmt)):
+            found.append(Finding("P1", "log-extras-passthrough", loc, "log formatter copies every LogRecord attribute or "
+                                 "extra key; copy an allow-list of fields so a stray extra can't leak a secret or body"))
+    if in_module and eager_debug(lines, index, line):
+        found.append(Finding("P2", "eager-debug-format", loc, "debug message formatted before the level check; pass "
+                             "arguments to the logger or guard the call with an isEnabledFor/level check"))
+    return found
+
+
+def config_safety_findings(rel: str, lines: list[str], max_chars: int | None = None) -> list[Finding]:
+    """The same rules for config files: credentials and attribute limits in any, endpoints and binds in observability.yml."""
+    found: list[Finding] = []
+    obs = OBS_YML.search(rel) is not None
+    for index, raw in enumerate(lines):
+        if IGNORE_RE.search(raw) or raw.lstrip().startswith(("#", "//", "!", "*")):
+            continue
+        line, loc = yml_strip(raw), f"{rel}:{index + 1}"
+        key = credential_literal(line)
+        if key:
+            found.append(Finding("P0", "telemetry-credential-literal", loc, f"literal {key} credential; reference a "
+                                 "mounted file or the environment (${file:...} or ${env:...}) instead"))
+        limit = attribute_limit(line)
+        if limit and not limit_accepted(limit, max_chars, lines, index, yml_strip):
+            found.append(Finding("P2", "attribute-limit-raised", loc, f"attribute value length limit {limit} is above "
+                                 f"{ATTRIBUTE_LIMIT_MAX} and not equal to genai.content.max_chars with a comment naming it"))
+        if not obs:
+            continue
+        plain = plaintext_endpoint(lines, index, line, yml_strip)
+        if plain:
+            found.append(Finding("P1", "plaintext-remote-endpoint", loc, f"{plain}; use TLS off this host, or say on the "
+                                 "line why the hop is private (sidecar, in-cluster with a NetworkPolicy, mesh mTLS)"))
+        if YML_PUBLIC_HOST.search(line) and not comment_says(lines, index, BIND_REASON, yml_strip):
+            found.append(Finding("P2", "metrics-public-bind", loc, "server bound to 0.0.0.0 with no comment saying who "
+                                 "scrapes it from the network; bind 127.0.0.1 unless it must be remote"))
+    return found
+
+
+def filtered_detector(lines: list[str], index: int) -> bool:
+    """A process or host detector whose output passes an allow-list of resource keys in the same file."""
+    window = "\n".join(strip_comment(l) for l in lines[max(0, index - 40):index + 41])
+    for name in set(ALLOW_NAME.findall(blank_strings(window))):
+        if re.search(rf"\bin\s+(?:self\.|this\.)?{re.escape(name)}\b|\b{re.escape(name)}\s*\.\s*(?:includes|has|contains"
+                     rf"|containsKey|get)\s*\(|\b{re.escape(name)}\s*\[|Contains\s*\(\s*{re.escape(name)}\b", window):
+            return True
+    return False
+
+
+def baggage_list(lines: list[str], index: int, loc: str) -> list[Finding]:
+    """A baggage allow-list: at most 8 keys, none a secret, authorisation or AI context, with a 512-byte cap nearby."""
+    line = strip_comment(lines[index])
+    if not BAGGAGE_LIST.search(blank_strings(line)):
+        return []
+    region = braced(lines, index, limit=30) if "{" in line else ""
+    text = line
+    depth = 0
+    for offset in range(min(30, len(lines) - index)):
+        code = blank_strings(strip_comment(lines[index + offset]))
+        if offset:
+            text += " " + strip_comment(lines[index + offset])
+        depth += code.count("[") + code.count("(") - code.count("]") - code.count(")")
+        if depth <= 0 and offset:
+            break
+        if depth <= 0 and not offset and "[" not in code and "(" not in code:
+            break
+    keys = sorted({m.group(2) for m in STRING.finditer(text + " " + region) if m.group(2)})
+    found = []
+    if len(keys) > BAGGAGE_LIMIT:
+        found.append(Finding("P2", "baggage-over-limit", loc, f"baggage allow-list with {len(keys)} keys; at most "
+                             f"{BAGGAGE_LIMIT}"))
+    bad = [k for k in keys if BAGGAGE_BAD_KEY.search(k)]
+    if bad:
+        found.append(Finding("P2", "baggage-over-limit", loc, f"baggage allow-list names {', '.join(bad)}; never secrets, "
+                             "authorisation or AI context"))
+    window = "\n".join(lines[max(0, index - 30):index + 60])
+    if keys and not re.search(r"\b512\b", window):
+        found.append(Finding("P2", "baggage-over-limit", loc, "baggage allow-list without the 512-byte cap nearby"))
+    return found
+
+
 def braced(lines: list[str], index: int, limit: int = 8) -> str:
     """The line and the lines after it until its braces close: an object literal written over several lines."""
     text, depth = "", 0
@@ -407,7 +894,9 @@ def code_refs(line: str) -> str:
     interpolated = re.findall(r"\$\{([^}]*)\}", line)
     if re.search(r"\bf['\"]", line):
         interpolated += re.findall(r"(?<![$\w])\{([^{}:!]+)[^{}]*\}", line)
-    return blank_strings(line) + " " + " ".join(interpolated)
+    # Values read by key, `body["email"]` or `data.get('card_number')`, are named by that key.
+    keys = re.findall(r"(?:\[\s*|\.get\(\s*)['\"]([A-Za-z_]\w*)['\"]", line)
+    return blank_strings(line) + " " + " ".join(interpolated + keys)
 
 
 def strip_comment(line: str) -> str:
@@ -522,6 +1011,23 @@ def new_taints(line: str, tainted: dict) -> tuple[list[str], list[str]]:
     return added, cleared
 
 
+def identity_taints(line: str) -> list[str]:
+    """Names this line fills with an identity the client sent: an assignment from a header, cookie or query read, or
+    an injected header parameter (FastAPI `x_user_id: str = Header()`, `@RequestHeader("X-User-Id") String userId`)."""
+    names = []
+    for match in HEADER_PARAM.finditer(line):
+        name = match.group(1) or match.group(2)
+        if IDENTITY_PARAM.match(name):
+            names.append(name)
+    for match in HEADER_ANNOTATION.finditer(line):
+        if re.search(rf"['\"](?:{IDENTITY_HEADER})['\"]", match.group(2), re.IGNORECASE):
+            names.append(match.group(3))
+    assign = ASSIGN.search(blank_strings(line))
+    if assign and IDENTITY_READ.search(line[assign.start(2):]):
+        names.append(assign.group(1))
+    return names
+
+
 def body_taints(line: str, body: dict) -> tuple[list[str], list[str]]:
     """Names this line fills with a raw request body, and names it overwrites."""
     blank = blank_strings(line)
@@ -589,7 +1095,7 @@ NO_LOGGER_FIX = ("add the app logger (levels, the configured format, native trac
 # The project has an app logger when a source file is named like one, a manifest lists a logging
 # library, or code uses the language's logging module. Evidence counts per language family, so a
 # Python service's `logging` says nothing about the console calls of a JavaScript tool beside it.
-LOGGER_STEM = re.compile(r"(?!request|http|access|audit)[a-z]*?(?:logger|logging)")
+LOGGER_STEM = re.compile(r"(?!request|http|access|audit)[a-z]*?(?:logger|logging|logs)")   # logs.py: logging.py shadows the stdlib
 LOG_MANIFEST = {"package.json": "js", "pyproject.toml": "py", "Pipfile": "py", "setup.py": "py", "setup.cfg": "py",
                 "go.mod": "go", "pom.xml": "jvm", "build.gradle": "jvm", "build.gradle.kts": "jvm", "Cargo.toml": "rust"}
 LOG_LIBRARY = {
@@ -685,7 +1191,7 @@ SDK_FIX = "SDK internals change between versions without notice; use a documente
 
 
 def logger_named(rel: str) -> bool:
-    """A file named like an app logger: logger.ts, logging.py, app-logger.js, AppLogger.kt."""
+    """A file named like an app logger: logger.ts, logging.py, logs.py, app-logger.js, AppLogger.kt."""
     stem = re.sub(r"[-_]", "", rel.rsplit("/", 1)[-1].split(".")[0]).lower()
     return LOGGER_STEM.fullmatch(stem) is not None
 
@@ -938,11 +1444,16 @@ class ProjectScan:
 def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[Finding]:
     findings: list[Finding] = []
     files = []
+    own = SKILL_SCRIPTS if root in SKILL_SCRIPTS.parents else None   # the skill copied or installed inside the project
     for path in sorted(root.rglob("*")):
         rel_parts = path.relative_to(root).parts
+        if own is not None and own in path.parents:
+            continue   # this skill's own scripts name the rules they check
         if not any(part in SKIP_DIRS for part in rel_parts) and path.is_file():
             files.append((path, "/".join(rel_parts)))
     project = ProjectScan(files)
+    max_chars = content_max_chars(files)
+    baggage_keys: dict[str, str] = {}   # literal key set as baggage -> first location
     for path, rel in files:
         if path.suffix not in SOURCE_SUFFIXES or (not include_tests and TEST_RE.search(rel)):
             continue
@@ -959,6 +1470,7 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
             # Logger bypass, schedulers and SDK patches are about application code: tests never count.
             findings.extend(project.scan_file(rel, path.suffix, source, lines, in_module, browser))
         tainted: dict[str, tuple[int, int | None]] = {}   # name -> (line read, block indent it lives in)
+        identity: dict[str, tuple[int, int | None]] = {}   # names holding a client-sent identity
         body: dict[str, tuple[int, int | None]] = {}
         opened = False   # the previous code line opened a block: pending parameter scopes start here
         for lineno, raw in enumerate(lines, 1):
@@ -967,10 +1479,11 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
             line = strip_comment(raw)
             if line.strip():
                 if opened:
-                    tainted, body = _alive(tainted, line), _alive(body, line)
+                    tainted, body, identity = _alive(tainted, line), _alive(body, line), _alive(identity, line)
                 else:
                     tainted = {n: v for n, v in tainted.items() if v[1] is None or indent_of(line) >= v[1]}
                     body = {n: v for n, v in body.items() if v[1] is None or indent_of(line) >= v[1]}
+                    identity = {n: v for n, v in identity.items() if v[1] is None or indent_of(line) >= v[1]}
                 opened = bool(re.search(r"[{:]\s*$", line))
             loc = f"{rel}:{lineno}"
             sink, error_sink = is_sink(line), ERROR_SINK.search(line) is not None
@@ -980,12 +1493,19 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
             if any(f.rule == "genai-capture-on" for f in genai):
                 direct = [f for f in direct if f.rule != "otel-env-outside-loader"]
             direct += genai
+            direct += data_model_findings(lines, lineno - 1, loc, in_module)
+            direct += baggage_list(lines, lineno - 1, loc)
+            direct += safety_findings(lines, lineno - 1, loc, rel, in_module, max_chars)
+            for match in BAGGAGE_SET.finditer(blank_strings(line)):
+                first = STRING.search(line[match.end():])
+                if first and first.group(2):
+                    baggage_keys.setdefault(first.group(2), loc)
             if browser:
                 direct += browser_findings(text, loc)
             elif PUBLIC_KEY.search(text):
                 direct.append(Finding("P1", "public-key-var", loc, "telemetry key named as a public build variable or "
-                                      "public runtime config; bundlers ship these to the page, so the same-origin proxy "
-                                      "holds it"))
+                                      "public runtime config; bundlers ship these to the page, so it stays a server-only "
+                                      "variable"))
             findings.extend(direct)
             refs = code_refs(text)
             reported = any(f.rule == "secret-capture" for f in direct)
@@ -1009,6 +1529,14 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
                 elif named:
                     findings.append(Finding("P1", "secret-named-value", loc, f"'{named}' is named like a secret and reaches a log, "
                                             "print or span call; check it is not one, or log allow-listed values only"))
+            if identity and IDENTITY_KEY.search(text) and not any(f.rule == "identity-from-header" for f in direct):
+                hit = next((n for n in identity if uses_value(n, refs)), None)
+                if hit:
+                    findings.append(Finding("P1", "identity-from-header", loc, f"'{hit}' (read from a client header, "
+                                            f"cookie or query on line {identity[hit][0]}) is set as an identity row; take "
+                                            "it from the trusted auth or tenant middleware"))
+            for name in identity_taints(line):
+                identity.setdefault(name, (lineno, _scope(line, bool(HEADER_PARAM.search(line) or HEADER_ANNOTATION.search(line)))))
             added, cleared = new_taints(line, tainted)
             for name in cleared:
                 tainted.pop(name, None)
@@ -1047,6 +1575,91 @@ def audit(root: Path, modules: list[str], include_tests: bool = False) -> list[F
                      for lineno, raw in enumerate(text, 1)
                      if LANGFUSE_OTLP.search(raw) and not IGNORE_RE.search(raw)
                      and not raw.lstrip().startswith(("#", "//", "!", "*"))]
+    proxy_mode = False
+    faro_project = False
+    for path, rel in files:
+        if path.suffix in (".yml", ".yaml") and "observability" in path.name:
+            try:
+                proxy_mode = proxy_mode or any(RUM_PROXY.search(raw) for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines())
+            except OSError:
+                pass
+    for path, rel in files:
+        if path.suffix not in SOURCE_SUFFIXES or (not include_tests and TEST_RE.search(rel)):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if FARO_IMPORT.search(text):
+            faro_project = True
+            findings += faro_findings(rel, text.splitlines(), proxy_mode)
+    if faro_project:
+        sources = {rel: path.read_text(encoding="utf-8", errors="ignore") for path, rel in files
+                   if path.suffix in SOURCE_SUFFIXES and not TEST_RE.search(rel)}
+        if not any("resetUser(" in text for text in sources.values()):
+            for rel, text in sources.items():
+                for lineno, raw in enumerate(text.splitlines(), 1):
+                    if FARO_IMPORT.search(text) and re.search(r"\bsetUser\s*\(", raw) and not IGNORE_RE.search(raw):
+                        findings.append(Finding("P2", "faro-user-not-reset", f"{rel}:{lineno}", "Faro user set but "
+                                                "never reset; call faro.api.resetUser() on sign-out, or the next "
+                                                "person's activity is recorded as the previous user"))
+        for path, rel in files:
+            if not NGINX_CONF.search(rel):
+                continue
+            try:
+                conf = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            findings += [Finding("P2", "rum-access-log-query", f"{rel}:{lineno}", "the page server's access log "
+                                 "records the query string (combined format, $request, $request_uri or $args): "
+                                 "OAuth codes and search text from page URLs reach the logs; log the path only")
+                         for lineno, raw in enumerate(conf, 1)
+                         if NGINX_QUERY_LOG.search(raw.split("#")[0]) and ("access_log" in raw or "log_format" in raw
+                                                                            or raw.strip().startswith("'"))]
+        # A Faro key is reported by the faro-key-* rules; the generic credential rule would repeat it.
+        faro_keys = {f.location for f in findings if f.rule in ("faro-key-literal", "faro-key-in-bundle")}
+        findings = [f for f in findings if not (f.rule == "telemetry-credential-literal" and f.location in faro_keys)]
+    for path, rel in files if faro_project else []:
+        if not BUNDLER_CONFIG.search(rel):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        findings += [Finding("P2", "faro-public-sourcemaps", f"{rel}:{lineno}", "source maps emitted into the served "
+                             "build; build them hidden and give them to the receiver, never to browsers")
+                     for lineno, raw in enumerate(text, 1)
+                     if PUBLIC_SOURCEMAPS.search(raw) and not IGNORE_RE.search(raw) and not raw.lstrip().startswith("//")]
+    if len(baggage_keys) > BAGGAGE_LIMIT:
+        keys = sorted(baggage_keys, key=lambda k: _location_key(baggage_keys[k]))
+        findings.append(Finding("P2", "baggage-over-limit", baggage_keys[keys[BAGGAGE_LIMIT]], f"{len(keys)} distinct "
+                                f"baggage keys set in the project; at most {BAGGAGE_LIMIT}"))
+    for path, rel in files:
+        # The yml, charts, env and compose files: resource keys the standard never adds.
+        if path.suffix in SOURCE_SUFFIXES or not SENDER_CONFIG.search(rel) or (not include_tests and TEST_RE.search(rel)):
+            continue
+        if path.name in ("package.json", "package-lock.json", "composer.json", "tsconfig.json") or path.suffix == ".lock":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        findings += [Finding("P2", "resource-excluded-key", f"{rel}:{lineno}", "resource key the standard never adds "
+                             "(pod or node UID, instance or host id, process id or command line, VCS data, release id) "
+                             "or a process or host detector; build the resource from the yml and the platform rows only")
+                     for lineno, raw in enumerate(text, 1)
+                     if (EXCLUDED_RESOURCE.search(raw) or RESOURCE_DETECTOR.search(raw)) and not IGNORE_RE.search(raw)
+                     and not EXCLUSION_CONTEXT.search(raw) and not raw.lstrip().startswith(("#", "//", "!", "*"))]
+    for path, rel in files:
+        if path.suffix in SOURCE_SUFFIXES or not SENDER_CONFIG.search(rel) or (not include_tests and TEST_RE.search(rel)):
+            continue
+        if path.name in ("package.json", "package-lock.json", "composer.json", "tsconfig.json") or path.suffix == ".lock":
+            continue
+        try:
+            findings += config_safety_findings(rel, path.read_text(encoding="utf-8", errors="ignore").splitlines(),
+                                               max_chars)
+        except OSError:
+            continue
     findings.extend(project.finish())
     if not modules:
         findings.append(Finding("P2", "no-module", ".", "no --module given; SDK setup location was not checked against a module"))
@@ -1060,10 +1673,25 @@ def _location_key(location: str) -> tuple[str, int]:
     return (path, int(line)) if line.isdigit() else (location, 0)
 
 
+def module_path(root: Path, module: str) -> str | None:
+    """The module relative to the project: given relative to it, relative to the working directory, or absolute."""
+    given = Path(module)
+    candidates = [given] if given.is_absolute() else [root / given, given.absolute()]
+    # An existing directory wins; otherwise the path as written, relative to the project.
+    for candidate in sorted(candidates, key=lambda c: not c.exists()):
+        resolved = candidate.resolve() if candidate.exists() else Path(os.path.normpath(candidate))
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        return "" if rel == "." else rel
+    return None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("project", type=Path)
-    parser.add_argument("--module", action="append", default=[], help="observability module path relative to the project (repeatable)")
+    parser.add_argument("--module", action="append", default=[], help="observability module path: relative to the project or the working directory, or absolute (repeatable)")
     parser.add_argument("--include-tests", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict", action="store_true", help="exit 1 when any finding remains")
@@ -1072,7 +1700,15 @@ def main(argv=None) -> int:
         print(f"not a directory: {args.project}", file=sys.stderr)
         return 1
 
-    findings = audit(args.project.resolve(), [m.strip("/") for m in args.module], args.include_tests)
+    root = args.project.resolve()
+    modules = []
+    for module in args.module:
+        rel = module_path(root, module)
+        if rel is None:
+            print(f"--module {module} is not inside {args.project}", file=sys.stderr)
+            return 1
+        modules.append(rel)
+    findings = audit(root, modules, args.include_tests)
     if args.json:
         print(json.dumps([asdict(f) for f in findings], indent=2))
     else:
