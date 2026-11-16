@@ -420,6 +420,8 @@ def _is_public_image(ref: str) -> bool:
     ref = ref.strip().strip("'\"")
     if not ref or "$" in ref:
         return False            # unresolved: supplied by CI, registry unknown
+    if any(ref == r or ref.startswith(r + "/") for r in TRUSTED_INTERNAL_REGISTRIES):
+        return False
     first = ref.split("/", 1)[0]
     has_host = "/" in ref and ("." in first or ":" in first or first == "localhost")
     if not has_host:
@@ -824,7 +826,7 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                         f"Dockerfile base image '{image_token}' pulls from an external registry without cache. " + _image_remedy(suggested)
                     ))
 
-        if _PLATFORM == "gitlab" and stripped.upper().startswith("ARG "):
+        if stripped.upper().startswith("ARG "):
             arg_def = stripped[4:].strip()
             # Support single or multiple ARG declarations on the same logical line (e.g. ARG VAR1=val1 VAR2=val2)
             arg_tokens = arg_def.split()
@@ -839,12 +841,35 @@ def check_dockerfile(df_file: Path, shape: Optional[str] = None) -> List[Finding
                     # `ARG BUILD_TRANSLATIONS="false"` is a build switch.
                     if not _is_image_arg(var_name.strip(), image_vars):
                         continue
-                    unproxied, suggested = classify_unproxied_public_image(var_val.strip(), known_stages)
-                    if unproxied:
-                        findings.append(Finding(
-                            "P1", "Unproxied External Image", f"{df_file.name}:{line_no}",
-                            f"ARG '{var_name.strip()}' default image '{var_val.strip()}' pulls from an external registry without cache. " + _image_remedy(suggested)
-                        ))
+                    if _PLATFORM == "gitlab":
+                        unproxied, suggested = classify_unproxied_public_image(var_val.strip(), known_stages)
+                        if unproxied:
+                            findings.append(Finding(
+                                "P1", "Unproxied External Image", f"{df_file.name}:{line_no}",
+                                f"ARG '{var_name.strip()}' default image '{var_val.strip()}' pulls from an external registry without cache. " + _image_remedy(suggested)
+                            ))
+                    raw_val = var_val.strip().strip("'\"")
+                    is_enterprise = any(raw_val == r or raw_val.startswith(r + "/") for r in TRUSTED_INTERNAL_REGISTRIES) or (
+                        var_name.strip().endswith("_IMAGE") or "_BASE_IMAGE" in var_name.strip() or "_BUILD_IMAGE" in var_name.strip()
+                    )
+                    if is_enterprise:
+                        if _has_renovate_above(lines, line_no):
+                            findings.append(Finding(
+                                "P2", "Unnecessary Renovate Annotation", f"{df_file.name}:{line_no}",
+                                f"ARG '{var_name.strip()}' is an enterprise base image and should not carry a '# renovate:' "
+                                f"annotation. It defaults to ':latest' for local developer builds; upgrading the CI "
+                                f"library automatically updates the root image version."
+                            ))
+                        tail = raw_val.rsplit("/", 1)[-1]
+                        tag = tail.split(":", 1)[1] if ":" in tail else None
+                        if tag and tag.lower() != "latest":
+                            findings.append(Finding(
+                                "P2", "Enterprise Base Image Tag", f"{df_file.name}:{line_no}",
+                                f"Enterprise base image ARG '{var_name.strip()}' defaults to '{raw_val}'. It should default "
+                                f"to ':latest' (e.g. '{var_name.strip()}={raw_val.rsplit(':', 1)[0]}:latest') so local developer "
+                                f"builds use the latest tag. Do not pin a specific version or add '# renovate:' "
+                                f"annotations; upgrading the CI library automatically updates the root image version."
+                            ))
                 else:
                     var_name = token.strip()
                     # CI passes it (DOCKER_BUILD_ARG_<NAME>), e.g. a prebuilt project base

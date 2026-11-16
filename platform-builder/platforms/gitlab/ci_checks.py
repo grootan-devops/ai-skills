@@ -422,6 +422,17 @@ def check_gitlab_ci(ci_file: Path, wmap: Dict[str, Any]) -> Tuple[List[Finding],
             "a nonempty stack or project key, e.g. PROJECT_CACHE_KEY: \"node\" or \"chat\"."
         ))
 
+    # In GitLab CI, semantic versioning is declared via RELEASE_VERSION in .gitlab-ci.yml
+    # variables (or Chart.yaml). A root VERSION file is not read by gitlab-ci-library.
+    version_file = ci_file.parent / "VERSION"
+    if version_file.is_file():
+        findings.append(Finding(
+            "P2", "Extraneous VERSION File", f"{version_file.name}",
+            "GitLab CI does not read a root 'VERSION' file. Declare the semantic version via "
+            "'RELEASE_VERSION: <version>' under 'variables:' in .gitlab-ci.yml (or in Chart.yaml), "
+            "and remove the 'VERSION' file. (Root 'VERSION' files are used by GitHub Actions only)."
+        ))
+
     # A module whose repo-level prerequisite is absent creates a pipeline that fails in
     # the job, long after review.
     # `included_files` was rebuilt here from `file:` alone, silently discarding the

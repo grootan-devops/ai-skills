@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-11-16
+
+### Added
+
+- `platform-builder`: audit check in GitLab CI adapter for extraneous root `VERSION` files (`Extraneous VERSION File`). In GitLab CI, projects declare semantic versions via `RELEASE_VERSION` under `variables:` in `.gitlab-ci.yml` or in `Chart.yaml`.
+- `platform-builder`: audit checks for enterprise base image `ARG` defaults (`Enterprise Base Image Tag` and `Unnecessary Renovate Annotation`). Enterprise base images default to `:latest` for local developer builds and manage versions through CI library updates without Renovate.
+
+### Changed
+
+- `platform-builder`: `_is_public_image` recognizes `TRUSTED_INTERNAL_REGISTRIES` (`grootantech/*`) so Renovate annotations are not requested on internal/enterprise base images.
+- `platform-builder`: documentation in `SKILL.md` clarifies base image `:latest` default rules and GitLab CI `RELEASE_VERSION` vs GitHub Actions root `VERSION` file usage.
+
 ## [4.0.0] - 2026-11-07
 
 ### Changed
