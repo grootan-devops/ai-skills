@@ -60,6 +60,41 @@ stages:
             self.assertEqual(len(cache_findings), 1)
             self.assertEqual(cache_findings[0].category, "Missing PROJECT_CACHE_KEY")
 
+    def test_extraneous_version_file_flagged_for_gitlab(self):
+        ci = """
+variables:
+  PROJECT_CACHE_KEY: "chat"
+  RELEASE_VERSION: "1.0.0"
+include:
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/docs/1.2.0/common/.gitlab-ci.yml'
+stages:
+  - build
+"""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / ".gitlab-ci.yml"
+            p.write_text(ci, encoding="utf-8")
+            (Path(td) / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
+            version_findings = [f for f in findings if f.category == "Extraneous VERSION File"]
+            self.assertEqual(len(version_findings), 1)
+
+    def test_gitlab_without_version_file_passes(self):
+        ci = """
+variables:
+  PROJECT_CACHE_KEY: "chat"
+  RELEASE_VERSION: "1.0.0"
+include:
+  - remote: 'https://raw.githubusercontent.com/grootan-devops/gitlab-ci-library/docs/1.2.0/common/.gitlab-ci.yml'
+stages:
+  - build
+"""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / ".gitlab-ci.yml"
+            p.write_text(ci, encoding="utf-8")
+            findings, _ = gitlab_ci_checks.check_gitlab_ci(p, library_fixtures.gitlab_map())
+            version_findings = [f for f in findings if f.category == "Extraneous VERSION File"]
+            self.assertEqual(len(version_findings), 0)
+
     def test_values_parity_omits_persistence_when_tpl_pvc_absent(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

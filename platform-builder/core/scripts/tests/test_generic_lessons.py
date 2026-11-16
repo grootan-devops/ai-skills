@@ -139,6 +139,23 @@ class RenovateTests(unittest.TestCase):
     def test_non_image_version_is_ignored(self):
         self.assertEqual(self._pins("ARG TOOL_VERSION=9.15.9\nFROM ${APP_BASE_IMAGE}\n"), [])
 
+    def test_enterprise_base_image_needs_no_annotation(self):
+        self.assertEqual(self._pins("ARG MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest\nFROM ${MICRO_ROOT_BASE_IMAGE}\n"), [])
+
+    def test_enterprise_base_image_warns_on_pinned_version(self):
+        with tempfile.TemporaryDirectory() as td:
+            df = Path(td) / "Dockerfile"
+            df.write_text("ARG MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:1.2.0\nFROM ${MICRO_ROOT_BASE_IMAGE}\n", encoding="utf-8")
+            findings = [f for f in checks_common.check_dockerfile(df, "service") if f.category == "Enterprise Base Image Tag"]
+            self.assertEqual(len(findings), 1)
+
+    def test_enterprise_base_image_warns_on_renovate_annotation(self):
+        with tempfile.TemporaryDirectory() as td:
+            df = Path(td) / "Dockerfile"
+            df.write_text("# renovate: datasource=docker depName=grootantech/micro-root\nARG MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest\nFROM ${MICRO_ROOT_BASE_IMAGE}\n", encoding="utf-8")
+            findings = [f for f in checks_common.check_dockerfile(df, "service") if f.category == "Unnecessary Renovate Annotation"]
+            self.assertEqual(len(findings), 1)
+
 
 class ChartRuntimeTests(unittest.TestCase):
     def test_clean_chart_passes(self):

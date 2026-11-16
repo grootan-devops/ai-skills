@@ -112,9 +112,16 @@ needs it, pair it with its tpl entrypoint and schema property, and otherwise lea
 
 The image the chart deploys must be the image CI pushes: set the registry, pull secret and
 `image.repository` to the CI push path (ask when unknown). Choose the base image as the CI
-library's docs describe, and ask for the registry before building a project base image. Fix runtime
-permission problems (a cache, lock or pid path) with a chart mount, not in the image.
+library's docs describe: base image `ARG`s (`MICRO_ROOT_BASE_IMAGE`, `*_MICRO_BASE_IMAGE`,
+`*_BASE_IMAGE`) must default to `:latest` (e.g. `ARG MICRO_ROOT_BASE_IMAGE=grootantech/micro-root:latest`)
+so local developer builds pull the latest tag; never pin an explicit version tag or add
+`# renovate:` annotations to enterprise base images because upgrading the CI library automatically
+manages the root image version in CI. Ask for the registry before building a project base image.
+Fix runtime permission problems (a cache, lock or pid path) with a chart mount, not in the image.
 Comments in CI files are one line that says why something differs from the library default.
+In GitLab CI, declare the project semantic version via `RELEASE_VERSION: <semver>` under
+`variables:` in `.gitlab-ci.yml` (or in `Chart.yaml`); GitLab repositories do not use a root
+`VERSION` file (root `VERSION` files are specific to GitHub Actions repositories).
 
 AI/agent tooling in the target repository (`.claude/`, `.agents/`, `.codex/`, `.gemini/`,
 `.cursor/`, `AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `GEMINI.md`, `skills-lock.json`, nested
