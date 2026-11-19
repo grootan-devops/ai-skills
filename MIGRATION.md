@@ -7,6 +7,10 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 4.2.0
+
+No migration is required. This release only updates dependencies.
+
 ## 4.1.0
 
 No migration is required. This release adds audit checks for Dockerfile enterprise base image defaults and GitLab CI versioning declarations.
