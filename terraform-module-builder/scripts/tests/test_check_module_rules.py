@@ -44,6 +44,49 @@ class ModuleRulesTests(unittest.TestCase):
                 self.assertEqual([finding["category"] for finding in findings],
                                  ["Output Security"])
 
+    def test_identifier_outputs_are_not_credentials(self):
+        for name in ("master_user_secret_arn", "secret_arns", "token_id", "secret_name"):
+            with self.subTest(name=name):
+                self.assertEqual(self.findings_for_output(
+                    f'output "{name}" {{\n  value = "x"\n}}\n'), [])
+
+    def dead_variables(self, variables, other=""):
+        (self.module / "variables.tf").write_text(variables)
+        if other:
+            (self.module / "main.tf").write_text(other)
+        findings = []
+        RULES.check_dead_variables(self.module, findings)
+        return sorted(finding["message"].split("'")[1] for finding in findings)
+
+    def test_variable_used_in_another_validation_is_not_dead(self):
+        variables = '''variable "allow_public" {
+  type    = bool
+  default = false
+}
+
+variable "statements" {
+  type = list(string)
+
+  validation {
+    condition     = var.allow_public || length(var.statements) == 0
+    error_message = "statements: public needs allow_public."
+  }
+}
+'''
+        self.assertEqual(self.dead_variables(variables, 'locals { s = var.statements }\n'), [])
+
+    def test_variable_used_only_in_its_own_validation_is_dead(self):
+        variables = '''variable "orphan" {
+  type = string
+
+  validation {
+    condition     = length(var.orphan) > 0
+    error_message = "orphan: required."
+  }
+}
+'''
+        self.assertEqual(self.dead_variables(variables), ["orphan"])
+
     def test_conditional_governance_tags_cannot_be_overridden(self):
         (self.module / "locals.tf").write_text('''locals {
   tags = merge(
@@ -76,6 +119,14 @@ class ModuleRulesTests(unittest.TestCase):
                          "P1")
         self.assertEqual(RULES.check_constraint_against_latest("~> 6.0", "6.66.0")[0][0],
                          "P2")
+
+    def test_alternative_provider_must_exist_in_the_registry(self):
+        original = RULES.query_provider_info
+        self.addCleanup(setattr, RULES, "query_provider_info", original)
+        RULES.query_provider_info = lambda source: ("official", None, 0, "")
+        self.assertIsNone(RULES.find_alternative_provider("oneuptime"))
+        RULES.query_provider_info = lambda source: ("official", "1.2.0", 10, "")
+        self.assertEqual(RULES.find_alternative_provider("example")[0], "hashicorp/example")
 
     def test_unused_data_sources_are_checked_in_any_tf_file(self):
         (self.module / "iam.tf").write_text('data "aws_caller_identity" "current" {}\n')

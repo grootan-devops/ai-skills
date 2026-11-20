@@ -121,10 +121,18 @@ def check_dead_variables(module_dir, findings):
             if file.endswith(".tf") and file != "variables.tf":
                 other_tf_content += "\n" + scan_file_content(Path(root) / file)
 
+    # A variable read in another variable's validation is in use; its own block does not count.
+    own_blocks = {}
+    for vb in re.finditer(r'(?m)^[ \t]*variable[ \t]+"([a-zA-Z0-9_-]+)"[ \t]*\{', vars_content):
+        end = matching_delimiter(vars_content, vb.end() - 1, "{", "}")
+        if end is not None:
+            own_blocks[vb.group(1)] = (vb.start(), end + 1)
+
     for var_name in declared_vars:
-        # Pattern matching var.var_name
         pattern = rf'\bvar\.{re.escape(var_name)}\b'
-        if not re.search(pattern, other_tf_content):
+        start, end = own_blocks.get(var_name, (0, 0))
+        elsewhere_in_variables = vars_content[:start] + vars_content[end:]
+        if not re.search(pattern, other_tf_content) and not re.search(pattern, elsewhere_in_variables):
             findings.append({
                 "severity": "P1",
                 "category": "Dead Module API",
@@ -251,6 +259,10 @@ def matching_delimiter(source, opening_index, opening, closing):
     return None
 
 
+# ARNs, IDs and names point at a secret; they are not the secret.
+IDENTIFIER_OUTPUT = re.compile(r'_(arn|arns|id|ids|name|names)$')
+
+
 def check_output_sensitive_hygiene(module_dir, findings):
     """Ensures sensitive outputs are properly marked."""
     outputs_file = Path(module_dir) / "outputs.tf"
@@ -266,6 +278,8 @@ def check_output_sensitive_hygiene(module_dir, findings):
         if end is None:
             continue
         body = content[ob.end():end]
+        if IDENTIFIER_OUTPUT.search(name.lower()):
+            continue
         if any(term in name.lower() for term in ["password", "secret", "private_key", "token"]):
             if not re.search(r'(?m)^[ \t]*sensitive[ \t]*=[ \t]*true(?:[ \t]*(?:(?:#|//).*)?)?$', body):
                 findings.append({
@@ -361,7 +375,7 @@ def find_alternative_provider(provider_name: str):
     if name_clean in KNOWN_ALTERNATIVES:
         return KNOWN_ALTERNATIVES[name_clean]
     tier, ver, _, _ = query_provider_info(f"hashicorp/{provider_name}")
-    if tier == "official":
+    if tier == "official" and ver:
         return (f"hashicorp/{provider_name}", "official", "Official HashiCorp provider")
     return None
 

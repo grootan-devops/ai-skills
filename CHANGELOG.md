@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-11-20
+
+### Changed
+
+- `terraform-module-builder`: general Terraform craft moves to companion skills: `terraform-skill` for module design, review, security and testing strategy, and HashiCorp's `terraform-style-guide` and `terraform-test` for HCL style and native tests. The skill keeps its routing, update, apply and audit rules and checks the companions are installed.
+- `terraform-module-builder`: a Resource attributes section spells out the schema-first rules for every provider: required, computed-only, sensitive, write-only and deprecated attributes, nested blocks as typed objects, security attributes secure by default or validated, and outputs for neighbours.
+- `terraform-module-builder`: the target repository's `CLAUDE.md` and `AGENTS.md` are read first and outrank the skill; the repository's versioning policy decides whether `moved` blocks are wanted.
+- `terraform-module-builder`: validation adds a baseline before editing, the CI's own tools at CI's versions, Markdown lint over every file CI lints, a secret scan over the whole commit range, regenerated docs and no credential-shaped fixture literals; a new section covers changes across many modules.
+
+### Fixed
+
+- `terraform-module-builder`: `check-module-rules.py` counts a variable read in another variable's validation as used, treats `*_arn`, `*_id` and `*_name` outputs as identifiers rather than secrets, and no longer suggests a `hashicorp/<name>` provider the Registry does not have.
+- `terraform-module-builder`: `detect-migrations.py` reports a module that does not exist at the compare ref as new, instead of asking for a MAJOR release for its required inputs.
+- `terraform-module-builder`: `generate-module-docs.py` ends a section at the next heading as well as a `---` rule, writes `| --- |` delimiters, keeps one-line defaults literal, shortens nested collection types and multi-line defaults, escapes `|` and code-formats `<placeholders>`, and accepts modules without providers.
+
+### Removed
+
+- `terraform-module-builder`: README pointers to a state-migration guide and an architecture diagram template the reference repository no longer ships.
+
 ## [4.2.0] - 2026-11-19
 
 ### Changed
