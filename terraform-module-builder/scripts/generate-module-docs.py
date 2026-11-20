@@ -23,8 +23,8 @@ def parse_versions(module_dir):
     prov_matches = re.finditer(r'([a-zA-Z0-9_-]+)\s*=\s*\{[^}]*version\s*=\s*"([^"]+)"', content)
     for pm in prov_matches:
         providers.append((pm.group(1), pm.group(2)))
-    if not req_tf or not providers:
-        raise ValueError(f"{versions_file} needs required_version and versioned providers")
+    if not req_tf:
+        raise ValueError(f"{versions_file} needs required_version")
     return req_tf, providers
 
 
@@ -61,16 +61,31 @@ def default_expression(body):
     return remainder.splitlines()[0].strip()
 
 
+def read_description(body):
+    match = re.search(r'(?m)^[ \t]*description[ \t]*=[ \t]*"((?:[^"\\]|\\.)*)"', body)
+    return match.group(1).replace('\\"', '"') if match else ""
+
+
+def escape_cell(text):
+    """Keep a value inside its table cell: escape pipes, code-format <placeholders>."""
+    if "`" not in text:
+        text = re.sub(r"(<[a-z][a-z0-9_-]*>[^\s|]*)", r"`\1`", text)
+    return text.replace("|", "\\|")
+
+
+def compact_type(type_expr):
+    match = re.match(r"^((?:(?:list|map|set)\()*)object\(", type_expr)
+    if match:
+        wrappers = match.group(1)
+        return f"{wrappers}object({{...}})" + ")" * wrappers.count("(")
+    return type_expr
+
+
 def display_default(expression):
-    if expression in ("null", "{}", "[]", "true", "false"):
-        return f"`{expression}`"
-    if expression.startswith(("{", "[")):
-        compact = " ".join(line.strip() for line in expression.splitlines())
-        compact = re.sub(r'[ \t]*=[ \t]*', ' = ', compact)
-        if len(compact) > 60:
-            compact = "{...}" if expression.startswith("{") else "[...]"
-        return f"`{compact}`"
-    return f"`{expression}`"
+    """Show a one-line default as written; shorten a multi-line collection to {...} or [...]."""
+    if "\n" in expression:
+        return "`{...}`" if expression.startswith("{") else "`[...]`"
+    return f"`{escape_cell(expression)}`"
 
 
 def parse_variables(module_dir):
@@ -86,23 +101,10 @@ def parse_variables(module_dir):
         name = vb.group(1)
         body = vb.group(2)
 
-        desc_match = re.search(r'description\s*=\s*"([^"]*)"', body)
-        description = desc_match.group(1) if desc_match else ""
+        description = escape_cell(read_description(body))
 
-        # Determine type
-        type_match = re.search(r'type\s*=\s*([^\n#]+)', body)
-        if type_match:
-            var_type = type_match.group(1).strip()
-            if "list(object(" in var_type:
-                var_type = "`list(object({...}))`"
-            elif "map(object(" in var_type:
-                var_type = "`map(object({...}))`"
-            elif "object(" in var_type:
-                var_type = "`object({...})`"
-            else:
-                var_type = f"`{var_type}`"
-        else:
-            var_type = "`any`"
+        type_match = re.search(r'(?m)^[ \t]*type[ \t]*=[ \t]*([^\n#]+)', body)
+        var_type = f"`{escape_cell(compact_type(type_match.group(1).strip()))}`" if type_match else "`any`"
 
         # Check default / required
         default_val = default_expression(body)
@@ -135,8 +137,7 @@ def parse_outputs(module_dir):
         name = ob.group(1)
         body = ob.group(2)
 
-        desc_match = re.search(r'description\s*=\s*"([^"]*)"', body)
-        description = desc_match.group(1) if desc_match else ""
+        description = escape_cell(read_description(body))
 
         sensitive_match = re.search(r'sensitive\s*=\s*true', body)
         sensitive = "Yes" if sensitive_match else "No"
@@ -156,19 +157,29 @@ def generate_markdown_tables(req_tf, providers, variables, outputs):
     requirements_table = "\n".join(req_lines)
 
     # Inputs Table
-    in_lines = ["| Name | Description | Type | Default | Required |", "| --- | --- | --- | --- | :---: |"]
+    in_lines = ["| Name | Description | Type | Default | Required |", "| --- | --- | --- | --- | --- |"]
     for v in variables:
-        description = f" {v['description']}" if v['description'] else ""
-        in_lines.append(f"| `{v['name']}` |{description} | {v['type']} | {v['default']} | {v['required']} |")
+        in_lines.append(f"| `{v['name']}` | {v['description']} | {v['type']} | {v['default']} | {v['required']} |")
     inputs_table = "\n".join(in_lines)
 
     # Outputs Table
-    out_lines = ["| Name | Description | Sensitive |", "| --- | --- | :---: |"]
+    out_lines = ["| Name | Description | Sensitive |", "| --- | --- | --- |"]
     for o in outputs:
         out_lines.append(f"| `{o['name']}` | {o['description']} | {o['sensitive']} |")
     outputs_table = "\n".join(out_lines)
 
     return requirements_table, inputs_table, outputs_table
+
+def replace_section(text, heading, table):
+    """Replace a section body; it ends at the next # or ## heading, a --- rule, or the end."""
+    match = re.search(rf'(?m)^## {re.escape(heading)}[ \t]*\n', text)
+    if not match:
+        return None
+    rest = text[match.end():]
+    boundary = re.search(r'(?m)^(?:#{1,2} |---[ \t]*$)', rest)
+    tail = rest[boundary.start():] if boundary else ""
+    return text[:match.end()] + "\n" + table + "\n" + ("\n" if tail else "") + tail
+
 
 def update_readme(module_dir, check_mode=False):
     readme_path = Path(module_dir) / "README.md"
@@ -189,23 +200,13 @@ def update_readme(module_dir, check_mode=False):
     new_content = existing_content
 
     # Patch generated tables without changing hand-written narratives or examples.
-    req_pattern = r'(## Requirements & Providers\s*\n\n)([\s\S]*?)(\n\n---)'
-    if not re.search(req_pattern, new_content):
-        print(f"[MISSING SECTION] {readme_path}: Requirements & Providers", file=sys.stderr)
-        return False
-    new_content = re.sub(req_pattern, rf'\g<1>{req_tbl}\g<3>', new_content)
-
-    in_pattern = r'(## Inputs Specification\s*\n\n)([\s\S]*?)(\n\n---|\Z)'
-    if not re.search(in_pattern, new_content):
-        print(f"[MISSING SECTION] {readme_path}: Inputs Specification", file=sys.stderr)
-        return False
-    new_content = re.sub(in_pattern, rf'\g<1>{in_tbl}\g<3>', new_content)
-
-    out_pattern = r'(## Outputs Specification\s*\n\n)([\s\S]*?)(\n\n---|\Z)'
-    if not re.search(out_pattern, new_content):
-        print(f"[MISSING SECTION] {readme_path}: Outputs Specification", file=sys.stderr)
-        return False
-    new_content = re.sub(out_pattern, rf'\g<1>{out_tbl}\g<3>', new_content)
+    for heading, table in (("Requirements & Providers", req_tbl), ("Inputs Specification", in_tbl),
+                           ("Outputs Specification", out_tbl)):
+        patched = replace_section(new_content, heading, table)
+        if patched is None:
+            print(f"[MISSING SECTION] {readme_path}: {heading}", file=sys.stderr)
+            return False
+        new_content = patched
 
     if check_mode:
         if existing_content.strip() != new_content.strip():

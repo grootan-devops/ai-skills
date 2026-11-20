@@ -126,6 +126,11 @@ def main():
         print(f"Error: cannot read Git baseline {args.compare_ref!r}: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    if not old_files:
+        print(f"New module: {module_dir.name} does not exist at {args.compare_ref}, so there is no previous API "
+              "or state to migrate. Adding a module is a MINOR release.")
+        sys.exit(0)
+
     vars_file = module_dir / "variables.tf"
     outputs_file = module_dir / "outputs.tf"
 

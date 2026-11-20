@@ -77,6 +77,16 @@ class DetectMigrationsTests(unittest.TestCase):
         self.assertIn("has a moved block; verify it against consumer state", result.stdout)
         self.assertNotIn("MAJOR BUMP REQUIRED", result.stdout)
 
+    def test_new_module_is_not_a_breaking_change(self):
+        fresh = self.root / "modules/fresh"
+        fresh.mkdir()
+        (fresh / "variables.tf").write_text('variable "name" {\n  type = string\n}\n')
+        (fresh / "main.tf").write_text('resource "test_item" "this" {\n}\n')
+        result = self.detect(path=fresh)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("MAJOR BUMP REQUIRED", result.stdout)
+        self.assertIn("New module", result.stdout)
+
     def test_invalid_baseline_fails_instead_of_reporting_new_api(self):
         result = self.detect("--compare-ref", "missing-ref")
         self.assertNotEqual(result.returncode, 0)

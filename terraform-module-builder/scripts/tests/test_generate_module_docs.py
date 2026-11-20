@@ -80,9 +80,86 @@ module "demo" {{ source = "{source}" }}
         updated = readme.read_text()
         self.assertIn(source, updated)
         self.assertIn("Verified behavior: creates a demo resource.", updated)
-        self.assertIn("| `settings` | | `object({...})` | `{ enabled = false mode = null }` | No |",
+        self.assertIn("| `settings` |  | `object({...})` | `{...}` | No |",
                       updated)
         self.assertTrue(DOCS.update_readme(self.module, check_mode=True))
+
+    def test_heading_bounded_sections_refresh_without_separators(self):
+        (self.module / "versions.tf").write_text('''terraform {
+  required_version = ">= 1.17.0"
+
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 7.0.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.8.1"
+    }
+  }
+}
+''')
+        (self.module / "variables.tf").write_text('''variable "routes" {
+  description = "Routes under <prefix>/<key> or a | b."
+  type = map(map(object({
+    target = string
+  })))
+  default = {}
+}
+
+variable "name" {
+  description = "Bucket name."
+  type        = string
+}
+''')
+        readme = self.module / "README.md"
+        readme.write_text('''# Demo
+
+## Requirements & Providers
+
+| old |
+
+## Usage Examples
+
+Kept as written.
+
+## Inputs Specification
+
+| old |
+
+## Outputs Specification
+
+| old |
+''')
+        self.assertTrue(DOCS.update_readme(self.module))
+        updated = readme.read_text()
+        self.assertIn("Kept as written.", updated)
+        self.assertNotIn(":---:", updated)
+        self.assertIn("| `terraform` | `>= 1.17.0` |\n| `google` | `>= 7.0.0` |\n| `archive` | `>= 2.8.1` |\n\n## Usage Examples",
+                      updated)
+        self.assertIn("| `routes` | Routes under `<prefix>/<key>` or a \\| b. | `map(map(object({...})))` | `{}` | No |", updated)
+        self.assertIn("| `name` | Bucket name. | `string` | **Required** | Yes |", updated)
+        self.assertIn("| Name | Description | Sensitive |\n| --- | --- | --- |\n| `id` | Resource ID. | No |", updated)
+        self.assertTrue(DOCS.update_readme(self.module, check_mode=True))
+
+    def test_single_line_defaults_stay_literal(self):
+        long_list = "[" + ", ".join(f'"attribute_{i}"' for i in range(12)) + "]"
+        (self.module / "variables.tf").write_text(f'''variable "attributes" {{
+  description = "Attributes."
+  type        = list(string)
+  default     = {long_list}
+}}
+''')
+        rows = DOCS.generate_markdown_tables(">= 1.5.0", [], DOCS.parse_variables(self.module), [])[1]
+        self.assertIn(f"| `{long_list}` | No |", rows)
+
+    def test_module_without_providers_gets_terraform_row_only(self):
+        (self.module / "versions.tf").write_text('terraform {\n  required_version = ">= 1.17.0"\n}\n')
+        readme = self.module / "README.md"
+        readme.write_text("# Helper\n\n## Requirements & Providers\n\n| old |\n\n## Inputs Specification\n\n| old |\n\n## Outputs Specification\n\n| old |\n")
+        self.assertTrue(DOCS.update_readme(self.module))
+        self.assertIn("| Requirement | Version |\n| --- | --- |\n| `terraform` | `>= 1.17.0` |\n\n## Inputs", readme.read_text())
 
     def test_missing_generated_section_fails_closed(self):
         readme = self.module / "README.md"

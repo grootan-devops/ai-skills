@@ -7,6 +7,20 @@ To upgrade, apply every section after your installed version up to the target, o
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns existing projects with the current standards) and **Verify**.
 
+## 4.3.0
+
+### Recommended
+
+- **`terraform-module-builder` companions.** Install `terraform-skill` and HashiCorp's
+  `terraform-style-guide` and `terraform-test` where the skill runs; the commands are in
+  [terraform-module-builder/README.md](terraform-module-builder/README.md#companion-skills).
+  Without them the skill carries on and names the missing guidance.
+
+### Verify
+
+- `generate-module-docs.py --check` now reads READMEs whose sections are separated by headings
+  only; re-run it on modules whose tables it used to report as missing.
+
 ## 4.2.0
 
 No migration is required. This release only updates dependencies.
